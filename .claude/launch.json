@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "slabyard-dev",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": [
+        "dev.sh"
+      ],
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}
