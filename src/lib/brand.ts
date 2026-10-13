@@ -1,11 +1,10 @@
 /**
- * Single source of truth for the product name. The layout is a study of
- * courtyard.io; the name lives here so it is one edit to change.
+ * Single source of truth for the product name, so a rename is one edit.
  */
 export const BRAND = {
-  name: "Slabyard",
-  short: "SY",
-  tagline: "Digital packs, physical slabs. Vaulted and insured.",
+  name: "Pokechain",
+  short: "PC",
+  tagline: "Graded Pokémon slabs, vaulted, tokenised and traded live.",
   chain: "Polygon",
   vaultCity: "Delaware",
 };

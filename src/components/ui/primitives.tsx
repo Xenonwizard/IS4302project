@@ -252,14 +252,27 @@ export function TimeAgo({ value, className }: { value: string | number; classNam
   );
 }
 
-export function Countdown({ to, className }: { to: string; className?: string }) {
+export function Countdown({
+  to,
+  className,
+  every,
+}: {
+  to: string;
+  className?: string;
+  /** auto-renewing deadline: once it passes, roll forward by this many ms */
+  every?: number;
+}) {
   const [text, setText] = useState<string>("");
   useEffect(() => {
-    const tick = () => setText(countdown(to));
+    const tick = () => {
+      let end = Date.parse(to);
+      if (every) while (end <= Date.now()) end += every;
+      setText(countdown(new Date(end).toISOString()));
+    };
     tick();
     const t = window.setInterval(tick, 1000);
     return () => window.clearInterval(t);
-  }, [to]);
+  }, [to, every]);
   return (
     <span className={clsx("tabular-nums", className)} suppressHydrationWarning>
       {text || "—"}

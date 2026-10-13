@@ -1,13 +1,14 @@
 # Making it real: the free / open-source blockchain stack
 
-The demo fakes six things that a chain can actually do. This is the shortest credible path from
+The demo fakes several things that a chain can actually do. This is the shortest credible path from
 the current app to something you can defend in a viva, using only free tiers and OSS.
 
 | Faked today | What replaces it |
 | --- | --- |
 | `listing.tokenId` / `contract` | An ERC-721 `SlabVault` contract, one token per physical slab |
-| `Math.random()` pack rolls | Chainlink VRF, or commit-reveal if you want zero dependencies |
-| Buy now / offers / trades | Seaport orders, or your own escrow contract |
+| Buy now / offers | Seaport orders, or your own escrow contract |
+| Trade room bids and settlement | An escrow contract that holds bid cash and slabs until the owner accepts |
+| Lost-item reports | An on-chain dispute record checked against custody attestations |
 | Marketplace queries | Ponder or a Graph subgraph indexing your events |
 | Card metadata | IPFS (Pinata / web3.storage) pinned JSON + images |
 | Grading certificate | An EAS attestation signed by the vault operator |
@@ -36,22 +37,22 @@ Three contracts cover the whole app:
    `RedemptionRequested`, which is your "ship it to me" flow.
 2. `SlabMarket` — listings, offers and trades. Escrow the token (or use an approval-based pull
    pattern), settle in USDC, take a 2% fee, emit `Listed` / `Sold` / `OfferMade` / `TradeExecuted`.
-3. `PackSale` — takes payment, requests randomness, assigns a token from a pool on the callback,
-   emits `PackOpened(user, tokenId, tier)`.
+3. `TradeEscrow` — backs the live trade rooms. `placeBid(tokenId, cash, slabIds)` escrows
+   the bidder's USDC and slab tokens; `acceptBid(bidId)` (owner only) swaps everything atomically
+   and refunds every other bidder; `withdrawBid(bidId)` returns escrow before acceptance. Emits
+   `BidPlaced` / `TradeSettled`. The chat itself stays off-chain; only bids touch the contract.
 
-## 2. Provably fair packs — Chainlink VRF v2.5
+## 2. Lost-item disputes
 
-This is the most interesting part of the project and the part a marker will poke at: how does the
-buyer know the pack was not rigged after they paid?
+A trade can settle on-chain while the physical slab goes missing in the vault or in transit. The
+Report lost flow maps onto:
 
-- **Chainlink VRF** is free on testnets and is the standard answer. Request randomness in
-  `openPack()`, assign the slab in `fulfillRandomWords()`. The random word is verifiable on-chain,
-  so nobody — not even you — can pick the outcome after the fact.
-- **Commit-reveal** is the zero-dependency alternative: publish `hash(serverSeed)` up front, mix
-  it with the user's `blockhash` at purchase, reveal `serverSeed` afterwards so anyone can
-  recompute the roll. Cheaper, but it relies on you publishing the seed honestly.
-- Publish the pool contents and the odds as an on-chain Merkle root so the payout bands on
-  `/packs/[slug]` are auditable rather than marketing copy.
+- `openDispute(tradeId, item, evidenceHash)` — records the claim on-chain and can freeze the
+  token (block transfers) until resolved.
+- Custody **EAS attestations** (section 8) — the vault attests each check-in and check-out, so a
+  dispute is resolved by comparing the attestation trail with the `TradeSettled` event.
+- `resolveDispute(id, outcome)` from the operator Safe — refunds from escrow or insurance, or
+  releases the freeze.
 
 ## 3. Orders — Seaport, or your own escrow
 
@@ -87,7 +88,7 @@ npm i viem wagmi @tanstack/react-query @rainbow-me/rainbowkit
 
 ## 6. Indexing — Ponder (or The Graph)
 
-Do not query the chain directly for a 168-item grid with ten filter groups; index events into
+Do not query the chain directly for a 176-item grid with ten filter groups; index events into
 Postgres and query that.
 
 - **Ponder** — OSS, TypeScript, runs locally, defines schema + event handlers in the same language
@@ -127,10 +128,10 @@ JS IPFS client if you want to pin from a script. Keep the cert-number hash in th
 
 1. `SlabVault` (ERC-721) + Foundry tests + deploy to Anvil.
 2. Swap `src/lib/store.tsx` writes for wagmi writes behind the same function names
-   (`buyNow`, `makeOffer`, `listFromVault`) — the UI does not need to change.
+   (`buyNow`, `makeOffer`, `listFromVault`, `placeBid`, `settleTrade`) — the UI does not need to change.
 3. `SlabMarket` escrow, then wire `/checkout` and the offer modal to it.
-4. `PackSale` + VRF, then wire `/packs/[slug]`.
+4. `TradeEscrow`, then wire `/trades/[id]` bids and accepts to it.
 5. Ponder indexer, then replace the static catalogue import in `/marketplace`.
-6. IPFS metadata + EAS attestations, then make "Verify certification" real.
+6. IPFS metadata + EAS attestations, then make "Verify certification" and lost-item disputes real.
 
 Steps 1–2 alone are a defensible project; the rest is upside.

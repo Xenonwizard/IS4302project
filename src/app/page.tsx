@@ -1,12 +1,10 @@
 import Link from "next/link";
-import { PackageOpen, ShieldCheck, Truck } from "lucide-react";
+import { MessagesSquare, ShieldCheck, Truck } from "lucide-react";
 import { HeroCarousel } from "@/components/home/HeroCarousel";
-import { JustPulled } from "@/components/home/JustPulled";
+import { LiveRooms } from "@/components/home/LiveRooms";
 import { Rail } from "@/components/home/Rail";
 import { BRAND } from "@/lib/brand";
-import { GRAILS, LISTINGS, PACKS, TRENDING } from "@/lib/catalog";
-import { CATEGORIES } from "@/lib/pools";
-import { usd } from "@/lib/format";
+import { FACETS, GRAILS, LISTINGS, TRENDING } from "@/lib/catalog";
 
 export default function HomePage() {
   const newest = [...LISTINGS]
@@ -16,7 +14,6 @@ export default function HomePage() {
   return (
     <div className="space-y-8 px-4 py-5 lg:px-6">
       <HeroCarousel />
-      <JustPulled />
 
       <Rail
         title="Best deals right now"
@@ -25,43 +22,7 @@ export default function HomePage() {
         listings={TRENDING.slice(0, 10)}
       />
 
-      {/* packs strip */}
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold">Open a pack</h2>
-            <p className="mt-0.5 text-[13px] text-muted">
-              Every pack pays out a graded slab. Nothing raw, nothing hidden.
-            </p>
-          </div>
-          <Link href="/packs" className="shrink-0 text-[13px] font-semibold text-accent hover:underline">
-            All packs →
-          </Link>
-        </div>
-        <div className="cy-scroll -mx-1 flex gap-3 overflow-x-auto px-1 pb-2">
-          {PACKS.slice(0, 7).map((p) => (
-            <Link
-              key={p.slug}
-              href={`/packs/${p.slug}`}
-              className="group w-[190px] shrink-0 overflow-hidden rounded-card border border-hairline bg-surface transition hover:border-white/20"
-            >
-              <div
-                className="flex h-[150px] items-end p-4"
-                style={{
-                  background: `linear-gradient(150deg, hsl(${p.hueA} 62% 32%), hsl(${p.hueB} 58% 14%))`,
-                }}
-              >
-                <PackageOpen size={30} className="text-white/80 transition group-hover:scale-110" />
-              </div>
-              <div className="p-3.5">
-                <p className="truncate text-[13px] font-bold">{p.name}</p>
-                <p className="mt-0.5 truncate text-[12px] text-muted">{p.group}</p>
-                <p className="mt-2 text-sm font-bold">{usd(p.price)}</p>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
+      <LiveRooms />
 
       <Rail title="Fresh listings" href="/marketplace?sort=recent" listings={newest} />
       <Rail
@@ -71,23 +32,20 @@ export default function HomePage() {
         listings={GRAILS.slice(0, 10)}
       />
 
-      {/* categories */}
+      {/* eras */}
       <section>
-        <h2 className="mb-3 text-lg font-bold">Browse by category</h2>
+        <h2 className="mb-3 text-lg font-bold">Browse by era</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {CATEGORIES.map((c) => {
-            const count = LISTINGS.filter((l) => l.category === c).length;
-            return (
-              <Link
-                key={c}
-                href={`/marketplace?category=${encodeURIComponent(c)}`}
-                className="rounded-card border border-hairline bg-surface p-4 transition hover:border-white/20 hover:bg-surface-2"
-              >
-                <p className="text-sm font-bold">{c}</p>
-                <p className="mt-1 text-[12px] text-muted">{count} listings</p>
-              </Link>
-            );
-          })}
+          {FACETS.series.map(({ value, count }) => (
+            <Link
+              key={value}
+              href={`/marketplace?era=${encodeURIComponent(value)}`}
+              className="rounded-card border border-hairline bg-surface p-4 transition hover:border-white/20 hover:bg-surface-2"
+            >
+              <p className="text-sm font-bold">{value}</p>
+              <p className="mt-1 text-[12px] text-muted">{count} slabs</p>
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -96,9 +54,9 @@ export default function HomePage() {
         <h2 className="text-lg font-bold">How {BRAND.name} works</h2>
         <div className="mt-5 grid gap-6 sm:grid-cols-3">
           <Step
-            icon={<PackageOpen size={20} />}
-            title="Rip or buy"
-            body="Open a pack for a random graded slab, or buy a specific one outright on the marketplace."
+            icon={<MessagesSquare size={20} />}
+            title="Buy or trade live"
+            body="Buy a slab outright, or join its trade room and bid against other collectors in real time."
           />
           <Step
             icon={<ShieldCheck size={20} />}
@@ -115,8 +73,10 @@ export default function HomePage() {
 
       <footer className="border-t border-hairline pt-6 pb-4 text-[12px] text-dim">
         <p>
-          {BRAND.name} is a portfolio project built for a blockchain module. All listings, prices,
-          users and sales on this site are generated dummy data.
+          {BRAND.name} is a non-commercial school project built for a blockchain module. Card
+          images and data come from the Pokémon TCG API (pokemontcg.io); Pokémon and its card
+          art belong to Nintendo, Creatures Inc. and GAME FREAK. Owners, listings, bids and sales
+          are generated dummy data.
         </p>
       </footer>
     </div>

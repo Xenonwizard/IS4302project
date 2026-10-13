@@ -1,148 +1,386 @@
-import clsx from "clsx";
-import { CardArt } from "./CardArt";
-import type { Grader, Listing } from "@/lib/types";
+"use client";
 
-const GRADER_STYLE: Record<
-  Grader,
-  { bar: string; barText: string; wordmark: string; sub: string; accent: string }
-> = {
-  CGC: {
-    bar: "#121214",
-    barText: "#ffffff",
-    wordmark: "CGC",
-    sub: "CERTIFIED GUARANTY COMPANY",
-    accent: "#1c1c22",
-  },
-  PSA: {
-    bar: "#b3121c",
-    barText: "#ffffff",
-    wordmark: "PSA",
-    sub: "PROFESSIONAL SPORTS AUTHENTICATOR",
-    accent: "#b3121c",
-  },
-  BGS: {
-    bar: "#0d1a3a",
-    barText: "#e8c879",
-    wordmark: "BECKETT",
-    sub: "BGS AUTHENTIC GRADING",
-    accent: "#0d1a3a",
-  },
-  SGC: {
-    bar: "#101010",
-    barText: "#d8b45a",
-    wordmark: "SGC",
-    sub: "SPORTSCARD GUARANTY",
-    accent: "#8a6f2a",
-  },
-};
+import clsx from "clsx";
+import Image from "next/image";
+import { useEffect, useRef } from "react";
+import { hashString } from "@/lib/rng";
+import type { Listing } from "@/lib/types";
+
+/*
+ * A graded slab built in CSS 3D. What makes it read as a physical object:
+ *
+ * 1. Thickness — a stack of translucent rims behind the face, so the acrylic edge
+ *    shows when the slab turns instead of a paper-thin plane.
+ * 2. Pointer-driven lighting — the pointer position becomes CSS variables that move
+ *    a specular glare, a light streak across the case and (on holo cards) a
+ *    rainbow foil layer blended with color-dodge, so light seems to come from a
+ *    fixed source as the slab tilts.
+ * 3. Spring easing — tilt chases the pointer through a damped lerp each frame, so
+ *    the slab has weight instead of snapping.
+ * 4. A contact shadow that slides opposite the tilt.
+ */
+
+const THICKNESS_LAYERS = 7;
+/** depth of each rim layer, in container-width units */
+const LAYER_DEPTH = 0.9;
 
 export function Slab({
   listing,
   className,
   flat = false,
   fit = false,
+  interactive = false,
+  spinning = false,
+  maxTilt = 14,
+  sizes = "(min-width: 1024px) 240px, 45vw",
 }: {
   listing: Listing;
   className?: string;
-  /** flat drops the plastic glare — used for tiny thumbnails */
+  /** flat drops depth and lighting — used for tiny thumbnails */
   flat?: boolean;
   /** fit sizes from the parent's height instead of its width */
   fit?: boolean;
+  /** tilt toward the pointer with moving light */
+  interactive?: boolean;
+  /** slow turntable spin that shows the back */
+  spinning?: boolean;
+  maxTilt?: number;
+  sizes?: string;
 }) {
-  const g = GRADER_STYLE[listing.grader];
-  const gradeText = String(listing.grade);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const live = interactive && !flat && !spinning;
+  useTilt(rootRef, bodyRef, live, maxTilt);
 
   return (
     <div
+      ref={rootRef}
       className={clsx(
-        "@container relative",
-        fit ? "h-full w-full" : "aspect-[0.63] w-full",
+        "@container slab-root relative",
+        fit ? "h-full w-full" : "aspect-[0.62] w-full",
+        !flat && "[perspective:1200px]",
         className,
       )}
     >
-      {/* plastic case */}
+      {!flat ? <div className="slab-shadow" aria-hidden /> : null}
       <div
-        className="absolute inset-0 rounded-[4cqw] p-[3.2cqw]"
-        style={{
-          background:
-            "linear-gradient(155deg, rgba(255,255,255,0.30), rgba(255,255,255,0.10) 42%, rgba(255,255,255,0.22))",
-          boxShadow:
-            "0 22px 44px -18px rgba(0,0,0,0.95), inset 0 0 0 1px rgba(255,255,255,0.22)",
-        }}
+        ref={bodyRef}
+        className={clsx("slab-body relative h-full w-full", spinning && "spin-slab")}
       >
-        {/* inner insert */}
-        <div className="flex h-full w-full flex-col gap-[2.2cqw] overflow-hidden rounded-[2.4cqw] bg-[#eceae4] p-[2.6cqw]">
-          {/* grading label */}
-          <div className="overflow-hidden rounded-[1cqw] bg-white shadow-[0_0.4cqw_1cqw_rgba(0,0,0,0.18)]">
-            <div
-              className="flex items-center justify-between px-[2cqw] py-[1cqw]"
-              style={{ background: g.bar, color: g.barText }}
-            >
-              <span className="text-[4cqw] font-black leading-none tracking-tight">
-                {g.wordmark}
-              </span>
-              <span className="truncate pl-[1.5cqw] text-[1.9cqw] font-semibold leading-none tracking-[0.08em] opacity-90">
-                {g.sub}
-              </span>
-            </div>
-            <div className="flex items-stretch">
-              <div className="min-w-0 flex-1 px-[2cqw] py-[1.4cqw]">
-                <p className="truncate text-[2.7cqw] font-bold leading-[1.25] text-[#15151a]">
-                  {listing.shortName}
-                </p>
-                <p className="truncate text-[2.2cqw] leading-[1.35] text-[#3d3d46]">
-                  {listing.category} ({listing.year})
-                </p>
-                <p className="truncate text-[2.2cqw] leading-[1.35] text-[#3d3d46]">
-                  {listing.set} - {listing.cardNumber}
-                </p>
-                <p className="truncate text-[2.2cqw] leading-[1.35] text-[#3d3d46]">
-                  {listing.variant}
-                </p>
-              </div>
+        {!flat
+          ? Array.from({ length: THICKNESS_LAYERS }, (_, i) => (
               <div
-                className="flex w-[24%] flex-col items-center justify-center border-l border-black/10 px-[1cqw] py-[1cqw]"
-                style={{ color: "#15151a" }}
-              >
-                <span className="text-center text-[1.9cqw] font-bold uppercase leading-none tracking-tight">
-                  {listing.gradeLabel}
-                </span>
-                <span className="text-[8.5cqw] font-black leading-[1.05]">{gradeText}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-[1cqw] px-[2cqw] pb-[1.2cqw]">
-              <div
-                className="h-[2cqw] flex-1"
-                style={{
-                  background:
-                    "repeating-linear-gradient(90deg,#15151a 0 0.4cqw,transparent 0.4cqw 0.9cqw,#15151a 0.9cqw 1.1cqw,transparent 1.1cqw 1.7cqw)",
-                }}
+                key={i}
+                aria-hidden
+                className="slab-rim"
+                style={{ transform: `translateZ(${-(i + 1) * LAYER_DEPTH}cqw)` }}
               />
-              <span className="text-[1.8cqw] font-medium tabular-nums text-[#3d3d46]">
-                {listing.certNumber}
-              </span>
+            ))
+          : null}
+
+        {/* back face */}
+        {!flat ? (
+          <div
+            className="slab-face slab-back"
+            style={{
+              transform: `translateZ(${-(THICKNESS_LAYERS + 1) * LAYER_DEPTH}cqw) rotateY(180deg)`,
+            }}
+          >
+            <SlabBack listing={listing} />
+          </div>
+        ) : null}
+
+        {/* front face */}
+        <div className="slab-face">
+          <div
+            className={clsx(
+              "slab-case flex h-full w-full flex-col gap-[2.4cqw] p-[4.2cqw]",
+              listing.grader === "SGC" && "slab-case-sgc",
+            )}
+          >
+            <GradeLabel listing={listing} />
+            <div className="slab-well relative min-h-0 flex-1">
+              <div
+                className="relative h-full w-full overflow-hidden rounded-[3.4cqw] bg-cover bg-center"
+                // the small scan paints instantly while the hi-res one loads
+                style={flat ? undefined : { backgroundImage: `url(${listing.thumb})` }}
+              >
+                <Image
+                  src={flat ? listing.thumb : listing.image}
+                  alt={`${listing.subject}, ${listing.set} ${listing.cardNumber}`}
+                  fill
+                  sizes={flat ? "64px" : sizes}
+                  className="object-cover"
+                  draggable={false}
+                />
+                {!flat && listing.holo ? <div className="slab-foil" aria-hidden /> : null}
+                {!flat ? <div className="slab-card-glare" aria-hidden /> : null}
+              </div>
             </div>
           </div>
-
-          {/* the card itself */}
-          <div className="@container min-h-0 flex-1 overflow-hidden rounded-[1.4cqw] shadow-[0_0.6cqw_1.6cqw_rgba(0,0,0,0.35)]">
-            <CardArt listing={listing} />
-          </div>
+          {!flat ? (
+            <>
+              <div className="slab-glare" aria-hidden />
+              <div className="slab-streak" aria-hidden />
+            </>
+          ) : null}
         </div>
-
-        {/* case glare */}
-        {!flat ? (
-          <>
-            <div className="pointer-events-none absolute inset-0 rounded-[4cqw] bg-[linear-gradient(115deg,rgba(255,255,255,0.28)_0%,transparent_28%,transparent_72%,rgba(255,255,255,0.14)_100%)]" />
-            <div className="pointer-events-none absolute left-[8%] top-0 h-full w-[14%] rotate-[8deg] bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.16),transparent)]" />
-          </>
-        ) : null}
       </div>
     </div>
   );
 }
 
-/** Detail-page presentation: slab floating over a lit pedestal. */
+/**
+ * Writes --rx/--ry (tilt) and --px/--py/--hyp (light position and strength) on the
+ * root element from a requestAnimationFrame loop. No React state, so a grid full of
+ * slabs never re-renders while the pointer moves.
+ */
+function useTilt(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  bodyRef: React.RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  maxTilt: number,
+) {
+  useEffect(() => {
+    const root = rootRef.current;
+    const body = bodyRef.current;
+    if (!root || !body) return;
+    if (!enabled) {
+      body.style.transform = "";
+      return;
+    }
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+
+    const cur = { x: 0.5, y: 0.5, a: 0 };
+    const target = { x: 0.5, y: 0.5, a: 0 };
+    let frame = 0;
+
+    const paint = () => {
+      cur.x += (target.x - cur.x) * 0.14;
+      cur.y += (target.y - cur.y) * 0.14;
+      cur.a += (target.a - cur.a) * 0.1;
+      const rx = (0.5 - cur.y) * 2 * maxTilt * cur.a;
+      const ry = (cur.x - 0.5) * 2 * maxTilt * cur.a;
+      body.style.transform = `rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
+      root.style.setProperty("--rx", rx.toFixed(2));
+      root.style.setProperty("--ry", ry.toFixed(2));
+      root.style.setProperty("--px", `${(cur.x * 100).toFixed(1)}%`);
+      root.style.setProperty("--py", `${(cur.y * 100).toFixed(1)}%`);
+      const dist = Math.min(1, Math.hypot(cur.x - 0.5, cur.y - 0.5) * 2);
+      root.style.setProperty("--hyp", (cur.a * (0.35 + dist * 0.65)).toFixed(3));
+      const settled =
+        Math.abs(target.x - cur.x) < 0.001 &&
+        Math.abs(target.y - cur.y) < 0.001 &&
+        Math.abs(target.a - cur.a) < 0.002;
+      frame = settled ? 0 : requestAnimationFrame(paint);
+    };
+    const kick = () => {
+      if (!frame) frame = requestAnimationFrame(paint);
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const r = root.getBoundingClientRect();
+      target.x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      target.y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+      target.a = 1;
+      kick();
+    };
+    const onLeave = () => {
+      target.x = 0.5;
+      target.y = 0.5;
+      target.a = 0;
+      kick();
+    };
+
+    root.addEventListener("pointermove", onMove);
+    root.addEventListener("pointerleave", onLeave);
+    return () => {
+      root.removeEventListener("pointermove", onMove);
+      root.removeEventListener("pointerleave", onLeave);
+      cancelAnimationFrame(frame);
+    };
+  }, [rootRef, bodyRef, enabled, maxTilt]);
+}
+
+/* ---------------- grading labels ---------------- */
+
+function Barcode({ seed, className }: { seed: number; className?: string }) {
+  // Bar widths from the cert so every label differs, like a real Code 128 strip.
+  const bars: number[] = [];
+  let s = seed;
+  for (let i = 0; i < 26; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    bars.push(1 + (s % 3));
+  }
+  const xs = bars.reduce<number[]>((acc, w, i) => [...acc, i ? acc[i - 1] + bars[i - 1] * 1.25 : 0], []);
+  return (
+    <svg viewBox="0 0 100 10" preserveAspectRatio="none" className={className} aria-hidden>
+      {bars.map((w, i) =>
+        i % 2 === 0 ? <rect key={i} x={xs[i]} y="0" width={w * 0.9} height="10" fill="currentColor" /> : null,
+      )}
+    </svg>
+  );
+}
+
+function labelLines(listing: Listing) {
+  const number = listing.cardNumber.split("/")[0];
+  return {
+    line1: `${listing.year} POKEMON ${listing.set.toUpperCase()}`,
+    line2: `#${number} ${listing.subject.toUpperCase()}`,
+    line3: listing.variant.toUpperCase(),
+  };
+}
+
+function GradeLabel({ listing }: { listing: Listing }) {
+  const seed = hashString(listing.certNumber);
+  const { line1, line2, line3 } = labelLines(listing);
+  const grade = String(listing.grade);
+
+  if (listing.grader === "PSA") {
+    return (
+      <div className="slab-label h-[22cqw] shrink-0 overflow-hidden rounded-[1.4cqw] bg-white p-[0.9cqw]">
+        <div className="flex h-full rounded-[0.8cqw] border-[0.7cqw] border-[#c8102e] bg-white px-[2cqw] py-[1.5cqw] text-[#111]">
+          <div className="min-w-0 flex-1 font-semibold uppercase leading-[1.32] tracking-[0.01em]">
+            <p className="truncate text-[2.75cqw] font-bold">{line1}</p>
+            <p className="truncate text-[2.75cqw] font-bold">{line2}</p>
+            <p className="truncate text-[2.5cqw]">{line3}</p>
+            <Barcode seed={seed} className="mt-[1.1cqw] h-[3.4cqw] w-[46%] text-black" />
+          </div>
+          <div className="flex shrink-0 flex-col items-end justify-between pl-[1.5cqw] text-right">
+            <span className="text-[2.6cqw] font-bold uppercase leading-none">{listing.gradeLabel}</span>
+            <span className="text-[8.4cqw] font-black leading-[0.9]">{grade}</span>
+            <span className="flex items-center gap-[0.8cqw]">
+              <span className="text-[2.1cqw] font-semibold tabular-nums">{listing.certNumber}</span>
+              <span className="rounded-[0.5cqw] bg-[#c8102e] px-[1cqw] py-[0.3cqw] text-[2.6cqw] font-black italic leading-none text-white">
+                PSA
+              </span>
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (listing.grader === "CGC") {
+    const pristine = listing.grade === 10;
+    return (
+      <div
+        className="slab-label h-[22cqw] shrink-0 overflow-hidden flex rounded-[1.4cqw] px-[2.4cqw] py-[1.8cqw] text-white"
+        style={{
+          background: pristine
+            ? "linear-gradient(135deg,#6b5418,#d9b25a 45%,#8a6a1f)"
+            : "linear-gradient(135deg,#0f2f63,#1f5fb5 55%,#123e80)",
+        }}
+      >
+        <div className="min-w-0 flex-1 uppercase leading-[1.32]">
+          <p className="flex items-baseline gap-[1cqw]">
+            <span className="text-[3.6cqw] font-black tracking-tight">CGC</span>
+            <span className="text-[1.9cqw] font-bold tracking-[0.18em] opacity-80">CARDS</span>
+          </p>
+          <p className="truncate text-[2.5cqw] font-semibold">{line1}</p>
+          <p className="truncate text-[2.5cqw] font-semibold">{line2}</p>
+          <p className="truncate text-[2.2cqw] opacity-85">{line3}</p>
+        </div>
+        <div className="ml-[1.5cqw] flex w-[23%] shrink-0 flex-col items-center justify-center rounded-[1cqw] bg-white/95 py-[1cqw] text-[#0f2f63]">
+          <span className="text-[1.9cqw] font-bold uppercase leading-none">{listing.gradeLabel}</span>
+          <span className="text-[8cqw] font-black leading-[1]">{grade}</span>
+          <span className="text-[1.7cqw] font-semibold tabular-nums leading-none">{listing.certNumber}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (listing.grader === "BGS") {
+    const black = listing.grade === 10;
+    const gold = listing.grade === 9.5;
+    const subs = ["Centering", "Corners", "Edges", "Surface"].map((name, i) => {
+      const bump = ((seed >> (i * 3)) & 3) * 0.5;
+      const v = Math.min(10, Math.max(listing.grade - 0.5, listing.grade - 0.5 + bump));
+      return { name, v: black ? 10 : v };
+    });
+    return (
+      <div
+        className={clsx(
+          "slab-label h-[22cqw] shrink-0 overflow-hidden flex rounded-[1.4cqw] px-[2.2cqw] py-[1.6cqw]",
+          black ? "text-[#e9d38f]" : "text-[#1b1b1f]",
+        )}
+        style={{
+          background: black
+            ? "linear-gradient(135deg,#050505,#2b2b2e 50%,#0b0b0c)"
+            : gold
+              ? "linear-gradient(135deg,#a37b26,#f3d98a 40%,#c9a24a 60%,#8c6720)"
+              : "linear-gradient(135deg,#8d9097,#eef0f3 42%,#b5b9c0 62%,#7e828a)",
+        }}
+      >
+        <div className="min-w-0 flex-1 uppercase leading-[1.3]">
+          <p className="text-[3.2cqw] font-black tracking-[0.06em]">BECKETT</p>
+          <p className="truncate text-[2.3cqw] font-bold">{line1}</p>
+          <p className="truncate text-[2.3cqw] font-bold">{line2}</p>
+          <div className="mt-[0.6cqw] grid grid-cols-4 gap-[0.6cqw] text-[1.7cqw] font-semibold">
+            {subs.map((s) => (
+              <span key={s.name} className="truncate">
+                {s.name.slice(0, 4)} <b className="font-black">{s.v}</b>
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="ml-[1.2cqw] flex shrink-0 flex-col items-center justify-center">
+          <span className="text-[8.4cqw] font-black leading-[0.95]">{grade}</span>
+          <span className="text-[1.9cqw] font-bold uppercase leading-none">{listing.gradeLabel}</span>
+          <span className="mt-[0.6cqw] text-[1.6cqw] font-semibold tabular-nums opacity-80">
+            {listing.certNumber}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // SGC: white type on the black "tuxedo" insert
+  return (
+    <div className="slab-label h-[22cqw] shrink-0 overflow-hidden flex rounded-[1.2cqw] border-[0.4cqw] border-white/25 bg-[#0b0b0b] px-[2.2cqw] py-[1.6cqw] text-white">
+      <div className="min-w-0 flex-1 uppercase leading-[1.32]">
+        <p className="text-[3.4cqw] font-black tracking-[0.1em] text-[#d8b45a]">SGC</p>
+        <p className="truncate text-[2.4cqw] font-semibold">{line1}</p>
+        <p className="truncate text-[2.4cqw] font-semibold">{line2}</p>
+        <p className="truncate text-[2.1cqw] opacity-75">{line3}</p>
+      </div>
+      <div className="ml-[1.4cqw] flex w-[22%] shrink-0 flex-col items-center justify-center rounded-[0.8cqw] bg-white py-[0.8cqw] text-black">
+        <span className="text-[7.6cqw] font-black leading-[1]">{grade}</span>
+        <span className="text-[1.9cqw] font-bold uppercase leading-none">{listing.gradeLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+function SlabBack({ listing }: { listing: Listing }) {
+  const seed = hashString(listing.certNumber + "b");
+  return (
+    <div
+      className={clsx(
+        "slab-case flex h-full w-full flex-col gap-[2.4cqw] p-[4.2cqw]",
+        listing.grader === "SGC" && "slab-case-sgc",
+      )}
+    >
+      <div className="slab-label h-[22cqw] shrink-0 overflow-hidden flex items-center justify-between rounded-[1.4cqw] bg-white/92 px-[2.4cqw] py-[1.8cqw] text-[#111]">
+        <div>
+          <p className="text-[3.6cqw] font-black">{listing.grader}</p>
+          <p className="text-[1.9cqw] font-semibold uppercase tracking-[0.12em] text-black/60">
+            Cert {listing.certNumber}
+          </p>
+          <Barcode seed={seed} className="mt-[1cqw] h-[3.6cqw] w-[38cqw] text-black" />
+        </div>
+        {/* tamper-evident hologram */}
+        <div className="slab-hologram h-[11cqw] w-[11cqw] rounded-full" />
+      </div>
+      <div className="slab-well relative min-h-0 flex-1">
+        <div className="card-back h-full w-full rounded-[3.4cqw]" />
+      </div>
+    </div>
+  );
+}
+
+/** Detail-page presentation: the slab under a soft spotlight. */
 export function SlabStage({
   listing,
   spinning = false,
@@ -152,24 +390,23 @@ export function SlabStage({
 }) {
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_38%,rgba(255,255,255,0.07),transparent_70%)]" />
-      <div className="relative aspect-[0.63] h-[76%] max-h-[420px] [perspective:1400px]">
-        <div
-          className={clsx(
-            "h-full w-full",
-            spinning
-              ? "spin-slab"
-              : "transition-transform duration-500 hover:[transform:rotateY(-10deg)_rotateX(4deg)]",
-          )}
-        >
-          <Slab listing={listing} fit />
-        </div>
-        {/* pedestal */}
-        <div className="pointer-events-none absolute -bottom-5 left-1/2 h-[46px] w-[82%] -translate-x-1/2">
-          <div className="absolute left-1/2 top-3 h-[32px] w-full -translate-x-1/2 rounded-[50%] bg-[linear-gradient(180deg,#3a3a42,#16161a)] shadow-[0_20px_40px_-10px_rgba(0,0,0,0.9)]" />
-          <div className="absolute left-1/2 top-0 h-[24px] w-[86%] -translate-x-1/2 rounded-[50%] bg-[linear-gradient(180deg,#54545d,#2a2a31)]" />
-        </div>
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `radial-gradient(55% 55% at 50% 40%, hsl(${listing.hue} 60% 45% / 0.22), transparent 70%), radial-gradient(40% 18% at 50% 92%, rgba(255,255,255,0.05), transparent 70%)`,
+        }}
+      />
+      <div className="relative aspect-[0.62] h-[84%] max-h-[480px]">
+        <Slab
+          listing={listing}
+          fit
+          interactive
+          spinning={spinning}
+          maxTilt={18}
+          sizes="(min-width: 1280px) 420px, 70vw"
+        />
       </div>
     </div>
   );
 }
+

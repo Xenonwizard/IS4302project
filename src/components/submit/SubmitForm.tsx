@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Check, ShieldCheck, Truck, Wallet } from "lucide-react";
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
-import { CATEGORIES, GRADERS, GRADE_STEPS } from "@/lib/pools";
+import { GRADERS, GRADE_STEPS } from "@/lib/pools";
 import { useStore } from "@/lib/store";
 import { Button, Field, inputClass } from "../ui/primitives";
 
@@ -12,7 +12,6 @@ export function SubmitForm() {
   const { user, pushToast } = useStore();
   const [done, setDone] = useState<string | null>(null);
   const [form, setForm] = useState({
-    category: CATEGORIES[0] as string,
     grader: GRADERS[0] as string,
     grade: "10",
     cert: "",
@@ -94,23 +93,13 @@ export function SubmitForm() {
 
   return (
     <div className="mx-auto max-w-lg">
-      <h1 className="text-[24px] font-bold">Submit my collectibles</h1>
+      <h1 className="text-[24px] font-bold">Submit my Pokémon slabs</h1>
       <p className="mt-1.5 text-[14px] text-muted">
         Send us a graded slab and we will vault, insure and tokenise it for free. You keep the
         right to ship it back to yourself at any time.
       </p>
 
       <form onSubmit={submit} className="mt-6 space-y-4">
-        <Field label="Category">
-          <select className={inputClass} value={form.category} onChange={set("category")}>
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </Field>
-
         <div className="grid grid-cols-2 gap-3">
           <Field label="Grader">
             <select className={inputClass} value={form.grader} onChange={set("grader")}>

@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import {
-  ArrowLeftRight,
+  MessagesSquare,
   BadgeCheck,
   ChevronDown,
   Clock,
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Truck,
 } from "lucide-react";
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { GRADERS, GRADE_STEPS } from "@/lib/pools";
@@ -26,8 +27,6 @@ import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
 import { BuyNowModal } from "../modals/BuyNowModal";
 import { OfferModal } from "../modals/OfferModal";
-import { TradeModal } from "../modals/TradeModal";
-import { CardArt } from "../slab/CardArt";
 import { Slab, SlabStage } from "../slab/Slab";
 import {
   Avatar,
@@ -53,7 +52,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     addComment,
     pushToast,
     overrides,
-    user,
+    acceptOffer,
+    trades,
   } = useStore();
 
   const listing = resolve(base);
@@ -63,7 +63,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
   const [buyOpen, setBuyOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
-  const [tradeOpen, setTradeOpen] = useState(false);
   const [view, setView] = useState<"slab" | "front" | "back">("slab");
   const [spin, setSpin] = useState(false);
   const [offersOpen, setOffersOpen] = useState(false);
@@ -86,11 +85,18 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                 <SlabStage listing={listing} spinning={spin} />
               ) : (
                 <div className="flex h-full w-full items-center justify-center p-8">
-                  <div className="@container aspect-[0.72] w-[42%] max-w-[260px] overflow-hidden rounded-xl shadow-2xl">
+                  <div className="@container relative aspect-[63/88] h-[86%] max-h-[460px] overflow-hidden rounded-[4.5cqw] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.9)]">
                     {view === "front" ? (
-                      <CardArt listing={listing} />
+                      <Image
+                        src={listing.image}
+                        alt={`${listing.subject} card front`}
+                        fill
+                        sizes="(min-width: 1280px) 340px, 60vw"
+                        className="object-cover"
+                        preload
+                      />
                     ) : (
-                      <CardBack listing={listing} />
+                      <div className="card-back h-full w-full" />
                     )}
                   </div>
                 </div>
@@ -115,15 +121,18 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                 <Slab listing={listing} flat />
               </Thumb>
               <Thumb active={view === "front"} onClick={() => setView("front")}>
-                <div className="@container aspect-[0.72] w-full overflow-hidden rounded">
-                  <CardArt listing={listing} />
+                <div className="relative aspect-[63/88] w-full overflow-hidden rounded">
+                  <Image src={listing.image} alt="" fill sizes="56px" className="object-cover" />
                 </div>
               </Thumb>
               <Thumb active={view === "back"} onClick={() => setView("back")}>
-                <div className="@container aspect-[0.72] w-full overflow-hidden rounded">
-                  <CardBack listing={listing} />
+                <div className="@container aspect-[63/88] w-full overflow-hidden rounded">
+                  <div className="card-back h-full w-full" />
                 </div>
               </Thumb>
+              <p className="ml-auto hidden text-[12px] text-dim sm:block">
+                Move your cursor over the slab to tilt it
+              </p>
             </div>
           </div>
 
@@ -280,7 +289,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                 <span>Held in your vault — not listed</span>
               ) : (
                 <span>
-                  Listing ends in: <Countdown to={listing.endsAt} className="font-semibold text-white" />
+                  Listing renews in:{" "}
+                  <Countdown to={listing.endsAt} every={7 * 86_400_000} className="font-semibold text-white" />
                 </span>
               )}
             </div>
@@ -298,6 +308,14 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
               {owned ? (
                 <div className="mt-4 grid gap-2">
+                  <Link href={`/trades/${listing.id}`}>
+                    <Button size="lg" className="w-full">
+                      <MessagesSquare size={16} />
+                      {trades[listing.id]?.status === "live" && trades[listing.id]?.seller === listing.owner
+                        ? "Go to your trade room"
+                        : "Open a live trade room"}
+                    </Button>
+                  </Link>
                   <Link href="/vault">
                     <Button size="lg" variant="secondary" className="w-full">
                       Manage in vault
@@ -314,13 +332,12 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                     Buy now
                   </Button>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => requireAuth(() => setTradeOpen(true)) && setTradeOpen(true)}
-                    >
-                      <ArrowLeftRight size={15} />
-                      Make a trade
-                    </Button>
+                    <Link href={`/trades/${listing.id}`} className="grid">
+                      <Button variant="outline">
+                        <MessagesSquare size={15} />
+                        Live trade room
+                      </Button>
+                    </Link>
                     <Button
                       variant="outline"
                       onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
@@ -369,13 +386,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                           <Button
                             size="sm"
                             variant="secondary"
-                            onClick={() =>
-                              pushToast({
-                                title: "Offer accepted",
-                                body: `${usd(o.amount)} settled with ${o.from}.`,
-                                tone: "success",
-                              })
-                            }
+                            onClick={() => acceptOffer(listing.id, o)}
                           >
                             Accept
                           </Button>
@@ -464,8 +475,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
       <BuyNowModal listing={listing} open={buyOpen} onClose={() => setBuyOpen(false)} />
       <OfferModal listing={listing} open={offerOpen} onClose={() => setOfferOpen(false)} />
-      <TradeModal listing={listing} open={tradeOpen} onClose={() => setTradeOpen(false)} />
-      {user ? null : null}
     </div>
   );
 }
@@ -498,24 +507,6 @@ function Trust({ icon, text }: { icon: React.ReactNode; text: string }) {
       <span className="text-good">{icon}</span>
       {text}
     </span>
-  );
-}
-
-function CardBack({ listing }: { listing: Listing }) {
-  return (
-    <div
-      className="flex h-full w-full flex-col items-center justify-center gap-[4cqw] p-[8cqw] text-center"
-      style={{
-        background: `linear-gradient(160deg, hsl(${listing.art.hueB} 45% 26%), hsl(${listing.art.hueA} 40% 12%))`,
-      }}
-    >
-      <div className="h-[22cqw] w-[22cqw] rounded-full border-[1.6cqw] border-white/50" />
-      <p className="text-[6cqw] font-black uppercase tracking-[0.2em] text-white/80">
-        {listing.category.slice(0, 12)}
-      </p>
-      <p className="text-[4cqw] font-semibold text-white/50">{listing.set}</p>
-      <p className="text-[3.4cqw] text-white/40">Cert {listing.certNumber}</p>
-    </div>
   );
 }
 
@@ -609,13 +600,11 @@ function Details({ listing }: { listing: Listing }) {
   const chips = [
     listing.grader,
     `${listing.grade} ${listing.gradeLabel}`,
-    listing.category,
     String(listing.year),
+    listing.series,
     listing.set,
     listing.subject,
-    listing.language,
     listing.variant,
-    listing.pulledFrom,
   ];
   const pop = population(listing);
 
@@ -640,6 +629,7 @@ function Details({ listing }: { listing: Listing }) {
           <Row label="Token ID" value={truncMiddle(listing.tokenId, 6, 4)} />
           <Row label="Contract" value={truncMiddle(listing.contract, 6, 4)} />
           <Row label="Owner address" value={truncMiddle(listing.ownerAddress, 6, 4)} />
+          <Row label="Card data" value="pokemontcg.io" />
         </div>
 
         {open ? (

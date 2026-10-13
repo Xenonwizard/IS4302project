@@ -8,7 +8,7 @@ import {
   Search,
   ShieldCheck,
   ShoppingCart,
-  Sparkles,
+  MessagesSquare,
   Wallet,
   X,
 } from "lucide-react";
@@ -25,9 +25,9 @@ export function PromoBanner() {
   if (!open) return null;
   return (
     <div className="relative flex items-center justify-center gap-2 bg-black px-10 py-2.5 text-center text-[13px] font-semibold">
-      <span>The thrill of the rip — now in your pocket.</span>
-      <Link href="/packs" className="text-accent underline-offset-2 hover:underline">
-        Open a pack →
+      <span>Live trade rooms are open — bid on slabs in real time.</span>
+      <Link href="/trades" className="text-accent underline-offset-2 hover:underline">
+        Join a room →
       </Link>
       <button
         onClick={() => setOpen(false)}
@@ -92,19 +92,9 @@ export function TopBar() {
               <div className="border-b border-hairline p-4">
                 <p className="text-sm font-bold">{user.username}</p>
                 <p className="truncate text-[12px] text-dim">{user.email}</p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="rounded-xl bg-surface p-2.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-dim">
-                      Balance
-                    </p>
-                    <p className="text-sm font-bold">{usd(user.balance)}</p>
-                  </div>
-                  <div className="rounded-xl bg-surface p-2.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-dim">
-                      Points
-                    </p>
-                    <p className="text-sm font-bold">{user.points.toLocaleString()}</p>
-                  </div>
+                <div className="mt-3 rounded-xl bg-surface p-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-dim">Balance</p>
+                  <p className="text-sm font-bold">{usd(user.balance)}</p>
                 </div>
               </div>
               <div className="p-2">
@@ -114,8 +104,8 @@ export function TopBar() {
                 <MenuLink href="/vault?tab=orders" icon={<Wallet size={16} />} onGo={() => setMenuOpen(false)}>
                   Orders & offers
                 </MenuLink>
-                <MenuLink href="/packs" icon={<Sparkles size={16} />} onGo={() => setMenuOpen(false)}>
-                  Open a pack
+                <MenuLink href="/trades" icon={<MessagesSquare size={16} />} onGo={() => setMenuOpen(false)}>
+                  Trade rooms
                 </MenuLink>
                 <button
                   onClick={() => {
@@ -212,7 +202,7 @@ function GlobalSearch() {
             router.push(`/marketplace?q=${encodeURIComponent(q.trim())}`);
           }
         }}
-        placeholder={`Search ${BRAND.name} — set, player, grade…`}
+        placeholder={`Search ${BRAND.name} — Pokémon, set, grade…`}
         className={`${inputClass} h-10 pl-10`}
       />
       {open && results.length ? (

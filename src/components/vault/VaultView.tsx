@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Package, ShieldCheck, Tag, Truck } from "lucide-react";
+import { MessagesSquare, Package, ShieldCheck, Tag, Truck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
@@ -36,6 +36,7 @@ export function VaultView() {
     delist,
     requestShipping,
     resolve,
+    trades,
   } = useStore();
   const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) ?? "collection");
   const [sellTarget, setSellTarget] = useState<Listing | null>(null);
@@ -83,7 +84,7 @@ export function VaultView() {
         <Stat label="Slabs owned" value={String(items.length)} />
         <Stat label="Collection value" value={usd(totalValue)} />
         <Stat label="Listed for sale" value={String(listed.length)} />
-        <Stat label="Points" value={user.points.toLocaleString()} />
+        <Stat label="Trades settled" value={String(Object.values(trades).filter((t) => t.status === "settled").length)} />
       </div>
 
       <div className="no-scrollbar mt-6 flex gap-1 overflow-x-auto border-b border-hairline">
@@ -137,7 +138,7 @@ export function VaultView() {
                         <Button size="sm" variant="secondary" onClick={() => delist(listing.id)}>
                           Remove listing
                         </Button>
-                      ) : (
+                      ) : entry.status === "Vaulted" ? (
                         <Button
                           size="sm"
                           onClick={() => {
@@ -148,8 +149,14 @@ export function VaultView() {
                           <Tag size={13} />
                           List for sale
                         </Button>
-                      )}
-                      {entry.status !== "Shipping requested" ? (
+                      ) : null}
+                      <Link href={`/trades/${listing.id}`}>
+                        <Button size="sm" variant="outline" className="w-full">
+                          <MessagesSquare size={13} />
+                          Trade room
+                        </Button>
+                      </Link>
+                      {entry.status === "Vaulted" ? (
                         <Button
                           size="sm"
                           variant="outline"
@@ -168,8 +175,8 @@ export function VaultView() {
             <Empty
               icon={<Package size={24} />}
               title="Nothing vaulted yet"
-              body="Buy a slab on the marketplace or rip a pack — either way it lands here."
-              cta={{ href: "/packs", label: "Open a pack" }}
+              body="Buy a slab on the marketplace or win one in a trade room — either way it lands here."
+              cta={{ href: "/marketplace", label: "Browse the marketplace" }}
             />
           )
         ) : null}

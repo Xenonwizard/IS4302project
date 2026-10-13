@@ -30,7 +30,7 @@ export function ListingCard({
               {off}% off
             </span>
           ) : null}
-          <Slab listing={listing} />
+          <Slab listing={listing} interactive maxTilt={9} />
         </div>
       </Link>
 

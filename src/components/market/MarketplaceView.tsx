@@ -36,11 +36,11 @@ export function MarketplaceView() {
   const [dense, setDense] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>(() => {
-    const category = params.get("category");
+    const era = params.get("era");
     const grader = params.get("grader");
     return {
       ...EMPTY_FILTERS,
-      categories: category ? [category] : [],
+      series: era ? [era] : [],
       graders: grader ? [grader] : [],
       dealsOnly: params.get("deals") === "1",
     };
@@ -61,13 +61,13 @@ export function MarketplaceView() {
     const next = new URLSearchParams();
     if (query.trim()) next.set("q", query.trim());
     if (sort !== "recent") next.set("sort", sort);
-    if (filters.categories.length === 1) next.set("category", filters.categories[0]);
+    if (filters.series.length === 1) next.set("era", filters.series[0]);
     if (filters.dealsOnly) next.set("deals", "1");
     const qs = next.toString();
     const target = qs ? `/marketplace?${qs}` : "/marketplace";
     if (window.location.pathname + window.location.search === target) return;
     router.replace(target, { scroll: false });
-  }, [query, sort, filters.categories, filters.dealsOnly, router]);
+  }, [query, sort, filters.series, filters.dealsOnly, router]);
 
   const filtered = useMemo(
     () => sortListings(applyFilters(inventory, filters, query), sort),
@@ -238,12 +238,10 @@ type Chip = { key: string; label: string; remove: (f: Filters) => Filters };
 function chipList(f: Filters): Chip[] {
   const chips: Chip[] = [];
   const listKeys: (keyof Filters)[] = [
-    "categories",
+    "series",
     "grades",
     "graders",
-    "languages",
     "variants",
-    "pulledFrom",
     "sets",
     "years",
   ];

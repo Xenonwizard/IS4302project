@@ -12,15 +12,25 @@ import {
 import { useRouter } from "next/navigation";
 import { LISTINGS, getListing } from "./catalog";
 import { hashString } from "./rng";
-import type { Listing, Offer, Order, VaultItem } from "./types";
+import { messageId, seedRoom } from "./trade";
+import type {
+  Listing,
+  LostItem,
+  LostReport,
+  Offer,
+  Order,
+  TradeBid,
+  TradeMessage,
+  TradeRoom,
+  VaultItem,
+} from "./types";
 
-const STORAGE_KEY = "cy.state.v3";
+const STORAGE_KEY = "pokechain.state.v1";
 
 export interface SessionUser {
   username: string;
   email: string;
   hue: number;
-  points: number;
   balance: number;
   joinedAt: string;
 }
@@ -50,6 +60,8 @@ interface PersistShape {
   overrides: Record<string, ListingOverride>;
   offersMade: Offer[];
   comments: Record<string, { id: string; user: string; text: string; at: string }[]>;
+  trades: Record<string, TradeRoom>;
+  lostReports: LostReport[];
 }
 
 const EMPTY: PersistShape = {
@@ -61,6 +73,8 @@ const EMPTY: PersistShape = {
   overrides: {},
   offersMade: [],
   comments: {},
+  trades: {},
+  lostReports: [],
 };
 
 interface StoreValue extends PersistShape {
@@ -87,7 +101,15 @@ interface StoreValue extends PersistShape {
   listFromVault: (id: string, price: number) => void;
   delist: (id: string) => void;
   requestShipping: (id: string) => void;
-  addPull: (listing: Listing, pack: string, cost: number) => void;
+  /* live trade rooms */
+  /** fresh replaces a settled room, e.g. when the new owner relists it */
+  openTradeRoom: (listingId: string, fresh?: boolean) => void;
+  postTradeMessage: (roomId: string, message: TradeMessage) => void;
+  placeBid: (roomId: string, bid: TradeBid) => boolean;
+  /** owner accepts a bid: the slab and the bid change hands */
+  settleTrade: (roomId: string, bidId: string, note?: string) => void;
+  acceptOffer: (listingId: string, offer: Offer) => void;
+  fileLostReport: (roomId: string, item: LostItem, tracking: string, details: string) => LostReport;
   addComment: (listingId: string, text: string) => void;
   topUp: (amount: number) => void;
   resetDemo: () => void;
@@ -162,7 +184,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           username,
           email: email ?? `${username}@example.com`,
           hue: hashString(username) % 360,
-          points: 12_480,
           balance: 2500,
           joinedAt: new Date().toISOString(),
         },
@@ -292,7 +313,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ? {
                 ...prev.user,
                 balance: Math.max(0, prev.user.balance - total),
-                points: prev.user.points + Math.round(total * 10),
               }
             : prev.user,
         };
@@ -387,29 +407,182 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
-  const addPull = useCallback((listing: Listing, pack: string, cost: number) => {
+  /* ---------------- live trade rooms ---------------- */
+
+  const openTradeRoom = useCallback((listingId: string, fresh = false) => {
     setState((prev) => {
-      const username = prev.user?.username ?? "you";
+      if (prev.trades[listingId] && !fresh) return prev;
+      const base = getListing(listingId);
+      if (!base) return prev;
+      const owner = prev.overrides[listingId]?.owner ?? base.owner;
+      const listing = { ...base, price: prev.overrides[listingId]?.price ?? base.price };
       return {
         ...prev,
-        overrides: {
-          ...prev.overrides,
-          [listing.id]: { ...prev.overrides[listing.id], owner: username, delisted: true },
+        trades: {
+          ...prev.trades,
+          [listingId]: seedRoom(listing, owner, Date.now(), owner === prev.user?.username),
         },
-        vault: [
-          { listingId: listing.id, acquiredAt: new Date().toISOString(), via: "Pack", status: "Vaulted" },
-          ...prev.vault,
-        ],
-        user: prev.user
-          ? {
-              ...prev.user,
-              balance: Math.max(0, prev.user.balance - cost),
-              points: prev.user.points + Math.round(cost * 25),
-            }
-          : prev.user,
       };
     });
   }, []);
+
+  const postTradeMessage = useCallback((roomId: string, message: TradeMessage) => {
+    setState((prev) => {
+      const room = prev.trades[roomId];
+      if (!room || room.status !== "live") return prev;
+      return {
+        ...prev,
+        trades: { ...prev.trades, [roomId]: { ...room, messages: [...room.messages, message] } },
+      };
+    });
+  }, []);
+
+  const placeBid = useCallback(
+    (roomId: string, bid: TradeBid): boolean => {
+      const user = state.user;
+      if (!user) return false;
+      if (bid.cash > user.balance) {
+        pushToast({ title: "Not enough balance", body: "Lower the cash part of your bid.", tone: "error" });
+        return false;
+      }
+      postTradeMessage(roomId, {
+        id: messageId(),
+        from: user.username,
+        at: new Date().toISOString(),
+        kind: "bid",
+        bid,
+      });
+      return true;
+    },
+    [state.user, postTradeMessage, pushToast],
+  );
+
+  /**
+   * Moves the slab from seller to buyer, the cash the other way, and any slabs in
+   * the bid from buyer to seller. Works whichever side the signed-in user is on.
+   */
+  const transfer = useCallback(
+    (prev: PersistShape, listingId: string, seller: string, buyer: string, bid: TradeBid): PersistShape => {
+      const me = prev.user?.username ?? "you";
+      const now = new Date().toISOString();
+      const overrides = { ...prev.overrides };
+      overrides[listingId] = { ...overrides[listingId], owner: buyer, soldTo: buyer, delisted: true };
+      for (const id of bid.slabIds) {
+        overrides[id] = { ...overrides[id], owner: seller, delisted: true };
+      }
+      let vault = prev.vault;
+      let balance = prev.user?.balance ?? 0;
+      if (seller === me) {
+        vault = vault.filter((v) => v.listingId !== listingId);
+        vault = [
+          ...bid.slabIds.map<VaultItem>((id) => ({ listingId: id, acquiredAt: now, via: "Trade", status: "Vaulted" })),
+          ...vault,
+        ];
+        balance += bid.cash;
+      } else if (buyer === me) {
+        vault = vault.filter((v) => !bid.slabIds.includes(v.listingId));
+        vault = [{ listingId, acquiredAt: now, via: "Trade", status: "Vaulted" }, ...vault];
+        balance = Math.max(0, balance - bid.cash);
+      }
+      return {
+        ...prev,
+        overrides,
+        vault,
+        cart: prev.cart.filter((c) => c !== listingId),
+        user: prev.user ? { ...prev.user, balance: Math.round(balance * 100) / 100 } : prev.user,
+      };
+    },
+    [],
+  );
+
+  const settleTrade = useCallback(
+    (roomId: string, bidId: string, note?: string) => {
+      setState((prev) => {
+        const room = prev.trades[roomId];
+        const bidMsg = room?.messages.find((m) => m.id === bidId);
+        if (!room || room.status !== "live" || !bidMsg?.bid) return prev;
+        const next = transfer(prev, room.listingId, room.seller, bidMsg.from, bidMsg.bid);
+        const at = new Date().toISOString();
+        const messages: TradeMessage[] = [
+          ...room.messages.map((m) => (m.id === bidId ? { ...m, accepted: true } : m)),
+          ...(note ? [{ id: messageId(), from: room.seller, at, kind: "text" as const, text: note }] : []),
+          {
+            id: messageId(),
+            from: "system",
+            at,
+            kind: "system",
+            text: `${room.seller} accepted ${bidMsg.from}'s bid. The token transferred on-chain and custody moved in the vault.`,
+          },
+        ];
+        return {
+          ...next,
+          trades: {
+            ...next.trades,
+            [roomId]: { ...room, status: "settled", settledBidId: bidId, winner: bidMsg.from, messages },
+          },
+        };
+      });
+      pushToast({ title: "Trade settled", body: "Check your vault for the updated collection.", tone: "success" });
+    },
+    [transfer, pushToast],
+  );
+
+  const acceptOffer = useCallback(
+    (listingId: string, offer: Offer) => {
+      setState((prev) => {
+        const me = prev.user?.username ?? "you";
+        const next = transfer(prev, listingId, me, offer.from, { cash: offer.amount, slabIds: [] });
+        const prior = next.overrides[listingId] ?? {};
+        return {
+          ...next,
+          overrides: {
+            ...next.overrides,
+            [listingId]: { ...prior, extraOffers: [] },
+          },
+        };
+      });
+      pushToast({
+        title: "Offer accepted",
+        body: `$${offer.amount.toLocaleString()} from ${offer.from} added to your balance.`,
+        tone: "success",
+      });
+    },
+    [transfer, pushToast],
+  );
+
+  const fileLostReport = useCallback(
+    (roomId: string, item: LostItem, tracking: string, details: string): LostReport => {
+      const report: LostReport = {
+        id: `LR-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+        roomId,
+        item,
+        tracking,
+        details,
+        filedAt: new Date().toISOString(),
+        status: "Under investigation",
+      };
+      setState((prev) => {
+        const room = prev.trades[roomId];
+        const note: TradeMessage = {
+          id: messageId(),
+          from: "system",
+          at: report.filedAt,
+          kind: "system",
+          text: `Lost item report ${report.id} filed. The vault team is checking the custody log for this trade.`,
+        };
+        return {
+          ...prev,
+          lostReports: [report, ...prev.lostReports],
+          trades: room
+            ? { ...prev.trades, [roomId]: { ...room, messages: [...room.messages, note] } }
+            : prev.trades,
+        };
+      });
+      pushToast({ title: `Report ${report.id} filed`, body: "We will email you within 48 hours.", tone: "success" });
+      return report;
+    },
+    [pushToast],
+  );
 
   const addComment = useCallback((listingId: string, text: string) => {
     setState((prev) => {
@@ -486,7 +659,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     listFromVault,
     delist,
     requestShipping,
-    addPull,
+    openTradeRoom,
+    postTradeMessage,
+    placeBid,
+    settleTrade,
+    acceptOffer,
+    fileLostReport,
     addComment,
     topUp,
     resetDemo,
