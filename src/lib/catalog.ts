@@ -185,6 +185,17 @@ function buildComments(rnd: ReturnType<typeof makeRandom>, listingId: string): C
   }));
 }
 
+/** Graded market value: raw price times the grade and grader premiums, with some noise. */
+function gradedValue(card: CardRecord, grader: Grader, grade: number, rnd: ReturnType<typeof makeRandom>): number {
+  const [mv, mm] = GRADE_MULT[String(grade)] ?? [1, 1];
+  const vintage = card.year < 2004;
+  return money(Math.max(8, card.raw * (vintage ? mv : mm) * GRADER_MULT[grader] * rnd.float(0.92, 1.08)));
+}
+
+function titleFor(card: CardRecord, grader: Grader, grade: number, label: string): string {
+  return `${card.year} Pokémon ${card.set} #${card.number}/${card.printedTotal} ${card.name} - ${variantLabel(card.rarity)} (${grader} ${grade} ${label})`;
+}
+
 function makeListing(card: CardRecord, index: number): Listing {
   const rnd = makeRandom(0x5ab1 + index * 7919);
   const vintage = card.year < 2004;
@@ -196,8 +207,7 @@ function makeListing(card: CardRecord, index: number): Listing {
     : rnd.pick(rnd.chance(0.7) ? [9, 9.5, 10, 10] : [8, 8.5, 9]);
   const label = gradeLabel(grader, grade);
 
-  const [mv, mm] = GRADE_MULT[String(grade)] ?? [1, 1];
-  const fmv = money(Math.max(8, card.raw * (vintage ? mv : mm) * GRADER_MULT[grader] * rnd.float(0.92, 1.08)));
+  const fmv = gradedValue(card, grader, grade, rnd);
   const skew = rnd.float(-0.3, 0.26);
   const price = money(Math.max(6, fmv * (1 - skew)));
 
@@ -209,7 +219,7 @@ function makeListing(card: CardRecord, index: number): Listing {
 
   const cardNumber = `${card.number}/${card.printedTotal}`;
   const variant = card.rarity;
-  const title = `${card.year} Pokémon ${card.set} #${cardNumber} ${card.name} - ${variantLabel(variant)} (${grader} ${grade} ${label})`;
+  const title = titleFor(card, grader, grade, label);
 
   return {
     id,
@@ -257,9 +267,123 @@ export function getListing(id: string): Listing | undefined {
   return LISTING_BY_ID.get(id);
 }
 
-export function discountPct(listing: Listing): number {
-  if (listing.fmv <= 0) return 0;
-  return Math.round(((listing.fmv - listing.price) / listing.fmv) * 100);
+/**
+ * Slabs the user submitted live in browser storage, not the catalog. The store
+ * registers them here on load so getListing finds them like any other slab.
+ */
+export function registerListing(listing: Listing): void {
+  LISTING_BY_ID.set(listing.id, listing);
+}
+
+/**
+ * Stand-in for the grader's cert registry: a cert number always resolves to the
+ * same card and grade, the way PSA's lookup returns what is printed on the label.
+ */
+export function lookupCert(grader: Grader, certNumber: string): { card: CardRecord; grade: number } | null {
+  const cert = certNumber.trim();
+  if (!/^\d{6,10}$/.test(cert)) return null;
+  const rnd = makeRandom(hashString(`${grader}cert${cert}`));
+  return { card: rnd.pick(CARDS), grade: rnd.pick([10, 10, 9.5, 9, 9, 9, 8.5, 8, 7]) };
+}
+
+/** What the registry shows for a cert, for previewing before it is vaulted. */
+export function certPreview(grader: Grader, certNumber: string) {
+  const hit = lookupCert(grader, certNumber);
+  if (!hit) return null;
+  const { card, grade } = hit;
+  return {
+    title: titleFor(card, grader, grade, gradeLabel(grader, grade)),
+    image: card.image,
+    thumb: card.thumb,
+    grade,
+    gradeLabel: gradeLabel(grader, grade),
+  };
+}
+
+/** A freshly graded slab the user sent in, vaulted in their name and not yet listed. */
+export function makeSubmittedListing(input: {
+  grader: Grader;
+  certNumber: string;
+  owner: string;
+  nowMs: number;
+}): Listing | null {
+  const hit = lookupCert(input.grader, input.certNumber);
+  if (!hit) return null;
+  return makeOwnedListing({ ...input, card: hit.card, grade: hit.grade });
+}
+
+/** Slabs the demo account starts with, so there is something to list or trade. */
+const STARTER_SLABS: { cardId: string; grader: Grader; grade: number; certNumber: string }[] = [
+  { cardId: "swsh7-189", grader: "PSA", grade: 10, certNumber: "81240517" },
+  { cardId: "sv3pt5-199", grader: "PSA", grade: 10, certNumber: "92031866" },
+  { cardId: "dp3-14", grader: "CGC", grade: 9, certNumber: "4127730015" },
+];
+
+export function makeStarterListings(owner: string, nowMs: number): Listing[] {
+  return STARTER_SLABS.flatMap((s, i) => {
+    const card = CARDS.find((c) => c.id === s.cardId);
+    return card ? [makeOwnedListing({ ...s, card, owner, nowMs: nowMs - (i + 1) * 9 * DAY })] : [];
+  });
+}
+
+function makeOwnedListing(input: {
+  card: CardRecord;
+  grader: Grader;
+  grade: number;
+  certNumber: string;
+  owner: string;
+  nowMs: number;
+}): Listing {
+  const { card, grader, grade, owner, nowMs } = input;
+  const rnd = makeRandom(hashString(`${card.id}${grader}${grade}${input.certNumber}`));
+  const label = gradeLabel(grader, grade);
+  const fmv = gradedValue(card, grader, grade, rnd);
+  const sales = buildSales(rnd, fmv);
+  const id = `sub-${hashString(`${grader}${input.certNumber}`).toString(36)}`;
+  return {
+    id,
+    title: titleFor(card, grader, grade, label),
+    shortName: card.name,
+    year: card.year,
+    set: card.set,
+    series: card.series,
+    cardNumber: `${card.number}/${card.printedTotal}`,
+    subject: card.name,
+    grader,
+    grade,
+    gradeLabel: label,
+    language: "English",
+    variant: card.rarity,
+    price: fmv,
+    fmv,
+    confidence: sales.length >= 6 ? "High" : sales.length >= 4 ? "Medium" : "Low",
+    owner,
+    certNumber: input.certNumber.trim(),
+    listedAt: new Date(nowMs).toISOString(),
+    endsAt: new Date(nowMs + 7 * DAY).toISOString(),
+    likes: 0,
+    offers: [],
+    sales,
+    activity: [
+      {
+        kind: "Mint",
+        from: "0x0000...0000",
+        to: owner,
+        at: new Date(nowMs).toISOString(),
+        txHash: `0x${hexId(hashString(id), 8)}`,
+      },
+    ],
+    comments: [],
+    tokenId: String(rnd.int(100_000, 999_999)) + String(rnd.int(1000, 9999)),
+    contract: `0x${hexId(0x251b, 20)}`,
+    ownerAddress: `0x${hexId(hashString(owner), 20)}`,
+    chain: "Polygon",
+    note: `Submitted by ${owner}. ${grader} cert ${input.certNumber} was checked against the registry before the slab entered the ${BRAND.vaultCity} vault.`,
+    image: card.image,
+    thumb: card.thumb,
+    holo: card.rarity !== "Rare",
+    hue: TYPE_HUE[card.types[0] ?? "Colorless"] ?? 30,
+  };
 }
 
 export function topOffer(listing: Listing): Offer | undefined {
@@ -294,8 +418,9 @@ export const PRICE_BOUNDS = {
   max: Math.ceil(Math.max(...LISTINGS.map((l) => Math.max(l.price, l.fmv))) / 100) * 100,
 };
 
-export const TRENDING = [...LISTINGS]
-  .sort((a, b) => discountPct(b) - discountPct(a))
+/** Slabs collectors are watching and bidding on the most. */
+export const MOST_WATCHED = [...LISTINGS]
+  .sort((a, b) => b.likes + b.offers.length * 10 - (a.likes + a.offers.length * 10))
   .slice(0, 18);
 
 export const GRAILS = [...LISTINGS].sort((a, b) => b.fmv - a.fmv).slice(0, 12);

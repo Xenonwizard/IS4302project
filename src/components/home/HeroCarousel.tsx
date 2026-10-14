@@ -10,10 +10,10 @@ import { Button } from "../ui/primitives";
 
 const SLIDES = [
   {
-    title: "Trade slabs live",
-    body: "Every slab has a trade room. Bid in the chat, sweeten with a slab, settle on-chain.",
-    cta: "Join a trade room",
-    href: "/trades",
+    title: "Make an offer, chat 1-to-1",
+    body: "Offer full cash or trade your slabs plus cash, then negotiate privately with the seller.",
+    cta: "Browse the marketplace",
+    href: "/marketplace",
     hueA: 224,
     hueB: 268,
   },
@@ -24,22 +24,6 @@ const SLIDES = [
     href: "/marketplace",
     hueA: 12,
     hueB: 352,
-  },
-  {
-    title: "Vintage vault, restocked",
-    body: "Base, Jungle, Fossil, Neo and e-Card era holos.",
-    cta: "Browse vintage",
-    href: "/marketplace?era=Base",
-    hueA: 32,
-    hueB: 8,
-  },
-  {
-    title: "Grails, graded",
-    body: "Shining, Gold Star and secret rare chase cards.",
-    cta: "See the grails",
-    href: "/marketplace?sort=price-desc",
-    hueA: 285,
-    hueB: 196,
   },
 ];
 

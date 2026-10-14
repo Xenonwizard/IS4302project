@@ -7,7 +7,6 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
-  ShoppingCart,
   MessagesSquare,
   Wallet,
   X,
@@ -25,9 +24,9 @@ export function PromoBanner() {
   if (!open) return null;
   return (
     <div className="relative flex items-center justify-center gap-2 bg-black px-10 py-2.5 text-center text-[13px] font-semibold">
-      <span>Live trade rooms are open — bid on slabs in real time.</span>
-      <Link href="/trades" className="text-accent underline-offset-2 hover:underline">
-        Join a room →
+      <span>Make an offer on any slab and negotiate 1-to-1 with the seller.</span>
+      <Link href="/marketplace" className="text-accent underline-offset-2 hover:underline">
+        Browse slabs →
       </Link>
       <button
         onClick={() => setOpen(false)}
@@ -41,7 +40,7 @@ export function PromoBanner() {
 }
 
 export function TopBar() {
-  const { user, logout, setAuthOpen, cart, setCartOpen, resetDemo } = useStore();
+  const { user, balance, logout, setAuthOpen, resetDemo } = useStore();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -65,19 +64,6 @@ export function TopBar() {
       </div>
       <div className="flex-1 md:hidden" />
 
-      <button
-        onClick={() => setCartOpen(true)}
-        className="relative grid h-10 w-10 place-items-center rounded-xl text-muted transition hover:bg-white/5 hover:text-white"
-        aria-label="Cart"
-      >
-        <ShoppingCart size={19} />
-        {cart.length ? (
-          <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-            {cart.length}
-          </span>
-        ) : null}
-      </button>
-
       {user ? (
         <div className="relative" ref={menuRef}>
           <button
@@ -92,20 +78,25 @@ export function TopBar() {
               <div className="border-b border-hairline p-4">
                 <p className="text-sm font-bold">{user.username}</p>
                 <p className="truncate text-[12px] text-dim">{user.email}</p>
-                <div className="mt-3 rounded-xl bg-surface p-2.5">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-dim">Balance</p>
-                  <p className="text-sm font-bold">{usd(user.balance)}</p>
-                </div>
+                <Link
+                  href="/vault?tab=wallet"
+                  onClick={() => setMenuOpen(false)}
+                  className="mt-3 block rounded-xl bg-surface p-2.5 transition hover:bg-surface-2"
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-dim">Wallet balance</p>
+                  <p className="text-sm font-bold">{usd(balance, { cents: true })}</p>
+                  <p className="mt-0.5 text-[11px] text-accent">See history →</p>
+                </Link>
               </div>
               <div className="p-2">
                 <MenuLink href="/vault" icon={<ShieldCheck size={16} />} onGo={() => setMenuOpen(false)}>
-                  My vault
+                  My Slabs
                 </MenuLink>
-                <MenuLink href="/vault?tab=orders" icon={<Wallet size={16} />} onGo={() => setMenuOpen(false)}>
-                  Orders & offers
+                <MenuLink href="/vault?tab=wallet" icon={<Wallet size={16} />} onGo={() => setMenuOpen(false)}>
+                  Wallet
                 </MenuLink>
                 <MenuLink href="/trades" icon={<MessagesSquare size={16} />} onGo={() => setMenuOpen(false)}>
-                  Trade rooms
+                  Negotiation rooms
                 </MenuLink>
                 <button
                   onClick={() => {

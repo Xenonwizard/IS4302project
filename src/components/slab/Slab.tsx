@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useEffect, useRef } from "react";
 import { hashString } from "@/lib/rng";
 import type { Listing } from "@/lib/types";
+import { CardBack } from "./CardBack";
 
 /*
  * A graded slab built in CSS 3D. What makes it read as a physical object:
@@ -374,7 +375,9 @@ function SlabBack({ listing }: { listing: Listing }) {
         <div className="slab-hologram h-[11cqw] w-[11cqw] rounded-full" />
       </div>
       <div className="slab-well relative min-h-0 flex-1">
-        <div className="card-back h-full w-full rounded-[3.4cqw]" />
+        <div className="h-full w-full overflow-hidden rounded-[3.4cqw]">
+          <CardBack />
+        </div>
       </div>
     </div>
   );

@@ -59,16 +59,7 @@ export function FilterDrawer({
         </Button>
       }
     >
-      <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
-        <label className="flex cursor-pointer items-center gap-2.5 text-[13px] font-semibold">
-          <input
-            type="checkbox"
-            checked={filters.dealsOnly}
-            onChange={(e) => setFilters({ ...filters, dealsOnly: e.target.checked })}
-            className="h-4 w-4 accent-[#2f5bf9]"
-          />
-          Deals only (5%+ under FMV)
-        </label>
+      <div className="flex items-center justify-end border-b border-hairline px-5 py-3">
         <button
           onClick={() =>
             setFilters(EMPTY_FILTERS)
@@ -80,7 +71,7 @@ export function FilterDrawer({
       </div>
 
       <Range
-        label="Buy now price"
+        label="Asking price"
         min={filters.priceMin}
         max={filters.priceMax}
         onChange={(min, max) => setFilters({ ...filters, priceMin: min, priceMax: max })}

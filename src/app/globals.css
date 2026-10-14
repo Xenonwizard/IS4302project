@@ -302,39 +302,6 @@ body {
   filter: saturate(0.8);
 }
 /* generic trading-card back drawn in CSS */
-.card-back {
-  position: relative;
-  overflow: hidden;
-  background:
-    radial-gradient(60% 45% at 30% 30%, rgba(120, 170, 255, 0.55), transparent 70%),
-    radial-gradient(70% 55% at 75% 75%, rgba(20, 50, 140, 0.9), transparent 70%),
-    linear-gradient(160deg, #2f62d0, #173d9b 55%, #0d2465);
-  box-shadow: inset 0 0 0 3cqw #1f4fb3, inset 0 0 0 3.6cqw #0c1f55;
-}
-.card-back::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 40%;
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%) rotate(-18deg);
-  border-radius: 50%;
-  background: linear-gradient(#e3262f 0 45%, #121212 45% 55%, #f2f2f2 55%);
-  box-shadow: 0 0 0 1cqw #121212, 0 1.5cqw 4cqw rgba(0, 0, 0, 0.5);
-}
-.card-back::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 11%;
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: #f2f2f2;
-  box-shadow: 0 0 0 1.4cqw #121212;
-}
 @media (prefers-reduced-motion: reduce) {
   .spin-slab {
     animation: none;

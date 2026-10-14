@@ -1,108 +1,140 @@
 "use client";
 
+import clsx from "clsx";
+import Image from "next/image";
 import Link from "next/link";
-import { Check, ShieldCheck, Truck, Wallet } from "lucide-react";
+import { Archive, BadgeCheck, Check, ShieldCheck, Tag } from "lucide-react";
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
-import { GRADERS, GRADE_STEPS } from "@/lib/pools";
+import { certPreview } from "@/lib/catalog";
+import { usd } from "@/lib/format";
+import { GRADERS } from "@/lib/pools";
 import { useStore } from "@/lib/store";
+import type { Grader, Listing } from "@/lib/types";
+import { Slab } from "../slab/Slab";
 import { Button, Field, inputClass } from "../ui/primitives";
+import { ListForSaleForm } from "../vault/ListForSaleForm";
 
 export function SubmitForm() {
-  const { user, pushToast } = useStore();
-  const [done, setDone] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    grader: GRADERS[0] as string,
-    grade: "10",
-    cert: "",
-    description: "",
-    value: "",
-    email: user?.email ?? "",
-  });
-
-  const set =
-    (key: keyof typeof form) =>
-    (
-      e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
-    ) =>
-      setForm((prev) => ({ ...prev, [key]: e.target.value }));
+  const { user, requireAuth, submitSlab, pushToast } = useStore();
+  const [vaulted, setVaulted] = useState<Listing | null>(null);
+  const [choice, setChoice] = useState<"sell" | "keep" | "listed" | null>(null);
+  const [form, setForm] = useState({ grader: "PSA" as Grader, cert: "" });
+  const preview = certPreview(form.grader, form.cert);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.cert.trim().length < 4) {
-      pushToast({ title: "Add the certification number", tone: "error" });
+    if (!preview) {
+      pushToast({ title: "Enter the 6 to 10 digit cert number", tone: "error" });
       return;
     }
-    setDone(`SUB-${Math.random().toString(36).slice(2, 8).toUpperCase()}`);
+    // Signing in re-renders the form, so the user sends again rather than replaying a stale callback.
+    if (!requireAuth()) return;
+    const listing = submitSlab({ grader: form.grader, certNumber: form.cert.trim() });
+    if (listing) {
+      setVaulted(listing);
+      setChoice(null);
+    }
   };
 
-  if (done) {
+  const reset = () => {
+    setVaulted(null);
+    setChoice(null);
+    setForm((prev) => ({ ...prev, cert: "" }));
+  };
+
+  if (vaulted) {
     return (
-      <div className="mx-auto max-w-lg py-10 text-center">
-        <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-good-bg text-good">
-          <Check size={28} />
-        </span>
-        <h1 className="mt-4 text-[24px] font-bold">Submission received</h1>
-        <p className="mt-2 text-sm text-muted">
-          Reference <span className="font-mono font-bold text-white">{done}</span>. We emailed a
-          prepaid, insured shipping label to {form.email || "your inbox"}.
-        </p>
-        <ol className="mt-8 space-y-4 text-left">
-          {[
-            {
-              icon: <Truck size={17} />,
-              title: "Ship it in",
-              body: "Drop the slab at any courier point using the label we sent.",
-            },
-            {
-              icon: <ShieldCheck size={17} />,
-              title: "We verify and vault it",
-              body: `Cert number is checked against the ${form.grader} registry, then the slab enters the ${BRAND.vaultCity} vault.`,
-            },
-            {
-              icon: <Wallet size={17} />,
-              title: "Mint and list",
-              body: `An ERC-721 token is minted to your wallet on ${BRAND.chain}. List it whenever you like.`,
-            },
-          ].map((s) => (
-            <li
-              key={s.title}
-              className="flex gap-3.5 rounded-card border border-hairline bg-surface p-4"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent/15 text-accent">
-                {s.icon}
-              </span>
-              <div>
-                <p className="text-[13px] font-bold">{s.title}</p>
-                <p className="mt-1 text-[13px] leading-relaxed text-muted">{s.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-        <div className="mt-6 flex justify-center gap-2">
-          <Button variant="secondary" onClick={() => setDone(null)}>
-            Submit another
-          </Button>
-          <Link href="/vault">
-            <Button>Go to my vault</Button>
-          </Link>
+      <div className="mx-auto max-w-lg py-4">
+        <div className="text-center">
+          <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-good-bg text-good">
+            <Check size={28} />
+          </span>
+          <h1 className="mt-4 text-[24px] font-bold">
+            {choice === "listed" ? "Listed on the marketplace" : "It's in your vault"}
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            {vaulted.grader} cert <span className="font-mono font-bold text-white">{vaulted.certNumber}</span>{" "}
+            checked out. The slab is in the {BRAND.vaultCity} vault and its token was minted to your
+            wallet on {BRAND.chain}.
+          </p>
         </div>
+
+        <div className="mt-6 flex gap-4 rounded-card border border-hairline bg-surface p-4">
+          <div className="w-20 shrink-0">
+            <Slab listing={vaulted} flat />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold leading-snug">{vaulted.title}</p>
+            <p className="mt-1.5 text-[12px] text-muted">
+              Market value {usd(vaulted.fmv)} · confidence {vaulted.confidence}
+            </p>
+          </div>
+        </div>
+
+        {choice === null ? (
+          <>
+            <p className="mt-6 text-[13px] font-bold">What would you like to do with it?</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <ChoiceCard
+                icon={<Tag size={17} />}
+                title="Put it up for sale"
+                body="Set an asking price. It goes on the marketplace and its negotiation room opens."
+                onClick={() => setChoice("sell")}
+              />
+              <ChoiceCard
+                icon={<Archive size={17} />}
+                title="Keep it"
+                body="Hold it in the vault, insured. You can list it or ship it home any time."
+                onClick={() => setChoice("keep")}
+              />
+            </div>
+          </>
+        ) : null}
+
+        {choice === "sell" ? (
+          <div className="mt-6 rounded-card border border-hairline bg-surface p-4">
+            <ListForSaleForm listing={vaulted} onListed={() => setChoice("listed")} />
+            <button
+              onClick={() => setChoice(null)}
+              className="mt-3 w-full text-center text-[12px] font-semibold text-muted hover:text-white"
+            >
+              Back
+            </button>
+          </div>
+        ) : null}
+
+        {choice === "keep" || choice === "listed" ? (
+          <div className="mt-6 flex justify-center gap-2">
+            <Button variant="secondary" onClick={reset}>
+              Vault another
+            </Button>
+            <Link href={choice === "listed" ? `/trades/${vaulted.id}` : "/vault"}>
+              <Button>{choice === "listed" ? "Open negotiation room" : "Go to My Slabs"}</Button>
+            </Link>
+          </div>
+        ) : null}
       </div>
     );
   }
 
   return (
     <div className="mx-auto max-w-lg">
-      <h1 className="text-[24px] font-bold">Submit my Pokémon slabs</h1>
+      <h1 className="text-[24px] font-bold">Vault a graded slab</h1>
       <p className="mt-1.5 text-[14px] text-muted">
-        Send us a graded slab and we will vault, insure and tokenise it for free. You keep the
-        right to ship it back to yourself at any time.
+        Tell us the grader and the cert number on the label. We pull the card, grade and set from
+        the grader&apos;s registry, then the slab goes straight into the {BRAND.vaultCity} vault and
+        shows up in My Slabs, insured and tokenised for free.
       </p>
 
       <form onSubmit={submit} className="mt-6 space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-[140px_1fr] gap-3">
           <Field label="Grader">
-            <select className={inputClass} value={form.grader} onChange={set("grader")}>
+            <select
+              className={inputClass}
+              value={form.grader}
+              onChange={(e) => setForm((prev) => ({ ...prev, grader: e.target.value as Grader }))}
+            >
               {GRADERS.map((g) => (
                 <option key={g} value={g}>
                   {g}
@@ -110,69 +142,68 @@ export function SubmitForm() {
               ))}
             </select>
           </Field>
-          <Field label="Grade">
-            <select className={inputClass} value={form.grade} onChange={set("grade")}>
-              {[...GRADE_STEPS].reverse().map((g) => (
-                <option key={g} value={String(g)}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-
-        <Field label="Certification number" hint="Printed on the grading label.">
-          <input
-            className={inputClass}
-            value={form.cert}
-            onChange={set("cert")}
-            placeholder="605965812"
-            inputMode="numeric"
-          />
-        </Field>
-
-        <Field label="What is it?">
-          <textarea
-            className={`${inputClass} h-24 resize-none py-2.5`}
-            value={form.description}
-            onChange={set("description")}
-            placeholder="1999 Base Set Charizard, shadowless, holo"
-          />
-        </Field>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Your estimated value">
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">
-                $
-              </span>
-              <input
-                className={`${inputClass} pl-7`}
-                value={form.value}
-                onChange={set("value")}
-                inputMode="decimal"
-                placeholder="1200"
-              />
-            </div>
-          </Field>
-          <Field label="Email">
+          <Field label="Certification number" hint="Printed on the grading label.">
             <input
               className={inputClass}
-              value={form.email}
-              onChange={set("email")}
-              placeholder="you@example.com"
-              type="email"
+              value={form.cert}
+              onChange={(e) => setForm((prev) => ({ ...prev, cert: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
+              placeholder="72862688"
+              inputMode="numeric"
+              autoFocus
             />
           </Field>
         </div>
 
-        <Button type="submit" size="lg" className="w-full">
-          Request a shipping label
+        {preview ? (
+          <div className="flex items-center gap-3 rounded-card border border-good/30 bg-good-bg/40 p-3">
+            <span className="relative block aspect-[63/88] w-12 shrink-0 overflow-hidden rounded">
+              <Image src={preview.thumb} alt="" fill sizes="48px" className="object-cover" />
+            </span>
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-good">
+                <BadgeCheck size={13} /> Found in the {form.grader} registry
+              </p>
+              <p className="mt-1 text-[13px] font-semibold leading-snug">{preview.title}</p>
+            </div>
+          </div>
+        ) : form.cert ? (
+          <p className="text-[12px] text-dim">Keep typing: cert numbers are 6 to 10 digits.</p>
+        ) : null}
+
+        <Button type="submit" size="lg" className="w-full" disabled={!preview}>
+          <ShieldCheck size={17} />
+          {user ? "Send to the vault" : "Log in and send to the vault"}
         </Button>
         <p className="text-center text-[11px] leading-relaxed text-dim">
-          Demo form — nothing is submitted anywhere and no shipping label is actually created.
+          Demo: the registry lookup is simulated and the slab is vaulted the moment you submit.
         </p>
       </form>
     </div>
+  );
+}
+
+function ChoiceCard({
+  icon,
+  title,
+  body,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        "flex flex-col gap-2 rounded-card border border-hairline bg-surface p-4 text-left transition",
+        "hover:border-accent/60 hover:bg-accent/5",
+      )}
+    >
+      <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/15 text-accent">{icon}</span>
+      <span className="text-[13px] font-bold">{title}</span>
+      <span className="text-[12px] leading-relaxed text-muted">{body}</span>
+    </button>
   );
 }

@@ -1,16 +1,9 @@
-import { notFound } from "next/navigation";
-import { TradeRoomView } from "@/components/trades/TradeRoomView";
-import { getListing } from "@/lib/catalog";
+import { NegotiationView } from "@/components/negotiations/NegotiationView";
 
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const listing = getListing(id);
-  return { title: listing ? `Trade room · ${listing.shortName}` : "Trade room not found" };
-}
+export const metadata = { title: "Negotiation room" };
 
-export default async function TradeRoomPage({ params }: { params: Promise<{ id: string }> }) {
+/** Chats live in the user's browser state, so the page only passes the id along. */
+export default async function NegotiationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const listing = getListing(id);
-  if (!listing) notFound();
-  return <TradeRoomView listing={listing} />;
+  return <NegotiationView id={id} />;
 }

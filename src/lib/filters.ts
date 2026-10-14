@@ -1,4 +1,3 @@
-import { discountPct } from "./catalog";
 import type { Listing } from "./types";
 
 export interface Filters {
@@ -12,7 +11,6 @@ export interface Filters {
   priceMax: string;
   fmvMin: string;
   fmvMax: string;
-  dealsOnly: boolean;
 }
 
 export const EMPTY_FILTERS: Filters = {
@@ -26,7 +24,6 @@ export const EMPTY_FILTERS: Filters = {
   priceMax: "",
   fmvMin: "",
   fmvMax: "",
-  dealsOnly: false,
 };
 
 export const SORTS = [
@@ -35,7 +32,6 @@ export const SORTS = [
   { value: "price-desc", label: "Price: High to low" },
   { value: "added", label: "Recently added" },
   { value: "sold", label: "Recently sold" },
-  { value: "deals", label: "Best deals" },
 ] as const;
 
 export type SortValue = (typeof SORTS)[number]["value"];
@@ -50,7 +46,6 @@ export function activeFilterCount(f: Filters): number {
   n += f.years.length;
   if (f.priceMin || f.priceMax) n += 1;
   if (f.fmvMin || f.fmvMax) n += 1;
-  if (f.dealsOnly) n += 1;
   return n;
 }
 
@@ -82,7 +77,6 @@ export function applyFilters(
     if (filters.years.length && !filters.years.includes(String(l.year))) return false;
     if (!inRange(l.price, filters.priceMin, filters.priceMax)) return false;
     if (!inRange(l.fmv, filters.fmvMin, filters.fmvMax)) return false;
-    if (filters.dealsOnly && discountPct(l) < 5) return false;
     return true;
   });
 }
@@ -94,8 +88,6 @@ export function sortListings(listings: Listing[], sort: SortValue): Listing[] {
       return out.sort((a, b) => a.price - b.price);
     case "price-desc":
       return out.sort((a, b) => b.price - a.price);
-    case "deals":
-      return out.sort((a, b) => discountPct(b) - discountPct(a));
     case "added":
       return out.sort(
         (a, b) =>

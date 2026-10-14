@@ -81,71 +81,66 @@ export interface Listing {
   hue: number;
 }
 
-export interface CartLine {
-  listingId: string;
-  addedAt: number;
-}
-
-export interface Order {
-  id: string;
-  createdAt: string;
-  listingIds: string[];
-  subtotal: number;
-  fee: number;
-  total: number;
-  method: "card" | "usdc";
-  txHash: string;
-}
-
 export interface VaultItem {
   listingId: string;
   acquiredAt: string;
-  via: "Purchase" | "Trade";
+  via: "Purchase" | "Trade" | "Submission";
   status: "Vaulted" | "Shipping requested" | "Listed";
   listedPrice?: number;
 }
 
-/* ---------------- live trade rooms ---------------- */
+/* ---------------- negotiations ---------------- */
 
+/** What a buyer puts up: full cash, or slabs from their vault plus a cash top-up. */
 export interface TradeBid {
   cash: number;
-  /** slabs from the bidder's vault put into the bid */
   slabIds: string[];
 }
 
-export interface TradeMessage {
+export type OfferStatus = "pending" | "accepted" | "declined" | "withdrawn" | "replaced";
+
+export interface ChatMessage {
   id: string;
   from: string;
   at: string;
-  kind: "text" | "bid" | "system";
+  kind: "text" | "offer" | "system";
   text?: string;
-  bid?: TradeBid;
-  /** set once the owner has accepted this bid */
-  accepted?: boolean;
+  offer?: TradeBid;
+  /** offers only */
+  status?: OfferStatus;
+  /** system messages: who caused it, so the other side can react */
+  by?: string;
+}
+
+/** A one-to-one chat between a buyer and the seller about one listing, like Carousell. */
+export interface Negotiation {
+  id: string;
+  listingId: string;
+  seller: string;
+  buyer: string;
+  status: "open" | "sold" | "closed";
+  createdAt: string;
+  messages: ChatMessage[];
+}
+
+/** One line in the wallet history. The balance is the sum of these. */
+export interface LedgerEntry {
+  id: string;
+  at: string;
+  /** signed: positive adds to the wallet */
+  amount: number;
+  label: string;
+  listingId?: string;
 }
 
 export type LostItem = "slab-sent" | "slab-received" | "payment";
 
 export interface LostReport {
   id: string;
-  roomId: string;
+  negotiationId: string;
   item: LostItem;
   tracking: string;
   details: string;
   filedAt: string;
   status: "Under investigation" | "Resolved";
-}
-
-export interface TradeRoom {
-  /** one room per listing, so the id is the listing id */
-  id: string;
-  listingId: string;
-  /** owner at the time the room opened */
-  seller: string;
-  status: "live" | "settled";
-  openedAt: string;
-  closesAt: string;
-  messages: TradeMessage[];
-  settledBidId?: string;
-  winner?: string;
 }

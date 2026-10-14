@@ -2,8 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { Heart, ShoppingCart } from "lucide-react";
-import { discountPct } from "@/lib/catalog";
+import { Heart } from "lucide-react";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { Listing } from "@/lib/types";
@@ -16,20 +15,13 @@ export function ListingCard({
   listing: Listing;
   dense?: boolean;
 }) {
-  const { addToCart, cart, isWatched, toggleWatch, requireAuth } = useStore();
-  const off = discountPct(listing);
-  const inCart = cart.includes(listing.id);
+  const { isWatched, toggleWatch, requireAuth } = useStore();
   const watched = isWatched(listing.id);
 
   return (
     <div className="group relative overflow-hidden rounded-card border border-hairline bg-surface transition hover:border-white/20">
       <Link href={`/asset/${listing.id}`} className="block">
         <div className="relative bg-[#101014] p-4">
-          {off >= 5 ? (
-            <span className="absolute left-2.5 top-2.5 z-10 rounded-md bg-good-bg px-2 py-1 text-[11px] font-bold text-good backdrop-blur">
-              {off}% off
-            </span>
-          ) : null}
           <Slab listing={listing} interactive maxTilt={9} />
         </div>
       </Link>
@@ -64,19 +56,6 @@ export function ListingCard({
             FMV {usd(listing.fmv)}
           </span>
         </div>
-      </div>
-
-      <div className="absolute inset-x-3.5 bottom-3.5 translate-y-3 opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100">
-        <button
-          onClick={() => !inCart && addToCart(listing.id)}
-          className={clsx(
-            "flex h-9 w-full items-center justify-center gap-1.5 rounded-xl text-[13px] font-bold transition",
-            inCart ? "bg-surface-3 text-muted" : "bg-accent text-white hover:bg-accent-hover",
-          )}
-        >
-          <ShoppingCart size={14} />
-          {inCart ? "In cart" : "Add to cart"}
-        </button>
       </div>
     </div>
   );

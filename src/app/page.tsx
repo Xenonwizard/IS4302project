@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { MessagesSquare, ShieldCheck, Truck } from "lucide-react";
 import { HeroCarousel } from "@/components/home/HeroCarousel";
-import { LiveRooms } from "@/components/home/LiveRooms";
 import { Rail } from "@/components/home/Rail";
 import { BRAND } from "@/lib/brand";
-import { FACETS, GRAILS, LISTINGS, TRENDING } from "@/lib/catalog";
+import { FACETS, GRAILS, LISTINGS, MOST_WATCHED } from "@/lib/catalog";
 
 export default function HomePage() {
   const newest = [...LISTINGS]
@@ -16,18 +15,16 @@ export default function HomePage() {
       <HeroCarousel />
 
       <Rail
-        title="Best deals right now"
-        subtitle="Listed under our market value estimate."
-        href="/marketplace?deals=1&sort=deals"
-        listings={TRENDING.slice(0, 10)}
+        title="Most watched"
+        subtitle="The slabs collectors are hearting and bidding on."
+        href="/marketplace"
+        listings={MOST_WATCHED.slice(0, 10)}
       />
-
-      <LiveRooms />
 
       <Rail title="Fresh listings" href="/marketplace?sort=recent" listings={newest} />
       <Rail
-        title="Grails"
-        subtitle="The heaviest slabs in the vault."
+        title="Highest value"
+        subtitle="The most valuable slabs on the marketplace."
         href="/marketplace?sort=price-desc"
         listings={GRAILS.slice(0, 10)}
       />
@@ -55,8 +52,8 @@ export default function HomePage() {
         <div className="mt-5 grid gap-6 sm:grid-cols-3">
           <Step
             icon={<MessagesSquare size={20} />}
-            title="Buy or trade live"
-            body="Buy a slab outright, or join its trade room and bid against other collectors in real time."
+            title="Make an offer, then negotiate"
+            body="Offer full cash or trade your slabs plus cash. Each offer opens a private chat with the seller, who accepts or declines."
           />
           <Step
             icon={<ShieldCheck size={20} />}

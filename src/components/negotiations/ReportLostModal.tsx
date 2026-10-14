@@ -5,24 +5,24 @@ import { Check } from "lucide-react";
 import { useState } from "react";
 import { getListing } from "@/lib/catalog";
 import { useStore } from "@/lib/store";
-import type { LostItem, LostReport, TradeRoom } from "@/lib/types";
+import type { LostItem, LostReport, Negotiation } from "@/lib/types";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
 
 const ITEMS: { value: LostItem; label: string; hint: string }[] = [
   {
     value: "slab-received",
     label: "A slab I should have received",
-    hint: "The trade settled but the slab never showed up in your vault, or never arrived after shipping.",
+    hint: "The deal went through but the slab never showed up in your vault, or never arrived after shipping.",
   },
   {
     value: "slab-sent",
     label: "A slab I sent",
-    hint: "A slab you put into a bid left your vault but the trade did not complete.",
+    hint: "A slab you put into an offer left your vault but the deal did not complete.",
   },
   {
     value: "payment",
     label: "A payment",
-    hint: "Cash from the trade was taken or promised but never reached the other side.",
+    hint: "Cash from the deal was taken or promised but never reached the other side.",
   },
 ];
 
@@ -31,11 +31,11 @@ export function reportItemLabel(item: LostItem): string {
 }
 
 export function ReportLostModal({
-  room,
+  negotiation,
   open,
   onClose,
 }: {
-  room: TradeRoom;
+  negotiation: Negotiation;
   open: boolean;
   onClose: () => void;
 }) {
@@ -45,7 +45,7 @@ export function ReportLostModal({
   const [details, setDetails] = useState("");
   const [error, setError] = useState("");
   const [filed, setFiled] = useState<LostReport | null>(null);
-  const listing = getListing(room.listingId);
+  const listing = getListing(negotiation.listingId);
 
   const close = () => {
     onClose();
@@ -64,11 +64,11 @@ export function ReportLostModal({
           </span>
           <p className="mt-3 text-base font-bold">Report {filed.id} filed</p>
           <p className="mt-2 text-[13px] leading-relaxed text-muted">
-            The vault team will compare the on-chain transfer with the custody log for this trade
-            and email you within 48 hours. The report also shows in this trade room.
+            The vault team will compare the on-chain transfer with the custody log for this deal
+            and email you within 48 hours. The report also shows in this chat.
           </p>
           <Button className="mt-5" onClick={close}>
-            Back to the room
+            Back to the chat
           </Button>
         </div>
       ) : (
@@ -80,12 +80,12 @@ export function ReportLostModal({
               setError("Tell us a bit more so the vault team can trace it (10+ characters).");
               return;
             }
-            setFiled(fileLostReport(room.id, item, tracking.trim(), details.trim()));
+            setFiled(fileLostReport(negotiation.id, item, tracking.trim(), details.trim()));
           }}
         >
           <p className="text-[13px] leading-relaxed text-muted">
-            Trade room for{" "}
-            <span className="font-semibold text-white">{listing?.title ?? room.listingId}</span>
+            Deal for{" "}
+            <span className="font-semibold text-white">{listing?.title ?? negotiation.listingId}</span>
           </p>
 
           <div>
@@ -132,7 +132,7 @@ export function ReportLostModal({
                 setDetails(e.target.value);
                 setError("");
               }}
-              placeholder="The trade settled yesterday but the slab is not in my vault…"
+              placeholder="The deal went through yesterday but the slab is not in my vault…"
             />
           </Field>
 

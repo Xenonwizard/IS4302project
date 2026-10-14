@@ -1,5 +1,5 @@
-import { notFound } from "next/navigation";
 import { AssetDetail } from "@/components/asset/AssetDetail";
+import { StoredSlab } from "@/components/asset/StoredSlab";
 import { LISTINGS, getListing } from "@/lib/catalog";
 
 export function generateStaticParams() {
@@ -9,12 +9,13 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const listing = getListing(id);
-  return { title: listing ? listing.title : "Listing not found" };
+  return { title: listing ? listing.title : "Slab" };
 }
 
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const listing = getListing(id);
-  if (!listing) notFound();
+  // Not in the catalog: it may be a slab the user submitted, which lives client-side.
+  if (!listing) return <StoredSlab id={id} />;
   return <AssetDetail listing={listing} />;
 }

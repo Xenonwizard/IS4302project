@@ -11,13 +11,12 @@ import {
   ShieldCheck,
   Store,
 } from "lucide-react";
-import { Button } from "../ui/primitives";
 
 const NAV = [
-  { href: "/", label: "Home", icon: House },
-  { href: "/marketplace", label: "Marketplace", icon: Store },
-  { href: "/trades", label: "Trade rooms", icon: MessagesSquare },
-  { href: "/vault", label: "My vault", icon: ShieldCheck },
+  { href: "/", label: "Home", short: "Home", icon: House },
+  { href: "/marketplace", label: "Marketplace", short: "Market", icon: Store },
+  { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
+  { href: "/vault", label: "My Slabs", short: "My Slabs", icon: ShieldCheck },
 ];
 
 export function Sidebar({
@@ -66,22 +65,7 @@ export function Sidebar({
             );
           })}
         </ul>
-
       </nav>
-
-      <div className="p-3">
-        <Link href="/submit">
-          {collapsed ? (
-            <Button variant="primary" size="sm" className="w-full px-0" title="Submit my collectibles">
-              +
-            </Button>
-          ) : (
-            <Button variant="primary" className="w-full">
-              Submit my collectibles
-            </Button>
-          )}
-        </Link>
-      </div>
     </aside>
   );
 }
@@ -90,7 +74,7 @@ export function MobileNav() {
   const pathname = usePathname();
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-hairline bg-black/95 backdrop-blur lg:hidden">
-      {NAV.map(({ href, label, icon: Icon }) => {
+      {NAV.map(({ href, short, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         return (
           <Link
@@ -102,7 +86,7 @@ export function MobileNav() {
             )}
           >
             <Icon size={19} strokeWidth={active ? 2.4 : 1.9} />
-            {label}
+            {short}
           </Link>
         );
       })}

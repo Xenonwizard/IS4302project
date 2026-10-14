@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   MessagesSquare,
   BadgeCheck,
-  ChevronDown,
   Clock,
   ExternalLink,
   Gavel,
@@ -13,20 +12,19 @@ import {
   Play,
   Share2,
   ShieldCheck,
-  ShoppingCart,
-  Sparkles,
+  Tag,
   Truck,
 } from "lucide-react";
 import Image from "next/image";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { GRADERS, GRADE_STEPS } from "@/lib/pools";
-import { discountPct, population, salesFor } from "@/lib/catalog";
+import { population, salesFor } from "@/lib/catalog";
 import { shortDate, truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
-import { BuyNowModal } from "../modals/BuyNowModal";
 import { OfferModal } from "../modals/OfferModal";
+import { CardBack } from "../slab/CardBack";
 import { Slab, SlabStage } from "../slab/Slab";
 import {
   Avatar,
@@ -46,33 +44,27 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     isWatched,
     toggleWatch,
     requireAuth,
-    addToCart,
-    cart,
     comments,
     addComment,
     pushToast,
-    overrides,
-    acceptOffer,
-    trades,
+    isListed,
+    negotiations,
   } = useStore();
 
   const listing = resolve(base);
   const owned = isOwned(listing.id);
-  const delisted = overrides[listing.id]?.delisted && owned;
-  const off = discountPct(listing);
+  const listed = isListed(listing.id);
 
-  const [buyOpen, setBuyOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
   const [view, setView] = useState<"slab" | "front" | "back">("slab");
   const [spin, setSpin] = useState(false);
-  const [offersOpen, setOffersOpen] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(false);
   const [draft, setDraft] = useState("");
 
   const localComments = comments[listing.id] ?? [];
   const allComments = [...localComments, ...listing.comments];
-  const top = listing.offers[0];
-  const inCart = cart.includes(listing.id);
+  const openChats = Object.values(negotiations).filter(
+    (n) => n.listingId === listing.id && n.status === "open",
+  ).length;
 
   return (
     <div className="px-4 py-5 lg:px-6">
@@ -96,7 +88,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                         preload
                       />
                     ) : (
-                      <div className="card-back h-full w-full" />
+                      <CardBack />
                     )}
                   </div>
                 </div>
@@ -127,7 +119,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               </Thumb>
               <Thumb active={view === "back"} onClick={() => setView("back")}>
                 <div className="@container aspect-[63/88] w-full overflow-hidden rounded">
-                  <div className="card-back h-full w-full" />
+                  <CardBack />
                 </div>
               </Thumb>
               <p className="ml-auto hidden text-[12px] text-dim sm:block">
@@ -285,8 +277,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
             <div className="flex items-center gap-2 border-b border-hairline px-4 py-3 text-[13px] text-muted">
               <Clock size={14} />
-              {delisted ? (
-                <span>Held in your vault — not listed</span>
+              {!listed ? (
+                <span>{owned ? "Held in your vault, not listed" : "Not listed right now"}</span>
               ) : (
                 <span>
                   Listing renews in:{" "}
@@ -299,107 +291,47 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="flex items-end justify-between gap-3">
                 <div>
                   <p className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                    {delisted ? "Last listed for" : "Listed for"}
+                    {listed ? "Asking" : owned ? "Market value" : "Last asked"}
                   </p>
-                  <p className="mt-1 text-[30px] font-bold leading-none">{usd(listing.price)}</p>
+                  <p className="mt-1 text-[30px] font-bold leading-none">
+                    {usd(listed || !owned ? listing.price : listing.fmv)}
+                  </p>
                 </div>
-                {off >= 5 ? <Badge tone="good">{off}% under FMV</Badge> : null}
               </div>
 
               {owned ? (
                 <div className="mt-4 grid gap-2">
-                  <Link href={`/trades/${listing.id}`}>
-                    <Button size="lg" className="w-full">
-                      <MessagesSquare size={16} />
-                      {trades[listing.id]?.status === "live" && trades[listing.id]?.seller === listing.owner
-                        ? "Go to your trade room"
-                        : "Open a live trade room"}
-                    </Button>
-                  </Link>
-                  <Link href="/vault">
-                    <Button size="lg" variant="secondary" className="w-full">
-                      Manage in vault
+                  {listed ? (
+                    <Link href={`/trades?listing=${listing.id}`}>
+                      <Button size="lg" className="w-full">
+                        <MessagesSquare size={16} />
+                        Offers on this slab{openChats ? ` (${openChats})` : ""}
+                      </Button>
+                    </Link>
+                  ) : (
+                    <p className="text-[12px] text-muted">
+                      List this slab from My Slabs to put it on the marketplace and receive offers.
+                    </p>
+                  )}
+                  <Link href={listed ? "/vault?tab=listings" : "/vault"}>
+                    <Button size="lg" variant={listed ? "secondary" : "primary"} className="w-full">
+                      {listed ? null : <Tag size={16} />}
+                      {listed ? "Manage listing" : "List it from My Slabs"}
                     </Button>
                   </Link>
                 </div>
+              ) : listed ? (
+                <Button
+                  size="lg"
+                  className="mt-4 w-full"
+                  onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
+                >
+                  <Gavel size={16} />
+                  Make an offer
+                </Button>
               ) : (
-                <>
-                  <Button
-                    size="lg"
-                    className="mt-4 w-full"
-                    onClick={() => requireAuth(() => setBuyOpen(true)) && setBuyOpen(true)}
-                  >
-                    Buy now
-                  </Button>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <Link href={`/trades/${listing.id}`} className="grid">
-                      <Button variant="outline">
-                        <MessagesSquare size={15} />
-                        Live trade room
-                      </Button>
-                    </Link>
-                    <Button
-                      variant="outline"
-                      onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
-                    >
-                      <Gavel size={15} />
-                      Make an offer
-                    </Button>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    className="mt-2 w-full"
-                    onClick={() => (inCart ? undefined : addToCart(listing.id))}
-                  >
-                    <ShoppingCart size={15} />
-                    {inCart ? "In your cart" : "Add to cart"}
-                  </Button>
-                </>
+                <p className="mt-4 text-[12px] text-muted">This slab is not for sale right now.</p>
               )}
-
-              {/* offers */}
-              <button
-                onClick={() => setOffersOpen((v) => !v)}
-                className="mt-3 flex w-full items-center justify-between rounded-xl bg-surface-2 px-3.5 py-3 text-[13px] font-semibold transition hover:bg-surface-3"
-              >
-                <span>
-                  Top offer{" "}
-                  <span className="text-muted">{top ? usd(top.amount) : "— no offers yet"}</span>
-                </span>
-                <ChevronDown size={16} className={clsx("transition", offersOpen && "rotate-180")} />
-              </button>
-              {offersOpen ? (
-                <ul className="mt-2 space-y-2">
-                  {listing.offers.length ? (
-                    listing.offers.map((o) => (
-                      <li
-                        key={o.id}
-                        className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3.5 py-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-[13px] font-bold">{usd(o.amount)}</p>
-                          <p className="truncate text-[12px] text-muted">
-                            From {o.from} · expires <TimeAgo value={o.expiresAt} />
-                          </p>
-                        </div>
-                        {owned ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => acceptOffer(listing.id, o)}
-                          >
-                            Accept
-                          </Button>
-                        ) : null}
-                      </li>
-                    ))
-                  ) : (
-                    <li className="rounded-xl bg-surface-2 px-3.5 py-3 text-[12px] text-dim">
-                      No offers on this slab yet.
-                    </li>
-                  )}
-                </ul>
-              ) : null}
             </div>
           </div>
 
@@ -443,29 +375,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <Sparkline
                 values={[...listing.sales].reverse().map((s) => s.price)}
                 className="h-10 w-full"
-                stroke={off >= 0 ? "#3ddc84" : "#ffb020"}
               />
             </div>
-          </section>
-
-          {/* notes */}
-          <section className="rounded-card border border-hairline bg-surface">
-            <button
-              onClick={() => setNotesOpen((v) => !v)}
-              className="flex w-full items-center justify-between px-4 py-3.5"
-            >
-              <span className="flex items-center gap-2 text-sm font-bold">
-                <Sparkles size={15} className="text-accent" />
-                {BRAND.name} notes
-                <Badge tone="accent">Beta</Badge>
-              </span>
-              <ChevronDown size={16} className={clsx("text-muted transition", notesOpen && "rotate-180")} />
-            </button>
-            {notesOpen ? (
-              <p className="border-t border-hairline px-4 py-4 text-[13px] leading-relaxed text-muted">
-                {listing.note}
-              </p>
-            ) : null}
           </section>
 
           <PriceHistory listing={listing} />
@@ -473,7 +384,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
         </div>
       </div>
 
-      <BuyNowModal listing={listing} open={buyOpen} onClose={() => setBuyOpen(false)} />
       <OfferModal listing={listing} open={offerOpen} onClose={() => setOfferOpen(false)} />
     </div>
   );
@@ -597,7 +507,9 @@ function PriceHistory({ listing }: { listing: Listing }) {
 
 function Details({ listing }: { listing: Listing }) {
   const [open, setOpen] = useState(false);
+  // Older sets share their era's name (e.g. Base, Platinum), so drop the repeat.
   const chips = [
+    ...new Set([
     listing.grader,
     `${listing.grade} ${listing.gradeLabel}`,
     String(listing.year),
@@ -605,7 +517,7 @@ function Details({ listing }: { listing: Listing }) {
     listing.set,
     listing.subject,
     listing.variant,
-  ];
+  ])];
   const pop = population(listing);
 
   return (
