@@ -3,24 +3,25 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Package, ShieldCheck, Tag, Truck } from "lucide-react";
+import { MessagesSquare, Package, Plus, ShieldCheck, Tag, Truck, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
-import { shortDate, truncMiddle, usd } from "@/lib/format";
+import { shortDate, usd } from "@/lib/format";
+import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
 import { Slab } from "../slab/Slab";
-import { Badge, Button, Field, Modal, TimeAgo, inputClass } from "../ui/primitives";
+import { Badge, Button, Modal, TimeAgo } from "../ui/primitives";
+import { ListForSaleForm } from "./ListForSaleForm";
 
-type Tab = "collection" | "listings" | "offers" | "orders" | "watchlist";
+type Tab = "collection" | "listings" | "watchlist" | "wallet";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "collection", label: "Collection" },
   { value: "listings", label: "My listings" },
-  { value: "offers", label: "Offers made" },
-  { value: "orders", label: "Orders" },
   { value: "watchlist", label: "Watchlist" },
+  { value: "wallet", label: "Wallet" },
 ];
 
 export function VaultView() {
@@ -29,17 +30,17 @@ export function VaultView() {
     user,
     setAuthOpen,
     vault,
-    orders,
-    offersMade,
     watchlist,
-    listFromVault,
     delist,
     requestShipping,
     resolve,
+    negotiations,
+    balance,
   } = useStore();
-  const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) ?? "collection");
+  const [tab, setTab] = useState<Tab>(
+    () => TABS.find((t) => t.value === params.get("tab"))?.value ?? "collection",
+  );
   const [sellTarget, setSellTarget] = useState<Listing | null>(null);
-  const [price, setPrice] = useState("");
 
   const items = useMemo(
     () =>
@@ -61,9 +62,9 @@ export function VaultView() {
         <span className="grid h-14 w-14 place-items-center rounded-2xl bg-accent/15 text-accent">
           <ShieldCheck size={26} />
         </span>
-        <h1 className="text-xl font-bold">Your vault</h1>
+        <h1 className="text-xl font-bold">My Slabs</h1>
         <p className="max-w-sm text-sm text-muted">
-          Log in to see the slabs you own, the offers you have made and your order history.
+          Log in to see the slabs you own, your listings and your wallet.
         </p>
         <Button size="lg" onClick={() => setAuthOpen(true)}>
           Log in
@@ -74,16 +75,26 @@ export function VaultView() {
 
   return (
     <div className="px-4 py-5 lg:px-6">
-      <h1 className="text-[24px] font-bold">My vault</h1>
-      <p className="mt-1 text-[13px] text-muted">
-        Held in the {BRAND.vaultCity} vault, insured at full market value.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-[24px] font-bold">My Slabs</h1>
+          <p className="mt-1 text-[13px] text-muted">
+            Held in the {BRAND.vaultCity} vault, insured at full market value.
+          </p>
+        </div>
+        <Link href="/submit">
+          <Button>
+            <Plus size={15} />
+            Vault a graded slab
+          </Button>
+        </Link>
+      </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Slabs owned" value={String(items.length)} />
         <Stat label="Collection value" value={usd(totalValue)} />
         <Stat label="Listed for sale" value={String(listed.length)} />
-        <Stat label="Points" value={user.points.toLocaleString()} />
+        <Stat label="Wallet balance" value={usd(balance, { cents: true })} onClick={() => setTab("wallet")} />
       </div>
 
       <div className="no-scrollbar mt-6 flex gap-1 overflow-x-auto border-b border-hairline">
@@ -97,6 +108,9 @@ export function VaultView() {
             )}
           >
             {t.label}
+            {t.value === "listings" && listed.length ? (
+              <span className="ml-1.5 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px]">{listed.length}</span>
+            ) : null}
             {tab === t.value ? (
               <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-accent" />
             ) : null}
@@ -134,22 +148,16 @@ export function VaultView() {
                     </p>
                     <div className="mt-3 grid gap-2">
                       {entry.status === "Listed" ? (
-                        <Button size="sm" variant="secondary" onClick={() => delist(listing.id)}>
-                          Remove listing
+                        <Button size="sm" variant="secondary" onClick={() => setTab("listings")}>
+                          Manage listing
                         </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setSellTarget(listing);
-                            setPrice(String(Math.round(listing.fmv * 0.97 * 100) / 100));
-                          }}
-                        >
+                      ) : entry.status === "Vaulted" ? (
+                        <Button size="sm" onClick={() => setSellTarget(listing)}>
                           <Tag size={13} />
                           List for sale
                         </Button>
-                      )}
-                      {entry.status !== "Shipping requested" ? (
+                      ) : null}
+                      {entry.status === "Vaulted" ? (
                         <Button
                           size="sm"
                           variant="outline"
@@ -167,9 +175,9 @@ export function VaultView() {
           ) : (
             <Empty
               icon={<Package size={24} />}
-              title="Nothing vaulted yet"
-              body="Buy a slab on the marketplace or rip a pack — either way it lands here."
-              cta={{ href: "/packs", label: "Open a pack" }}
+              title="No slabs yet"
+              body="Vault a graded slab you own, or win one with an offer or in a negotiation room. Either way it lands here."
+              cta={{ href: "/submit", label: "Vault a graded slab" }}
             />
           )
         ) : null}
@@ -177,58 +185,46 @@ export function VaultView() {
         {tab === "listings" ? (
           listed.length ? (
             <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-              {listed.map(({ entry, listing }) => (
-                <li key={listing.id} className="flex items-center gap-4 p-4">
-                  <Link href={`/asset/${listing.id}`} className="w-12 shrink-0">
-                    <Slab listing={listing} flat />
-                  </Link>
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      href={`/asset/${listing.id}`}
-                      className="line-clamp-1 text-[13px] font-semibold hover:underline"
-                    >
-                      {listing.title}
-                    </Link>
-                    <p className="mt-1 text-[12px] text-muted">
-                      Listed at {usd(entry.listedPrice ?? listing.price)} · FMV {usd(listing.fmv)}
-                    </p>
-                  </div>
-                  <Button size="sm" variant="secondary" onClick={() => delist(listing.id)}>
-                    Remove
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Empty
-              icon={<Tag size={24} />}
-              title="No active listings"
-              body="List a slab from your collection and it appears on the marketplace instantly."
-            />
-          )
-        ) : null}
-
-        {tab === "offers" ? (
-          offersMade.length ? (
-            <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-              {offersMade.map((o) => {
-                const listing = getListing(o.listingId);
+              {listed.map(({ entry, listing }) => {
+                const chats = Object.values(negotiations).filter(
+                  (n) => n.listingId === listing.id && n.seller === user.username && n.status === "open",
+                );
+                const offers = chats.map(pendingOffer).filter((m) => m?.offer);
+                const best = Math.max(0, ...offers.map((m) => bidValue(m!.offer!)));
                 return (
-                  <li key={o.id} className="flex items-center gap-4 p-4">
-                    {listing ? (
-                      <Link href={`/asset/${listing.id}`} className="w-12 shrink-0">
-                        <Slab listing={listing} flat />
-                      </Link>
-                    ) : null}
+                  <li key={listing.id} className="flex flex-wrap items-center gap-4 p-4">
+                    <Link href={`/asset/${listing.id}`} className="w-12 shrink-0">
+                      <Slab listing={listing} flat />
+                    </Link>
                     <div className="min-w-0 flex-1">
-                      <p className="line-clamp-1 text-[13px] font-semibold">
-                        {listing?.title ?? o.listingId}
+                      <Link
+                        href={`/asset/${listing.id}`}
+                        className="line-clamp-1 text-[13px] font-semibold hover:underline"
+                      >
+                        {listing.title}
+                      </Link>
+                      <p className="mt-1 text-[12px] text-muted">
+                        Asking {usd(entry.listedPrice ?? listing.price)} · FMV {usd(listing.fmv)}
                       </p>
                       <p className="mt-1 text-[12px] text-muted">
-                        Offered {usd(o.amount)} · expires <TimeAgo value={o.expiresAt} />
+                        {offers.length
+                          ? `${offers.length} offer${offers.length === 1 ? "" : "s"} to review · best ${usd(best, { cents: true })}`
+                          : chats.length
+                            ? `${chats.length} open chat${chats.length === 1 ? "" : "s"}`
+                            : "No offers yet. Buyers' offers show up as private chats."}
                       </p>
                     </div>
-                    <Badge tone="warn">Pending</Badge>
+                    <div className="flex gap-2">
+                      <Link href={`/trades?listing=${listing.id}`}>
+                        <Button size="sm">
+                          <MessagesSquare size={13} />
+                          Negotiation rooms{chats.length ? ` (${chats.length})` : ""}
+                        </Button>
+                      </Link>
+                      <Button size="sm" variant="secondary" onClick={() => delist(listing.id)}>
+                        Remove
+                      </Button>
+                    </div>
                   </li>
                 );
               })}
@@ -236,51 +232,8 @@ export function VaultView() {
           ) : (
             <Empty
               icon={<Tag size={24} />}
-              title="No offers yet"
-              body="Offers you make on other collectors' slabs show up here until they are accepted or expire."
-            />
-          )
-        ) : null}
-
-        {tab === "orders" ? (
-          orders.length ? (
-            <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-              {orders.map((o) => (
-                <li key={o.id} className="p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[13px] font-bold">{o.id}</p>
-                      <p className="mt-0.5 text-[12px] text-muted">
-                        {shortDate(o.createdAt)} · {o.listingIds.length} item
-                        {o.listingIds.length === 1 ? "" : "s"} ·{" "}
-                        {o.method === "usdc" ? `USDC on ${BRAND.chain}` : "Card / balance"}
-                      </p>
-                    </div>
-                    <p className="text-sm font-bold">{usd(o.total)}</p>
-                  </div>
-                  <p className="mt-2 font-mono text-[11px] text-dim">
-                    tx {truncMiddle(o.txHash, 14, 8)}
-                  </p>
-                  <div className="mt-3 flex gap-2">
-                    {o.listingIds.map((id) => {
-                      const listing = getListing(id);
-                      if (!listing) return null;
-                      return (
-                        <Link key={id} href={`/asset/${id}`} className="w-11 shrink-0">
-                          <Slab listing={listing} flat />
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Empty
-              icon={<Package size={24} />}
-              title="No orders yet"
-              body="Your purchase receipts and on-chain transfer hashes live here."
-              cta={{ href: "/marketplace", label: "Browse the marketplace" }}
+              title="No active listings"
+              body="List a slab from your collection. Buyers' offers arrive as private negotiation rooms."
             />
           )
         ) : null}
@@ -322,6 +275,8 @@ export function VaultView() {
         ) : null}
       </div>
 
+      {tab === "wallet" ? <WalletPanel /> : null}
+
       {/* list-for-sale modal */}
       <Modal
         open={Boolean(sellTarget)}
@@ -330,7 +285,7 @@ export function VaultView() {
       >
         {sellTarget ? (
           <div className="p-5">
-            <div className="flex gap-4">
+            <div className="mb-5 flex gap-4">
               <div className="w-20 shrink-0">
                 <Slab listing={sellTarget} flat />
               </div>
@@ -341,55 +296,7 @@ export function VaultView() {
                 </p>
               </div>
             </div>
-
-            <div className="mt-5">
-              <Field label="Ask price" hint="Listings run for 7 days and renew automatically.">
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">
-                    $
-                  </span>
-                  <input
-                    className={`${inputClass} pl-7 text-base font-bold`}
-                    inputMode="decimal"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value.replace(/[^\d.]/g, ""))}
-                  />
-                </div>
-              </Field>
-            </div>
-
-            <div className="mt-3 flex gap-2">
-              {[0.9, 0.97, 1, 1.1].map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setPrice(String(Math.round(sellTarget.fmv * m * 100) / 100))}
-                  className="h-9 flex-1 rounded-lg bg-surface-2 text-[12px] font-semibold text-muted transition hover:bg-surface-3 hover:text-white"
-                >
-                  {m === 1 ? "FMV" : `${Math.round(m * 100)}%`}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-5 space-y-2.5 rounded-2xl bg-surface p-4 text-[13px]">
-              <div className="flex justify-between">
-                <span className="text-muted">You receive (after 2% fee)</span>
-                <span className="font-semibold">
-                  {usd(Math.max(0, Number(price) || 0) * 0.98)}
-                </span>
-              </div>
-            </div>
-
-            <Button
-              size="lg"
-              className="mt-5 w-full"
-              disabled={!Number(price)}
-              onClick={() => {
-                listFromVault(sellTarget.id, Number(price));
-                setSellTarget(null);
-              }}
-            >
-              List for {usd(Number(price) || 0)}
-            </Button>
+            <ListForSaleForm listing={sellTarget} onListed={() => setSellTarget(null)} />
           </div>
         ) : null}
       </Modal>
@@ -397,11 +304,87 @@ export function VaultView() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, onClick }: { label: string; value: string; onClick?: () => void }) {
+  const Box = onClick ? "button" : "div";
   return (
-    <div className="rounded-card border border-hairline bg-surface p-4">
+    <Box
+      onClick={onClick}
+      className={clsx(
+        "rounded-card border border-hairline bg-surface p-4 text-left",
+        onClick && "transition hover:border-white/20",
+      )}
+    >
       <p className="text-[11px] font-bold uppercase tracking-wide text-dim">{label}</p>
       <p className="mt-1.5 text-lg font-bold">{value}</p>
+    </Box>
+  );
+}
+
+/** Wallet balance with every credit and debit that makes it up. */
+function WalletPanel() {
+  const { ledger, balance, negotiations, user, topUp } = useStore();
+  const me = user?.username;
+  // Balance after each entry: everything from that entry back to the oldest.
+  const rows = ledger.map((e, i) => ({
+    ...e,
+    after: Math.round(ledger.slice(i).reduce((sum, x) => sum + x.amount, 0) * 100) / 100,
+  }));
+  const pendingCash = Object.values(negotiations)
+    .filter((n) => n.buyer === me && n.status === "open")
+    .map(pendingOffer)
+    .reduce((sum, m) => sum + (m?.offer?.cash ?? 0), 0);
+
+  return (
+    <div className="mt-5 space-y-4">
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center rounded-card border border-hairline bg-surface p-5">
+        <div>
+          <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-dim">
+            <Wallet size={14} /> Wallet balance
+          </p>
+          <p className="mt-1 text-[30px] font-bold leading-none">{usd(balance, { cents: true })}</p>
+          <p className="mt-2 text-[12px] text-muted">
+            The sum of every entry below. Demo money only.
+            {pendingCash > 0
+              ? ` ${usd(pendingCash, { cents: true })} is in offers waiting on sellers. It is not held, and only leaves your wallet if an offer is accepted.`
+              : ""}
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => topUp(1000)}>
+          <Plus size={15} />
+          Top up $1,000 (demo)
+        </Button>
+      </div>
+
+      {rows.length ? (
+        <div className="overflow-hidden rounded-card border border-hairline bg-surface">
+          <div className="grid grid-cols-[1fr_auto_auto] gap-4 border-b border-hairline px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-dim">
+            <span>Entry</span>
+            <span className="w-24 text-right">Amount</span>
+            <span className="hidden w-24 text-right sm:block">Balance</span>
+          </div>
+          <ul className="divide-y divide-[rgba(255,255,255,0.08)]">
+            {rows.map((e) => (
+              <li key={e.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-4 py-3 text-[13px]">
+                <span className="min-w-0">
+                  {e.listingId ? (
+                    <Link href={`/asset/${e.listingId}`} className="block truncate font-semibold hover:underline">
+                      {e.label}
+                    </Link>
+                  ) : (
+                    <span className="block truncate font-semibold">{e.label}</span>
+                  )}
+                  <span className="text-[11px] text-dim">{shortDate(e.at)}</span>
+                </span>
+                <span className={clsx("w-24 text-right font-bold", e.amount >= 0 ? "text-good" : "text-white")}>
+                  {e.amount >= 0 ? "+" : "−"}
+                  {usd(Math.abs(e.amount), { cents: true })}
+                </span>
+                <span className="hidden w-24 text-right text-muted sm:block">{usd(e.after, { cents: true })}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -31,18 +31,20 @@ export function MarketplaceView() {
   const inventory = useMarketInventory();
 
   const [query, setQuery] = useState(params.get("q") ?? "");
-  const [sort, setSort] = useState<SortValue>((params.get("sort") as SortValue) ?? "recent");
+  const [sort, setSort] = useState<SortValue>(() => {
+    const fromUrl = params.get("sort");
+    return SORTS.find((s) => s.value === fromUrl)?.value ?? "recent";
+  });
   const [pageSize, setPageSize] = useState<"24" | "48" | "96">("48");
   const [dense, setDense] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>(() => {
-    const category = params.get("category");
+    const era = params.get("era");
     const grader = params.get("grader");
     return {
       ...EMPTY_FILTERS,
-      categories: category ? [category] : [],
+      series: era ? [era] : [],
       graders: grader ? [grader] : [],
-      dealsOnly: params.get("deals") === "1",
     };
   });
   const [page, setPage] = useState<{ sig: string; count: number }>({
@@ -61,13 +63,12 @@ export function MarketplaceView() {
     const next = new URLSearchParams();
     if (query.trim()) next.set("q", query.trim());
     if (sort !== "recent") next.set("sort", sort);
-    if (filters.categories.length === 1) next.set("category", filters.categories[0]);
-    if (filters.dealsOnly) next.set("deals", "1");
+    if (filters.series.length === 1) next.set("era", filters.series[0]);
     const qs = next.toString();
     const target = qs ? `/marketplace?${qs}` : "/marketplace";
     if (window.location.pathname + window.location.search === target) return;
     router.replace(target, { scroll: false });
-  }, [query, sort, filters.categories, filters.dealsOnly, router]);
+  }, [query, sort, filters.series, router]);
 
   const filtered = useMemo(
     () => sortListings(applyFilters(inventory, filters, query), sort),
@@ -238,12 +239,10 @@ type Chip = { key: string; label: string; remove: (f: Filters) => Filters };
 function chipList(f: Filters): Chip[] {
   const chips: Chip[] = [];
   const listKeys: (keyof Filters)[] = [
-    "categories",
+    "series",
     "grades",
     "graders",
-    "languages",
     "variants",
-    "pulledFrom",
     "sets",
     "years",
   ];
@@ -272,13 +271,6 @@ function chipList(f: Filters): Chip[] {
       key: "fmv",
       label: `FMV ${f.fmvMin || "0"}–${f.fmvMax || "∞"}`,
       remove: (prev) => ({ ...prev, fmvMin: "", fmvMax: "" }),
-    });
-  }
-  if (f.dealsOnly) {
-    chips.push({
-      key: "deals",
-      label: "Deals only",
-      remove: (prev) => ({ ...prev, dealsOnly: false }),
     });
   }
   return chips;

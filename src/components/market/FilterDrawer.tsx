@@ -4,10 +4,10 @@ import clsx from "clsx";
 import { ChevronRight, Search } from "lucide-react";
 import { useState } from "react";
 import { FACETS } from "@/lib/catalog";
-import { type Filters, activeFilterCount } from "@/lib/filters";
+import { EMPTY_FILTERS, type Filters, activeFilterCount } from "@/lib/filters";
 import { Button, Drawer, inputClass } from "../ui/primitives";
 
-type ListKey = "categories" | "graders" | "grades" | "languages" | "variants" | "pulledFrom" | "sets" | "years";
+type ListKey = "series" | "graders" | "grades" | "variants" | "sets" | "years";
 
 const GROUPS: {
   key: ListKey;
@@ -15,12 +15,10 @@ const GROUPS: {
   facet: { value: string; count: number }[];
   searchable?: boolean;
 }[] = [
-  { key: "categories", label: "Category", facet: FACETS.category },
+  { key: "series", label: "Era", facet: FACETS.series },
   { key: "grades", label: "Grade", facet: FACETS.grade },
   { key: "graders", label: "Grader", facet: FACETS.grader },
-  { key: "languages", label: "Language", facet: FACETS.language },
-  { key: "variants", label: "Parallel / Variant", facet: FACETS.variant, searchable: true },
-  { key: "pulledFrom", label: "Pulled from", facet: FACETS.pulledFrom, searchable: true },
+  { key: "variants", label: "Rarity", facet: FACETS.variant, searchable: true },
   { key: "sets", label: "Set", facet: FACETS.set, searchable: true },
   { key: "years", label: "Year", facet: FACETS.year, searchable: true },
 ];
@@ -38,7 +36,7 @@ export function FilterDrawer({
   setFilters: (next: Filters) => void;
   resultCount: number;
 }) {
-  const [expanded, setExpanded] = useState<string | null>("Category");
+  const [expanded, setExpanded] = useState<string | null>("Era");
 
   const toggle = (key: ListKey, value: string) => {
     const current = filters[key];
@@ -61,33 +59,10 @@ export function FilterDrawer({
         </Button>
       }
     >
-      <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
-        <label className="flex cursor-pointer items-center gap-2.5 text-[13px] font-semibold">
-          <input
-            type="checkbox"
-            checked={filters.dealsOnly}
-            onChange={(e) => setFilters({ ...filters, dealsOnly: e.target.checked })}
-            className="h-4 w-4 accent-[#2f5bf9]"
-          />
-          Deals only (5%+ under FMV)
-        </label>
+      <div className="flex items-center justify-end border-b border-hairline px-5 py-3">
         <button
           onClick={() =>
-            setFilters({
-              categories: [],
-              graders: [],
-              grades: [],
-              languages: [],
-              variants: [],
-              pulledFrom: [],
-              sets: [],
-              years: [],
-              priceMin: "",
-              priceMax: "",
-              fmvMin: "",
-              fmvMax: "",
-              dealsOnly: false,
-            })
+            setFilters(EMPTY_FILTERS)
           }
           className="text-[11px] font-bold uppercase tracking-wider text-muted transition hover:text-white"
         >
@@ -96,7 +71,7 @@ export function FilterDrawer({
       </div>
 
       <Range
-        label="Buy now price"
+        label="Asking price"
         min={filters.priceMin}
         max={filters.priceMax}
         onChange={(min, max) => setFilters({ ...filters, priceMin: min, priceMax: max })}

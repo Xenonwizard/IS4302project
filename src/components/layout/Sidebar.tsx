@@ -4,26 +4,19 @@ import clsx from "clsx";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
   House,
-  PackageOpen,
+  MessagesSquare,
   ShieldCheck,
   Store,
-  Trophy,
-  Zap,
 } from "lucide-react";
-import { useState } from "react";
-import { EVENTS } from "@/lib/catalog";
-import { Button } from "../ui/primitives";
 
 const NAV = [
-  { href: "/", label: "Home", icon: House },
-  { href: "/packs", label: "Packs", icon: PackageOpen },
-  { href: "/marketplace", label: "Marketplace", icon: Store },
-  { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
-  { href: "/vault", label: "My vault", icon: ShieldCheck },
+  { href: "/", label: "Home", short: "Home", icon: House },
+  { href: "/marketplace", label: "Marketplace", short: "Market", icon: Store },
+  { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
+  { href: "/vault", label: "My Slabs", short: "My Slabs", icon: ShieldCheck },
 ];
 
 export function Sidebar({
@@ -34,7 +27,6 @@ export function Sidebar({
   onToggle: () => void;
 }) {
   const pathname = usePathname();
-  const [eventsOpen, setEventsOpen] = useState(true);
 
   return (
     <aside
@@ -73,63 +65,7 @@ export function Sidebar({
             );
           })}
         </ul>
-
-        {!collapsed ? (
-          <div className="mt-6">
-            <button
-              onClick={() => setEventsOpen((v) => !v)}
-              className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-bold uppercase tracking-[0.12em] text-dim transition hover:text-muted"
-            >
-              Events
-              <ChevronDown
-                size={15}
-                className={clsx("transition", eventsOpen && "rotate-180")}
-              />
-            </button>
-            {eventsOpen ? (
-              <ul className="mt-1 space-y-0.5">
-                {EVENTS.map((e) => {
-                  const active = pathname === `/events/${e.slug}`;
-                  return (
-                    <li key={e.slug}>
-                      <Link
-                        href={`/events/${e.slug}`}
-                        className={clsx(
-                          "flex h-10 items-center gap-3 rounded-xl px-3 text-[13px] font-medium transition",
-                          active
-                            ? "bg-white/8 text-white"
-                            : "text-muted hover:bg-white/5 hover:text-white",
-                        )}
-                      >
-                        <Zap
-                          size={16}
-                          style={{ color: `hsl(${e.hueA} 80% 62%)` }}
-                          strokeWidth={2}
-                        />
-                        <span className="truncate">{e.name}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
       </nav>
-
-      <div className="p-3">
-        <Link href="/submit">
-          {collapsed ? (
-            <Button variant="primary" size="sm" className="w-full px-0" title="Submit my collectibles">
-              +
-            </Button>
-          ) : (
-            <Button variant="primary" className="w-full">
-              Submit my collectibles
-            </Button>
-          )}
-        </Link>
-      </div>
     </aside>
   );
 }
@@ -138,7 +74,7 @@ export function MobileNav() {
   const pathname = usePathname();
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-hairline bg-black/95 backdrop-blur lg:hidden">
-      {NAV.map(({ href, label, icon: Icon }) => {
+      {NAV.map(({ href, short, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         return (
           <Link
@@ -150,7 +86,7 @@ export function MobileNav() {
             )}
           >
             <Icon size={19} strokeWidth={active ? 2.4 : 1.9} />
-            {label}
+            {short}
           </Link>
         );
       })}

@@ -65,32 +65,6 @@ body {
   border: 1px solid var(--color-hairline);
 }
 
-/* holo foil sweep used by the slab renderer */
-@keyframes holo-sweep {
-  0% {
-    transform: translateX(-120%) rotate(8deg);
-  }
-  100% {
-    transform: translateX(220%) rotate(8deg);
-  }
-}
-.holo-sweep::after {
-  content: "";
-  position: absolute;
-  inset: -30%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.05) 35%,
-    rgba(255, 255, 255, 0.35) 50%,
-    rgba(255, 255, 255, 0.05) 65%,
-    transparent 100%
-  );
-  mix-blend-mode: screen;
-  animation: holo-sweep 5.5s ease-in-out infinite;
-  pointer-events: none;
-}
-
 @keyframes fade-up {
   from {
     opacity: 0;
@@ -168,13 +142,168 @@ body {
   transform-style: preserve-3d;
 }
 
-@keyframes rip-shake {
-  0%, 100% { transform: translate(0,0) rotate(0deg); }
-  20% { transform: translate(-6px,2px) rotate(-2deg); }
-  40% { transform: translate(6px,-2px) rotate(2deg); }
-  60% { transform: translate(-4px,-3px) rotate(-1.5deg); }
-  80% { transform: translate(4px,3px) rotate(1.5deg); }
+/* ---------------- 3D slab ---------------- */
+.slab-root {
+  --rx: 0;
+  --ry: 0;
+  --px: 32%;
+  --py: 22%;
+  --hyp: 0;
 }
-.rip-shake {
-  animation: rip-shake 0.45s linear infinite;
+.slab-body {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.slab-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 4.5cqw;
+  backface-visibility: hidden;
+}
+/* translucent rims stacked behind the face give the acrylic its thickness */
+.slab-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 4.5cqw;
+  border: 0.9cqw solid rgba(200, 212, 230, 0.2);
+  background: rgba(150, 162, 180, 0.05);
+}
+.slab-case {
+  position: relative;
+  border-radius: 4.5cqw;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.13),
+      rgba(255, 255, 255, 0.03) 28%,
+      rgba(255, 255, 255, 0.04) 72%,
+      rgba(255, 255, 255, 0.11)
+    ),
+    rgba(190, 204, 224, 0.1);
+  box-shadow:
+    inset 0 0 0 0.45cqw rgba(255, 255, 255, 0.42),
+    inset 0 0 0 1.7cqw rgba(255, 255, 255, 0.06),
+    inset 0 0 0 1.9cqw rgba(255, 255, 255, 0.2),
+    inset 0 1.4cqw 2.6cqw rgba(255, 255, 255, 0.1),
+    inset 0 -1.4cqw 2.6cqw rgba(0, 0, 0, 0.35);
+}
+.slab-case-sgc {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 30%, transparent 70%, rgba(255, 255, 255, 0.08)),
+    #0c0c0e;
+}
+.slab-label {
+  box-shadow:
+    0 0.4cqw 1cqw rgba(0, 0, 0, 0.35),
+    inset 0 0 0 0.2cqw rgba(255, 255, 255, 0.25);
+}
+/* the recessed well the card sits in */
+.slab-well {
+  border-radius: 3.8cqw;
+  padding: 1.2cqw;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow:
+    inset 0 0 0 0.35cqw rgba(255, 255, 255, 0.24),
+    inset 0 0.7cqw 1.6cqw rgba(0, 0, 0, 0.55),
+    0 0 0 0.3cqw rgba(0, 0, 0, 0.3);
+}
+/* specular highlight that follows the pointer */
+.slab-glare {
+  position: absolute;
+  inset: 0;
+  border-radius: 4.5cqw;
+  pointer-events: none;
+  background: radial-gradient(
+    farthest-corner circle at var(--px) var(--py),
+    rgba(255, 255, 255, 0.6) 0%,
+    rgba(255, 255, 255, 0.14) 24%,
+    transparent 58%
+  );
+  mix-blend-mode: overlay;
+  opacity: calc(0.35 + var(--hyp) * 0.65);
+}
+/* a long soft reflection across the acrylic */
+.slab-streak {
+  position: absolute;
+  inset: 0;
+  border-radius: 4.5cqw;
+  pointer-events: none;
+  background: linear-gradient(
+    112deg,
+    transparent calc(var(--px) - 32%),
+    rgba(255, 255, 255, 0.16) calc(var(--px) - 6%),
+    rgba(255, 255, 255, 0.04) calc(var(--px) + 2%),
+    transparent calc(var(--px) + 22%)
+  );
+  mix-blend-mode: screen;
+}
+/* rainbow foil on holo cards, strongest at steep angles */
+.slab-foil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      115deg,
+      #ff7773 0%,
+      #ffed5f 4%,
+      #a8ff5f 8%,
+      #83fff7 12%,
+      #7894ff 16%,
+      #d875ff 20%,
+      #ff7773 24%
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(14, 21, 46, 0.6) 0%,
+      rgba(143, 163, 163, 0.6) 3%,
+      rgba(14, 21, 46, 0.6) 6%
+    );
+  background-size: 360% 360%, 240% 240%;
+  background-position:
+    var(--px) var(--py),
+    calc(100% - var(--px)) calc(100% - var(--py));
+  background-blend-mode: hue;
+  mix-blend-mode: color-dodge;
+  filter: brightness(0.62) contrast(1.5) saturate(1.25);
+  opacity: calc(0.12 + var(--hyp) * 0.5);
+}
+.slab-card-glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    farthest-corner circle at var(--px) var(--py),
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0.08) 30%,
+    rgba(0, 0, 0, 0.25) 90%
+  );
+  mix-blend-mode: soft-light;
+  opacity: calc(0.4 + var(--hyp) * 0.6);
+}
+/* contact shadow that slides opposite the tilt */
+.slab-shadow {
+  position: absolute;
+  left: 9%;
+  right: 9%;
+  bottom: -4%;
+  height: 9%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.75), transparent);
+  filter: blur(6px);
+  transform: translateX(calc(var(--ry) * -1.2px)) scaleX(calc(1 + var(--hyp) * 0.06));
+  pointer-events: none;
+}
+.slab-hologram {
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.85), transparent 40%),
+    conic-gradient(from 90deg, #ff7773, #ffed5f, #a8ff5f, #83fff7, #7894ff, #d875ff, #ff7773);
+  box-shadow: inset 0 0 0 0.5cqw rgba(255, 255, 255, 0.6);
+  filter: saturate(0.8);
+}
+/* generic trading-card back drawn in CSS */
+@media (prefers-reduced-motion: reduce) {
+  .spin-slab {
+    animation: none;
+  }
 }

@@ -1,18 +1,6 @@
 export type Grader = "PSA" | "CGC" | "BGS" | "SGC";
 
-export type Category =
-  | "Pokémon"
-  | "Baseball"
-  | "Basketball"
-  | "Football"
-  | "Soccer"
-  | "Hockey"
-  | "One Piece"
-  | "Magic: The Gathering";
-
 export type Confidence = "High" | "Medium" | "Low";
-
-export type ArtStyle = "pokemon" | "sports" | "anime" | "mtg";
 
 export interface Sale {
   date: string; // ISO
@@ -56,17 +44,18 @@ export interface Listing {
   id: string;
   title: string;
   shortName: string;
-  category: Category;
   year: number;
   set: string;
+  /** era of the set, e.g. "Base", "Sword & Shield" */
+  series: string;
   cardNumber: string;
   subject: string;
   grader: Grader;
   grade: number;
   gradeLabel: string;
-  language: "English" | "Japanese" | "Korean" | "Chinese";
+  language: "English";
+  /** printed rarity, e.g. "Rare Holo" */
   variant: string;
-  pulledFrom: string;
   price: number;
   fmv: number;
   confidence: Confidence;
@@ -84,63 +73,74 @@ export interface Listing {
   ownerAddress: string;
   chain: "Polygon";
   note: string;
-  art: {
-    style: ArtStyle;
-    hueA: number;
-    hueB: number;
-    holo: boolean;
-    seed: number;
-  };
-}
-
-export interface Pack {
-  slug: string;
-  name: string;
-  price: number;
-  group: string;
-  tagline: string;
-  hueA: number;
-  hueB: number;
-  odds: { label: string; chance: number }[];
-  categories: Category[];
-}
-
-export interface LeaderboardEntry {
-  rank: number;
-  user: string;
-  points: number;
-  avatarHueA: number;
-  avatarHueB: number;
-}
-
-export interface CartLine {
-  listingId: string;
-  addedAt: number;
-}
-
-export interface Order {
-  id: string;
-  createdAt: string;
-  listingIds: string[];
-  subtotal: number;
-  fee: number;
-  total: number;
-  method: "card" | "usdc";
-  txHash: string;
+  /** hi-res card scan and a small one for thumbnails */
+  image: string;
+  thumb: string;
+  holo: boolean;
+  /** accent hue taken from the Pokémon's energy type */
+  hue: number;
 }
 
 export interface VaultItem {
   listingId: string;
   acquiredAt: string;
-  via: "Purchase" | "Pack" | "Trade";
+  via: "Purchase" | "Trade" | "Submission";
   status: "Vaulted" | "Shipping requested" | "Listed";
   listedPrice?: number;
 }
 
-export interface Pull {
+/* ---------------- negotiations ---------------- */
+
+/** What a buyer puts up: full cash, or slabs from their vault plus a cash top-up. */
+export interface TradeBid {
+  cash: number;
+  slabIds: string[];
+}
+
+export type OfferStatus = "pending" | "accepted" | "declined" | "withdrawn" | "replaced";
+
+export interface ChatMessage {
+  id: string;
+  from: string;
+  at: string;
+  kind: "text" | "offer" | "system";
+  text?: string;
+  offer?: TradeBid;
+  /** offers only */
+  status?: OfferStatus;
+  /** system messages: who caused it, so the other side can react */
+  by?: string;
+}
+
+/** A one-to-one chat between a buyer and the seller about one listing, like Carousell. */
+export interface Negotiation {
   id: string;
   listingId: string;
-  user: string;
-  pack: string;
-  at: number;
+  seller: string;
+  buyer: string;
+  status: "open" | "sold" | "closed";
+  createdAt: string;
+  messages: ChatMessage[];
+}
+
+/** One line in the wallet history. The balance is the sum of these. */
+export interface LedgerEntry {
+  id: string;
+  at: string;
+  /** signed: positive adds to the wallet */
+  amount: number;
+  label: string;
+  listingId?: string;
+}
+
+export type LostItem = "slab-sent" | "slab-received" | "payment";
+
+export interface LostReport {
+  id: string;
+  negotiationId: string;
+  item: LostItem;
+  tracking: string;
+  details: string;
+  filedAt: string;
+  status: "Under investigation" | "Resolved";
 }

@@ -46,7 +46,7 @@ export default async function ProfilePage({
           label="Best slab"
           value={owned.length ? usd(Math.max(...owned.map((l) => l.fmv))) : "—"}
         />
-        <Stat label="Events joined" value={String((username.length % 5) + 1)} />
+        <Stat label="Trades settled" value={String((username.length % 7) + 2)} />
       </div>
 
       <section className="mt-8">

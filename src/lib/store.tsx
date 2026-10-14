@@ -10,18 +10,45 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { LISTINGS, getListing } from "./catalog";
+import { BRAND } from "./brand";
+import { LISTINGS, getListing, makeStarterListings, makeSubmittedListing, registerListing } from "./catalog";
+import { usd } from "./format";
+import {
+  botReply,
+  bidValue,
+  messageId,
+  offerMix,
+  pendingOffer,
+  negotiationId,
+  newBuyerChat,
+  systemMessage,
+  type BotAction,
+} from "./negotiation";
 import { hashString } from "./rng";
-import type { Listing, Offer, Order, VaultItem } from "./types";
+import type {
+  ChatMessage,
+  Grader,
+  LedgerEntry,
+  Listing,
+  LostItem,
+  LostReport,
+  Negotiation,
+  TradeBid,
+  VaultItem,
+} from "./types";
 
-const STORAGE_KEY = "cy.state.v3";
+const STORAGE_KEY = "pokechain.state.v3";
+
+/** Demo credit every new wallet starts with. */
+const WELCOME_CREDIT = 2500;
+
+/** The demo account, which starts with a few slabs already vaulted. */
+const DEMO_USER = "demotester";
 
 export interface SessionUser {
   username: string;
   email: string;
   hue: number;
-  points: number;
-  balance: number;
   joinedAt: string;
 }
 
@@ -38,64 +65,74 @@ export interface ListingOverride {
   owner?: string;
   soldTo?: string;
   delisted?: boolean;
-  extraOffers?: Offer[];
 }
 
 interface PersistShape {
   user: SessionUser | null;
-  cart: string[];
   watchlist: string[];
   vault: VaultItem[];
-  orders: Order[];
+  /** slabs the user submitted, which are not part of the catalog */
+  slabs: Listing[];
   overrides: Record<string, ListingOverride>;
-  offersMade: Offer[];
   comments: Record<string, { id: string; user: string; text: string; at: string }[]>;
+  negotiations: Record<string, Negotiation>;
+  /** wallet history, newest first; the balance is its sum */
+  ledger: LedgerEntry[];
+  lostReports: LostReport[];
 }
 
 const EMPTY: PersistShape = {
   user: null,
-  cart: [],
   watchlist: [],
   vault: [],
-  orders: [],
+  slabs: [],
   overrides: {},
-  offersMade: [],
   comments: {},
+  negotiations: {},
+  ledger: [],
+  lostReports: [],
 };
+
+export interface SlabSubmission {
+  grader: Grader;
+  certNumber: string;
+}
 
 interface StoreValue extends PersistShape {
   ready: boolean;
+  /** wallet balance, derived from the ledger */
+  balance: number;
   /* auth */
   login: (username: string, email?: string) => void;
   logout: () => void;
   requireAuth: (then?: () => void) => boolean;
   authOpen: boolean;
   setAuthOpen: (open: boolean) => void;
-  /* cart */
-  addToCart: (id: string) => void;
-  removeFromCart: (id: string) => void;
-  clearCart: () => void;
-  cartOpen: boolean;
-  setCartOpen: (open: boolean) => void;
   /* watchlist */
   toggleWatch: (id: string) => void;
   isWatched: (id: string) => boolean;
-  /* commerce */
-  checkout: (method: "card" | "usdc") => Order | null;
-  buyNow: (id: string, method: "card" | "usdc") => Order | null;
-  makeOffer: (id: string, amount: number, expiresInHours: number) => void;
+  /* slabs */
+  submitSlab: (input: SlabSubmission) => Listing | null;
   listFromVault: (id: string, price: number) => void;
   delist: (id: string) => void;
   requestShipping: (id: string) => void;
-  addPull: (listing: Listing, pack: string, cost: number) => void;
+  /* negotiations */
+  /** sends an offer in the buyer's chat with the seller; returns the chat id */
+  makeOffer: (listingId: string, bid: TradeBid) => string | null;
+  sendMessage: (negotiationId: string, text: string) => void;
+  /** seller side: accept or decline the buyer's pending offer */
+  respondToOffer: (negotiationId: string, offerId: string, accept: boolean) => void;
+  /** buyer side: take back a pending offer */
+  withdrawOffer: (negotiationId: string, offerId: string) => void;
+  fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
   addComment: (listingId: string, text: string) => void;
   topUp: (amount: number) => void;
   resetDemo: () => void;
   /* derived */
   resolve: (listing: Listing) => Listing;
   isOwned: (id: string) => boolean;
-  cartListings: Listing[];
-  cartTotal: number;
+  /** listed on the marketplace, so buyers can make offers */
+  isListed: (id: string) => boolean;
   /* toasts */
   toasts: Toast[];
   pushToast: (t: Omit<Toast, "id">) => void;
@@ -103,6 +140,206 @@ interface StoreValue extends PersistShape {
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+
+const cents = (n: number) => Math.round(n * 100) / 100;
+
+/** Seller fee on the cash part of a sale. Slabs in a trade are not charged. */
+export function sellerFee(cash: number): number {
+  return cents(cash * BRAND.sellerFee);
+}
+
+export function ledgerBalance(ledger: LedgerEntry[]): number {
+  return cents(ledger.reduce((sum, e) => sum + e.amount, 0));
+}
+
+let ledgerSeq = 0;
+function ledgerEntry(amount: number, label: string, listingId?: string): LedgerEntry {
+  ledgerSeq += 1;
+  return {
+    id: `L${Date.now().toString(36)}${ledgerSeq}`,
+    at: new Date().toISOString(),
+    amount: cents(amount),
+    label,
+    listingId,
+  };
+}
+
+/** The listing as it stands in this state: price and owner after any changes. */
+function current(prev: PersistShape, id: string): Listing | undefined {
+  const base = getListing(id);
+  if (!base) return undefined;
+  const o = prev.overrides[id];
+  return o ? { ...base, price: o.price ?? base.price, owner: o.owner ?? base.owner } : base;
+}
+
+/**
+ * Settles an accepted offer: the slab goes to the buyer, the cash and any offered
+ * slabs to the seller, and every other chat about the slab closes. Works whichever
+ * side the signed-in user is on. Returns an error instead when the deal cannot go through.
+ */
+function settleDeal(
+  prev: PersistShape,
+  negId: string,
+  offerId: string,
+): { next: PersistShape; error?: string } {
+  const me = prev.user?.username;
+  const n = prev.negotiations[negId];
+  const offerMsg = n?.messages.find((m) => m.id === offerId);
+  const listing = n ? current(prev, n.listingId) : undefined;
+  if (!me || !n || !listing || n.status !== "open" || !offerMsg?.offer || offerMsg.status !== "pending") {
+    return { next: prev, error: "This offer is no longer open." };
+  }
+  const { cash, slabIds } = offerMsg.offer;
+  const now = new Date().toISOString();
+  let vault = prev.vault;
+  let ledger = prev.ledger;
+
+  if (n.buyer === me) {
+    if (cash > ledgerBalance(prev.ledger)) {
+      return { next: prev, error: `Your wallet cannot cover the ${usd(cash, { cents: true })} cash.` };
+    }
+    const vaulted = (id: string) => prev.vault.some((v) => v.listingId === id && v.status === "Vaulted");
+    if (!slabIds.every(vaulted)) {
+      return { next: prev, error: "A slab in this offer is no longer in your vault." };
+    }
+    vault = vault.filter((v) => !slabIds.includes(v.listingId));
+    vault = [
+      { listingId: listing.id, acquiredAt: now, via: slabIds.length ? "Trade" : "Purchase", status: "Vaulted" },
+      ...vault,
+    ];
+    if (cash > 0) {
+      ledger = [
+        ledgerEntry(-cash, `Bought ${listing.shortName}${slabIds.length ? " (cash part of trade)" : ""}`, listing.id),
+        ...ledger,
+      ];
+    }
+  } else if (n.seller === me) {
+    if (!prev.vault.some((v) => v.listingId === listing.id)) {
+      return { next: prev, error: "You no longer own this slab." };
+    }
+    vault = vault.filter((v) => v.listingId !== listing.id);
+    vault = [
+      ...slabIds.map<VaultItem>((id) => ({ listingId: id, acquiredAt: now, via: "Trade", status: "Vaulted" })),
+      ...vault,
+    ];
+    if (cash > 0) {
+      ledger = [
+        ledgerEntry(-sellerFee(cash), `Seller fee (${BRAND.sellerFee * 100}%) on ${listing.shortName}`, listing.id),
+        ledgerEntry(cash, `Sold ${listing.shortName}${slabIds.length ? " (cash part of trade)" : ""}`, listing.id),
+        ...ledger,
+      ];
+    }
+  }
+
+  const overrides = { ...prev.overrides };
+  overrides[listing.id] = { ...overrides[listing.id], owner: n.buyer, soldTo: n.buyer, delisted: true };
+  for (const id of slabIds) overrides[id] = { ...overrides[id], owner: n.seller, delisted: true };
+
+  const negotiations = { ...prev.negotiations };
+  for (const other of Object.values(prev.negotiations)) {
+    if (other.listingId !== listing.id || other.status !== "open") continue;
+    if (other.id === n.id) {
+      negotiations[other.id] = {
+        ...other,
+        status: "sold",
+        messages: [
+          ...other.messages.map((m) => (m.id === offerId ? { ...m, status: "accepted" as const } : m)),
+          systemMessage(
+            `${n.seller} accepted ${n.buyer}'s offer. The token transferred on-chain and the vault updated custody.`,
+          ),
+        ],
+      };
+    } else {
+      negotiations[other.id] = {
+        ...other,
+        status: "closed",
+        messages: [
+          ...other.messages.map((m) =>
+            m.kind === "offer" && m.status === "pending" ? { ...m, status: "declined" as const } : m,
+          ),
+          systemMessage("This slab was sold to another buyer."),
+        ],
+      };
+    }
+  }
+
+  return { next: { ...prev, overrides, vault, ledger, negotiations } };
+}
+
+/** Sets an offer's status and adds a note saying who did it. */
+function markOffer(
+  prev: PersistShape,
+  negId: string,
+  offerId: string,
+  status: "declined" | "withdrawn",
+  note: string,
+  by?: string,
+): PersistShape {
+  const n = prev.negotiations[negId];
+  if (!n) return prev;
+  return {
+    ...prev,
+    negotiations: {
+      ...prev.negotiations,
+      [negId]: {
+        ...n,
+        messages: [
+          ...n.messages.map((m) => (m.id === offerId ? { ...m, status } : m)),
+          systemMessage(note, by),
+        ],
+      },
+    },
+  };
+}
+
+function append(prev: PersistShape, negId: string, ...messages: ChatMessage[]): PersistShape {
+  const n = prev.negotiations[negId];
+  if (!n) return prev;
+  return {
+    ...prev,
+    negotiations: { ...prev.negotiations, [negId]: { ...n, messages: [...n.messages, ...messages] } },
+  };
+}
+
+/** Asks the server for an in-character reply from the simulated party; null on any failure. */
+async function writeReply(chat: Negotiation, me: string, listing: Listing): Promise<string | null> {
+  const bot = chat.buyer === me ? chat.seller : chat.buyer;
+  const pending = pendingOffer(chat);
+  try {
+    const res = await fetch("/api/reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        role: chat.buyer === me ? "seller" : "buyer",
+        name: bot,
+        slab: {
+          title: listing.title,
+          grader: listing.grader,
+          grade: listing.grade,
+          gradeLabel: listing.gradeLabel,
+          certNumber: listing.certNumber,
+          asking: listing.price,
+          marketValue: listing.fmv,
+        },
+        pendingOffer: pending?.offer
+          ? `${pending.from === me ? "the user" : bot} offered ${usd(bidValue(pending.offer), { cents: true })} (${offerMix(pending.offer)})`
+          : undefined,
+        messages: chat.messages.map((m) => ({
+          from: m.kind === "system" ? "system" : m.from === me ? "me" : "them",
+          text:
+            m.kind === "offer" && m.offer
+              ? `[offer ${usd(bidValue(m.offer), { cents: true })}, ${offerMix(m.offer)}, ${m.status}]`
+              : (m.text ?? ""),
+        })),
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { text?: string };
+    return data.text?.trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 function loadState(): PersistShape {
   if (typeof window === "undefined") return EMPTY;
@@ -120,16 +357,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [authOpen, setAuthOpen] = useState(false);
-  const [cartOpen, setCartOpen] = useState(false);
   const router = useRouter();
   const toastSeq = useRef(0);
   const pendingAction = useRef<(() => void) | null>(null);
+  /** latest state for timers, which outlive the render that scheduled them */
+  const latest = useRef(state);
+  useEffect(() => {
+    latest.current = state;
+  });
 
   useEffect(() => {
     // Hydration: localStorage does not exist during SSR, so the first client render starts
     // from EMPTY and adopts the stored state once mounted.
+    const loaded = loadState();
+    loaded.slabs.forEach(registerListing);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setState(loadState());
+    setState(loaded);
     setReady(true);
   }, []);
 
@@ -154,19 +397,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
+  const balance = useMemo(() => ledgerBalance(state.ledger), [state.ledger]);
+
   const login = useCallback(
     (username: string, email?: string) => {
-      setState((prev) => ({
-        ...prev,
-        user: {
-          username,
-          email: email ?? `${username}@example.com`,
-          hue: hashString(username) % 360,
-          points: 12_480,
-          balance: 2500,
-          joinedAt: new Date().toISOString(),
-        },
-      }));
+      setState((prev) => {
+        const fresh = !prev.ledger.length;
+        const starters = fresh && username === DEMO_USER ? makeStarterListings(username, Date.now()) : [];
+        starters.forEach(registerListing);
+        return {
+          ...prev,
+          user: {
+            username,
+            email: email ?? `${username}@example.com`,
+            hue: hashString(username) % 360,
+            joinedAt: new Date().toISOString(),
+          },
+          ledger: fresh ? [ledgerEntry(WELCOME_CREDIT, "Welcome credit (demo money)")] : prev.ledger,
+          slabs: [...starters, ...prev.slabs],
+          vault: [
+            ...starters.map<VaultItem>((l) => ({
+              listingId: l.id,
+              acquiredAt: l.listedAt,
+              via: "Submission",
+              status: "Vaulted",
+            })),
+            ...prev.vault,
+          ],
+          overrides: {
+            ...prev.overrides,
+            ...Object.fromEntries(starters.map((l) => [l.id, { delisted: true }])),
+          },
+        };
+      });
       setAuthOpen(false);
       pushToast({ title: `Welcome, ${username}`, tone: "success" });
       const next = pendingAction.current;
@@ -177,7 +440,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
-    setState((prev) => ({ ...prev, user: null, cart: [] }));
+    setState((prev) => ({ ...prev, user: null }));
     pushToast({ title: "Signed out" });
   }, [pushToast]);
 
@@ -195,12 +458,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (listing: Listing): Listing => {
       const o = state.overrides[listing.id];
       if (!o) return listing;
-      return {
-        ...listing,
-        price: o.price ?? listing.price,
-        owner: o.owner ?? listing.owner,
-        offers: o.extraOffers ? [...o.extraOffers, ...listing.offers].sort((a, b) => b.amount - a.amount) : listing.offers,
-      };
+      return { ...listing, price: o.price ?? listing.price, owner: o.owner ?? listing.owner };
     },
     [state.overrides],
   );
@@ -210,24 +468,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [state.vault],
   );
 
-  const addToCart = useCallback(
-    (id: string) => {
-      setState((prev) =>
-        prev.cart.includes(id) ? prev : { ...prev, cart: [...prev.cart, id] },
-      );
-      pushToast({ title: "Added to cart", tone: "success" });
-      setCartOpen(true);
-    },
-    [pushToast],
+  const isListed = useCallback(
+    (id: string) => !state.overrides[id]?.delisted,
+    [state.overrides],
   );
-
-  const removeFromCart = useCallback((id: string) => {
-    setState((prev) => ({ ...prev, cart: prev.cart.filter((c) => c !== id) }));
-  }, []);
-
-  const clearCart = useCallback(() => {
-    setState((prev) => ({ ...prev, cart: [] }));
-  }, []);
 
   const toggleWatch = useCallback((id: string) => {
     setState((prev) => ({
@@ -243,129 +487,84 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [state.watchlist],
   );
 
-  const settle = useCallback(
-    (ids: string[], method: "card" | "usdc"): Order | null => {
-      const listings = ids
-        .map((id) => getListing(id))
-        .filter((l): l is Listing => Boolean(l))
-        .map(resolve);
-      if (!listings.length) return null;
-      const subtotal = listings.reduce((sum, l) => sum + l.price, 0);
-      const fee = Math.round(subtotal * 0.02 * 100) / 100;
-      const total = Math.round((subtotal + fee) * 100) / 100;
-      const order: Order = {
-        id: `CY-${Date.now().toString(36).toUpperCase()}`,
-        createdAt: new Date().toISOString(),
-        listingIds: listings.map((l) => l.id),
-        subtotal,
-        fee,
-        total,
-        method,
-        txHash: `0x${hashString(ids.join() + Date.now()).toString(16).padStart(8, "0").repeat(8).slice(0, 64)}`,
-      };
-      setState((prev) => {
-        const username = prev.user?.username ?? "you";
-        const overrides = { ...prev.overrides };
-        for (const l of listings) {
-          overrides[l.id] = {
-            ...overrides[l.id],
-            owner: username,
-            soldTo: username,
-            delisted: true,
-          };
-        }
-        return {
-          ...prev,
-          overrides,
-          cart: prev.cart.filter((c) => !ids.includes(c)),
-          orders: [order, ...prev.orders],
-          vault: [
-            ...listings.map<VaultItem>((l) => ({
-              listingId: l.id,
-              acquiredAt: order.createdAt,
-              via: "Purchase",
-              status: "Vaulted",
-            })),
-            ...prev.vault,
-          ],
-          user: prev.user
-            ? {
-                ...prev.user,
-                balance: Math.max(0, prev.user.balance - total),
-                points: prev.user.points + Math.round(total * 10),
-              }
-            : prev.user,
-        };
+  /* ---------------- slabs ---------------- */
+
+  const submitSlab = useCallback(
+    (input: SlabSubmission): Listing | null => {
+      const user = state.user;
+      if (!user) return null;
+      const cert = input.certNumber.trim();
+      const duplicate = state.vault.some((v) => {
+        const l = getListing(v.listingId);
+        return l?.grader === input.grader && l.certNumber === cert;
       });
-      return order;
+      if (duplicate) {
+        pushToast({ title: "Already in your slabs", body: `${input.grader} cert ${cert} is already vaulted.`, tone: "error" });
+        return null;
+      }
+      const listing = makeSubmittedListing({ ...input, owner: user.username, nowMs: Date.now() });
+      if (!listing) {
+        pushToast({ title: "Cert not found", body: `${input.grader} has no record of cert ${cert}.`, tone: "error" });
+        return null;
+      }
+      registerListing(listing);
+      setState((prev) => ({
+        ...prev,
+        slabs: [listing, ...prev.slabs],
+        vault: [
+          { listingId: listing.id, acquiredAt: listing.listedAt, via: "Submission", status: "Vaulted" },
+          ...prev.vault,
+        ],
+        overrides: { ...prev.overrides, [listing.id]: { delisted: true } },
+      }));
+      pushToast({ title: "Slab vaulted", body: `${listing.shortName} is now in My Slabs.`, tone: "success" });
+      return listing;
     },
-    [resolve],
-  );
-
-  const checkout = useCallback(
-    (method: "card" | "usdc") => settle(state.cart, method),
-    [settle, state.cart],
-  );
-
-  const buyNow = useCallback(
-    (id: string, method: "card" | "usdc") => settle([id], method),
-    [settle],
-  );
-
-  const makeOffer = useCallback(
-    (id: string, amount: number, expiresInHours: number) => {
-      const now = new Date();
-      setState((prev) => {
-        const offer: Offer = {
-          id: `own-${id.slice(0, 6)}-${prev.offersMade.length}`,
-          listingId: id,
-          amount,
-          from: prev.user?.username ?? "you",
-          createdAt: now.toISOString(),
-          expiresAt: new Date(now.getTime() + expiresInHours * 3_600_000).toISOString(),
-        };
-        const prior = prev.overrides[id] ?? {};
-        return {
-          ...prev,
-          offersMade: [offer, ...prev.offersMade],
-          overrides: {
-            ...prev.overrides,
-            [id]: { ...prior, extraOffers: [offer, ...(prior.extraOffers ?? [])] },
-          },
-        };
-      });
-      pushToast({ title: "Offer submitted", body: "The owner has 48 hours to respond.", tone: "success" });
-    },
-    [pushToast],
+    [state.user, state.vault, pushToast],
   );
 
   const listFromVault = useCallback(
     (id: string, price: number) => {
       setState((prev) => ({
         ...prev,
-        overrides: {
-          ...prev.overrides,
-          [id]: { ...prev.overrides[id], price, delisted: false },
-        },
+        overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], price, delisted: false } },
         vault: prev.vault.map((v) =>
           v.listingId === id ? { ...v, status: "Listed", listedPrice: price } : v,
         ),
       }));
-      pushToast({ title: "Listed on the marketplace", tone: "success" });
+      pushToast({ title: "Listed on the marketplace", body: "Buyers can now send you offers.", tone: "success" });
     },
     [pushToast],
   );
 
   const delist = useCallback(
     (id: string) => {
-      setState((prev) => ({
-        ...prev,
-        overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], delisted: true } },
-        vault: prev.vault.map((v) =>
-          v.listingId === id ? { ...v, status: "Vaulted", listedPrice: undefined } : v,
-        ),
-      }));
-      pushToast({ title: "Listing removed" });
+      setState((prev) => {
+        const me = prev.user?.username;
+        const negotiations = { ...prev.negotiations };
+        for (const n of Object.values(prev.negotiations)) {
+          if (n.listingId !== id || n.seller !== me || n.status !== "open") continue;
+          negotiations[n.id] = {
+            ...n,
+            status: "closed",
+            messages: [
+              ...n.messages.map((m) =>
+                m.kind === "offer" && m.status === "pending" ? { ...m, status: "declined" as const } : m,
+              ),
+              systemMessage("The seller removed this listing."),
+            ],
+          };
+        }
+        return {
+          ...prev,
+          negotiations,
+          overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], delisted: true } },
+          vault: prev.vault.map((v) =>
+            v.listingId === id ? { ...v, status: "Vaulted", listedPrice: undefined } : v,
+          ),
+        };
+      });
+      pushToast({ title: "Listing removed", body: "Open offers on it were declined." });
     },
     [pushToast],
   );
@@ -387,29 +586,202 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
-  const addPull = useCallback((listing: Listing, pack: string, cost: number) => {
+  /* ---------------- negotiations ---------------- */
+
+  const makeOffer = useCallback(
+    (listingId: string, bid: TradeBid): string | null => {
+      const user = state.user;
+      const listing = current(state, listingId);
+      if (!user || !listing) return null;
+      if (bid.cash > balance) {
+        pushToast({ title: "Not enough in your wallet", body: "Lower the cash part or top up first.", tone: "error" });
+        return null;
+      }
+      const me = user.username;
+      const id = negotiationId(listingId, me);
+      const now = new Date().toISOString();
+      const offer: ChatMessage = { id: messageId(), from: me, at: now, kind: "offer", offer: bid, status: "pending" };
+      setState((prev) => {
+        const existing = prev.negotiations[id];
+        const n: Negotiation =
+          existing && existing.status === "open"
+            ? {
+                ...existing,
+                messages: [
+                  ...existing.messages.map((m) =>
+                    m.kind === "offer" && m.status === "pending" && m.from === me
+                      ? { ...m, status: "replaced" as const }
+                      : m,
+                  ),
+                  offer,
+                ],
+              }
+            : { id, listingId, seller: listing.owner, buyer: me, status: "open", createdAt: now, messages: [offer] };
+        return { ...prev, negotiations: { ...prev.negotiations, [id]: n } };
+      });
+      pushToast({ title: "Offer sent", body: `${listing.owner} will reply in your chat.`, tone: "success" });
+      return id;
+    },
+    [state, balance, pushToast],
+  );
+
+  const sendMessage = useCallback((negId: string, text: string) => {
     setState((prev) => {
-      const username = prev.user?.username ?? "you";
-      return {
-        ...prev,
-        overrides: {
-          ...prev.overrides,
-          [listing.id]: { ...prev.overrides[listing.id], owner: username, delisted: true },
-        },
-        vault: [
-          { listingId: listing.id, acquiredAt: new Date().toISOString(), via: "Pack", status: "Vaulted" },
-          ...prev.vault,
-        ],
-        user: prev.user
-          ? {
-              ...prev.user,
-              balance: Math.max(0, prev.user.balance - cost),
-              points: prev.user.points + Math.round(cost * 25),
-            }
-          : prev.user,
-      };
+      const me = prev.user?.username;
+      if (!me || prev.negotiations[negId]?.status !== "open") return prev;
+      return append(prev, negId, { id: messageId(), from: me, at: new Date().toISOString(), kind: "text", text });
     });
   }, []);
+
+  const respondToOffer = useCallback(
+    (negId: string, offerId: string, accept: boolean) => {
+      const snapshot = latest.current;
+      const me = snapshot.user?.username;
+      if (!me) return;
+      if (accept) {
+        const { error } = settleDeal(snapshot, negId, offerId);
+        if (error) {
+          pushToast({ title: "Could not accept", body: error, tone: "error" });
+          return;
+        }
+        setState((prev) => settleDeal(prev, negId, offerId).next);
+        pushToast({ title: "Offer accepted", body: "See My Slabs and your wallet for the update.", tone: "success" });
+      } else {
+        setState((prev) => markOffer(prev, negId, offerId, "declined", `${me} declined the offer.`, me));
+      }
+    },
+    [pushToast],
+  );
+
+  const withdrawOffer = useCallback((negId: string, offerId: string) => {
+    setState((prev) => {
+      const me = prev.user?.username;
+      if (!me) return prev;
+      return markOffer(prev, negId, offerId, "withdrawn", `${me} cancelled the offer.`, me);
+    });
+  }, []);
+
+  /* The simulated other party answers whatever the user last did in a chat. */
+  const answered = useRef(new Set<string>());
+  useEffect(() => {
+    const me = state.user?.username;
+    if (!ready || !me) return;
+    for (const n of Object.values(state.negotiations)) {
+      const last = n.messages.at(-1);
+      if (n.status !== "open" || !last || answered.current.has(last.id)) continue;
+      if (last.from !== me && last.by !== me) continue;
+      answered.current.add(last.id);
+      window.setTimeout(() => {
+        const snapshot = latest.current;
+        const chat = snapshot.negotiations[n.id];
+        const listing = chat ? current(snapshot, chat.listingId) : undefined;
+        if (!chat || !listing || chat.messages.at(-1)?.id !== last.id) return;
+        const action = botReply(chat, listing, me);
+        if (action) applyBot(chat, listing, action);
+      }, 1500 + Math.random() * 2000);
+    }
+
+    function applyBot(chat: Negotiation, listing: Listing, action: BotAction) {
+      const bot = chat.buyer === me ? chat.seller : chat.buyer;
+      const say = (text: string): ChatMessage => ({
+        id: messageId(),
+        from: bot,
+        at: new Date().toISOString(),
+        kind: "text",
+        text,
+      });
+      if (action.type === "text" && action.chat) {
+        // Let the LLM answer the actual question; keep the canned line as a fallback.
+        void writeReply(chat, me!, listing).then((text) =>
+          setState((prev) => append(prev, chat.id, say(text ?? action.text))),
+        );
+      } else if (action.type === "text") {
+        setState((prev) => append(prev, chat.id, say(action.text)));
+      } else if (action.type === "decline") {
+        setState((prev) =>
+          append(markOffer(prev, chat.id, action.offerId, "declined", `${bot} declined the offer.`), chat.id, say(action.text)),
+        );
+      } else if (action.type === "offer") {
+        setState((prev) =>
+          append(prev, chat.id, ...(action.text ? [say(action.text)] : []), {
+            id: messageId(),
+            from: bot,
+            at: new Date().toISOString(),
+            kind: "offer",
+            offer: action.offer,
+            status: "pending",
+          }),
+        );
+        pushToast({ title: `New offer from ${bot}` });
+      } else {
+        const { error } = settleDeal(latest.current, chat.id, action.offerId);
+        if (error) {
+          setState((prev) =>
+            append(
+              markOffer(prev, chat.id, action.offerId, "declined", `The deal could not go through. ${error}`),
+              chat.id,
+            ),
+          );
+          pushToast({ title: "Deal failed", body: error, tone: "error" });
+          return;
+        }
+        setState((prev) => {
+          const withNote = append(prev, chat.id, say(action.text));
+          return settleDeal(withNote, chat.id, action.offerId).next;
+        });
+        pushToast({ title: `${bot} accepted your offer`, body: "The slab is now in My Slabs.", tone: "success" });
+      }
+    }
+  }, [ready, state.user?.username, state.negotiations, pushToast]);
+
+  /* Simulated collectors send offers on the user's listings now and then. */
+  const signedIn = Boolean(state.user);
+  useEffect(() => {
+    if (!ready || !signedIn) return;
+    const timer = window.setInterval(() => {
+      if (document.hidden || Math.random() > 0.35) return;
+      const snapshot = latest.current;
+      const me = snapshot.user?.username;
+      const listed = snapshot.vault.filter((v) => v.status === "Listed");
+      if (!me || !listed.length) return;
+      const pick = listed[Math.floor(Math.random() * listed.length)];
+      const listing = current(snapshot, pick.listingId);
+      if (!listing) return;
+      const chats = Object.values(snapshot.negotiations).filter(
+        (n) => n.listingId === listing.id && n.seller === me,
+      );
+      if (chats.filter((c) => c.status === "open").length >= 3) return;
+      const chat = newBuyerChat(listing, me, chats.map((c) => c.buyer));
+      if (!chat) return;
+      setState((prev) => ({ ...prev, negotiations: { ...prev.negotiations, [chat.id]: chat } }));
+      pushToast({ title: `New offer from ${chat.buyer}`, body: listing.shortName });
+    }, 9000);
+    return () => window.clearInterval(timer);
+  }, [ready, signedIn, pushToast]);
+
+  const fileLostReport = useCallback(
+    (negId: string, item: LostItem, tracking: string, details: string): LostReport => {
+      const report: LostReport = {
+        id: `LR-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+        negotiationId: negId,
+        item,
+        tracking,
+        details,
+        filedAt: new Date().toISOString(),
+        status: "Under investigation",
+      };
+      setState((prev) =>
+        append(
+          { ...prev, lostReports: [report, ...prev.lostReports] },
+          negId,
+          systemMessage(`Lost item report ${report.id} filed. The vault team is checking the custody log for this deal.`),
+        ),
+      );
+      pushToast({ title: `Report ${report.id} filed`, body: "We will email you within 48 hours.", tone: "success" });
+      return report;
+    },
+    [pushToast],
+  );
 
   const addComment = useCallback((listingId: string, text: string) => {
     setState((prev) => {
@@ -431,12 +803,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const topUp = useCallback(
     (amount: number) => {
-      setState((prev) =>
-        prev.user
-          ? { ...prev, user: { ...prev.user, balance: prev.user.balance + amount } }
-          : prev,
-      );
-      pushToast({ title: `Added $${amount.toLocaleString()} to balance`, tone: "success" });
+      setState((prev) => ({ ...prev, ledger: [ledgerEntry(amount, "Wallet top-up (demo money)"), ...prev.ledger] }));
+      pushToast({ title: `Added ${usd(amount, { cents: true })} to your wallet`, tone: "success" });
     },
     [pushToast],
   );
@@ -451,49 +819,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     router.push("/");
   }, [router]);
 
-  const cartListings = useMemo(
-    () =>
-      state.cart
-        .map((id) => getListing(id))
-        .filter((l): l is Listing => Boolean(l))
-        .map(resolve),
-    [state.cart, resolve],
-  );
-
-  const cartTotal = useMemo(
-    () => cartListings.reduce((sum, l) => sum + l.price, 0),
-    [cartListings],
-  );
-
   const value: StoreValue = {
     ...state,
     ready,
+    balance,
     login,
     logout,
     requireAuth,
     authOpen,
     setAuthOpen,
-    addToCart,
-    removeFromCart,
-    clearCart,
-    cartOpen,
-    setCartOpen,
     toggleWatch,
     isWatched,
-    checkout,
-    buyNow,
-    makeOffer,
+    submitSlab,
     listFromVault,
     delist,
     requestShipping,
-    addPull,
+    makeOffer,
+    sendMessage,
+    respondToOffer,
+    withdrawOffer,
+    fileLostReport,
     addComment,
     topUp,
     resetDemo,
     resolve,
     isOwned,
-    cartListings,
-    cartTotal,
+    isListed,
     toasts,
     pushToast,
     dismissToast,
@@ -508,11 +859,11 @@ export function useStore(): StoreValue {
   return ctx;
 }
 
-/** Marketplace inventory = catalog minus anything the user took off the market. */
+/** Marketplace inventory = catalog plus submitted slabs, minus anything off the market. */
 export function useMarketInventory(): Listing[] {
-  const { overrides, resolve } = useStore();
+  const { overrides, resolve, slabs } = useStore();
   return useMemo(
-    () => LISTINGS.filter((l) => !overrides[l.id]?.delisted).map(resolve),
-    [overrides, resolve],
+    () => [...slabs, ...LISTINGS].filter((l) => !overrides[l.id]?.delisted).map(resolve),
+    [slabs, overrides, resolve],
   );
 }

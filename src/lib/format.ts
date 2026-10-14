@@ -14,10 +14,6 @@ export function compact(n: number): string {
   return String(n);
 }
 
-export function points(n: number): string {
-  return `${n.toLocaleString("en-US")} pts`;
-}
-
 export function timeAgo(iso: string | number, now = Date.now()): string {
   const then = typeof iso === "number" ? iso : Date.parse(iso);
   const s = Math.max(1, Math.floor((now - then) / 1000));

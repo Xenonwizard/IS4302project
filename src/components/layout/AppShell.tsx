@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { CartDrawer } from "../cart/CartDrawer";
 import { AuthModal } from "../modals/AuthModal";
 import { MobileNav, Sidebar } from "./Sidebar";
 import { Toasts } from "./Toasts";
@@ -21,7 +20,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       <MobileNav />
-      <CartDrawer />
       <AuthModal />
       <Toasts />
     </div>

@@ -1,6 +1,6 @@
 import { SubmitForm } from "@/components/submit/SubmitForm";
 
-export const metadata = { title: "Submit my collectibles" };
+export const metadata = { title: "Vault a graded slab" };
 
 export default function SubmitPage() {
   return (
