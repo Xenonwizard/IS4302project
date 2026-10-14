@@ -6,17 +6,21 @@ import { usePathname } from "next/navigation";
 import {
   ChevronsLeft,
   ChevronsRight,
+  Heart,
   House,
   MessagesSquare,
   ShieldCheck,
   Store,
+  Wallet,
 } from "lucide-react";
 
 const NAV = [
   { href: "/", label: "Home", short: "Home", icon: House },
   { href: "/marketplace", label: "Marketplace", short: "Market", icon: Store },
   { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
-  { href: "/vault", label: "My Slabs", short: "My Slabs", icon: ShieldCheck },
+  { href: "/vault", label: "Vault", short: "Vault", icon: ShieldCheck },
+  { href: "/watchlist", label: "Watchlist", short: "Watchlist", icon: Heart },
+  { href: "/wallet", label: "Wallet", short: "Wallet", icon: Wallet },
 ];
 
 export function Sidebar({

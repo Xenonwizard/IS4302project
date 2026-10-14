@@ -199,7 +199,7 @@ export function DealBuilder({
             label={
               <span className="flex items-center gap-1.5">
                 <Wallet size={13} /> Wallet balance
-                <Link href="/vault?tab=wallet" className="text-[11px] font-semibold text-accent hover:underline">
+                <Link href="/wallet" className="text-[11px] font-semibold text-accent hover:underline">
                   see history
                 </Link>
               </span>

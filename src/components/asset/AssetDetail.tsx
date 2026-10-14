@@ -310,13 +310,13 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                     </Link>
                   ) : (
                     <p className="text-[12px] text-muted">
-                      List this slab from My Slabs to put it on the marketplace and receive offers.
+                      List this slab from your Vault to put it on the marketplace and receive offers.
                     </p>
                   )}
-                  <Link href={listed ? "/vault?tab=listings" : "/vault"}>
+                  <Link href={listed ? "/vault?tab=listed" : "/vault"}>
                     <Button size="lg" variant={listed ? "secondary" : "primary"} className="w-full">
                       {listed ? null : <Tag size={16} />}
-                      {listed ? "Manage listing" : "List it from My Slabs"}
+                      {listed ? "Manage listing" : "List it from your Vault"}
                     </Button>
                   </Link>
                 </div>
