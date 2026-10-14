@@ -517,7 +517,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ],
         overrides: { ...prev.overrides, [listing.id]: { delisted: true } },
       }));
-      pushToast({ title: "Slab vaulted", body: `${listing.shortName} is now in My Slabs.`, tone: "success" });
+      pushToast({ title: "Slab vaulted", body: `${listing.shortName} is now in your Vault.`, tone: "success" });
       return listing;
     },
     [state.user, state.vault, pushToast],
@@ -645,7 +645,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         setState((prev) => settleDeal(prev, negId, offerId).next);
-        pushToast({ title: "Offer accepted", body: "See My Slabs and your wallet for the update.", tone: "success" });
+        pushToast({ title: "Offer accepted", body: "See your Vault and Wallet for the update.", tone: "success" });
       } else {
         setState((prev) => markOffer(prev, negId, offerId, "declined", `${me} declined the offer.`, me));
       }
@@ -729,7 +729,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const withNote = append(prev, chat.id, say(action.text));
           return settleDeal(withNote, chat.id, action.offerId).next;
         });
-        pushToast({ title: `${bot} accepted your offer`, body: "The slab is now in My Slabs.", tone: "success" });
+        pushToast({ title: `${bot} accepted your offer`, body: "The slab is now in your Vault.", tone: "success" });
       }
     }
   }, [ready, state.user?.username, state.negotiations, pushToast]);

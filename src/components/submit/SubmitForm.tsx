@@ -109,8 +109,8 @@ export function SubmitForm() {
             <Button variant="secondary" onClick={reset}>
               Vault another
             </Button>
-            <Link href={choice === "listed" ? `/trades/${vaulted.id}` : "/vault"}>
-              <Button>{choice === "listed" ? "Open negotiation room" : "Go to My Slabs"}</Button>
+            <Link href={choice === "listed" ? `/trades?listing=${vaulted.id}` : "/vault"}>
+              <Button>{choice === "listed" ? "See its negotiation rooms" : "Go to Vault"}</Button>
             </Link>
           </div>
         ) : null}
@@ -124,7 +124,7 @@ export function SubmitForm() {
       <p className="mt-1.5 text-[14px] text-muted">
         Tell us the grader and the cert number on the label. We pull the card, grade and set from
         the grader&apos;s registry, then the slab goes straight into the {BRAND.vaultCity} vault and
-        shows up in My Slabs, insured and tokenised for free.
+        shows up in your Vault, insured and tokenised for free.
       </p>
 
       <form onSubmit={submit} className="mt-6 space-y-4">

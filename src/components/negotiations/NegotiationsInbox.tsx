@@ -121,12 +121,12 @@ export function NegotiationsInbox() {
           <p className="text-base font-bold">No chats yet</p>
           <p className="max-w-sm text-[13px] text-muted">
             {tab === "selling"
-              ? "List a slab from My Slabs. When buyers make offers, their chats appear here."
+              ? "List a slab from your Vault. When buyers make offers, their chats appear here."
               : "Find a slab on the marketplace and make an offer. Your chat with the seller appears here."}
           </p>
           <Link href={tab === "selling" ? "/vault" : "/marketplace"}>
             <Button variant="secondary" className="mt-1">
-              {tab === "selling" ? "Go to My Slabs" : "Browse the marketplace"}
+              {tab === "selling" ? "Go to Vault" : "Browse the marketplace"}
             </Button>
           </Link>
         </div>

@@ -79,7 +79,7 @@ export function TopBar() {
                 <p className="text-sm font-bold">{user.username}</p>
                 <p className="truncate text-[12px] text-dim">{user.email}</p>
                 <Link
-                  href="/vault?tab=wallet"
+                  href="/wallet"
                   onClick={() => setMenuOpen(false)}
                   className="mt-3 block rounded-xl bg-surface p-2.5 transition hover:bg-surface-2"
                 >
@@ -90,9 +90,9 @@ export function TopBar() {
               </div>
               <div className="p-2">
                 <MenuLink href="/vault" icon={<ShieldCheck size={16} />} onGo={() => setMenuOpen(false)}>
-                  My Slabs
+                  Vault
                 </MenuLink>
-                <MenuLink href="/vault?tab=wallet" icon={<Wallet size={16} />} onGo={() => setMenuOpen(false)}>
+                <MenuLink href="/wallet" icon={<Wallet size={16} />} onGo={() => setMenuOpen(false)}>
                   Wallet
                 </MenuLink>
                 <MenuLink href="/trades" icon={<MessagesSquare size={16} />} onGo={() => setMenuOpen(false)}>
