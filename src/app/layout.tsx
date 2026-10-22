@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { Web3Providers } from "@/components/chain/Web3Providers";
 import { AppShell } from "@/components/layout/AppShell";
 import { BRAND } from "@/lib/brand";
 import { StoreProvider } from "@/lib/store";
@@ -19,9 +20,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${inter.variable} h-full`}>
       <body className="min-h-full">
-        <StoreProvider>
-          <AppShell>{children}</AppShell>
-        </StoreProvider>
+        <Web3Providers>
+          <StoreProvider>
+            <AppShell>{children}</AppShell>
+          </StoreProvider>
+        </Web3Providers>
       </body>
     </html>
   );

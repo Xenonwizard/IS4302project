@@ -1,0 +1,26 @@
+{
+  "name": "pokechain-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "hardhat build",
+    "test": "hardhat test",
+    "coverage": "hardhat test --coverage",
+    "node": "hardhat node",
+    "chain": "node scripts/dev-chain.mjs",
+    "deploy:local": "hardhat ignition deploy ignition/modules/Pokechain.ts --network localhost --reset && node scripts/export-frontend.mjs 31337",
+    "deploy:amoy": "hardhat ignition deploy ignition/modules/Pokechain.ts --network amoy && node scripts/export-frontend.mjs 80002"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "^3.1.9",
+    "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
+    "@types/node": "^20.19.43",
+    "forge-std": "github:foundry-rs/forge-std#v1.9.7",
+    "hardhat": "^3.20.0",
+    "typescript": "^5.9.3",
+    "viem": "^2.57.10"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1"
+  }
+}

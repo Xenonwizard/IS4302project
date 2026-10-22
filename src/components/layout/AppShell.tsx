@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { ChainConsole } from "../chain/ChainConsole";
+import { ChainSessionSync } from "../chain/ChainSessionSync";
 import { AuthModal } from "../modals/AuthModal";
 import { MobileNav, Sidebar } from "./Sidebar";
 import { Toasts } from "./Toasts";
@@ -21,6 +23,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <MobileNav />
       <AuthModal />
+      <ChainSessionSync />
+      <ChainConsole />
       <Toasts />
     </div>
   );

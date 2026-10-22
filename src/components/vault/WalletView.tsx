@@ -6,6 +6,7 @@ import { Plus, Wallet } from "lucide-react";
 import { shortDate, usd } from "@/lib/format";
 import { pendingOffer } from "@/lib/negotiation";
 import { useStore } from "@/lib/store";
+import { OnChainFunds } from "../chain/OnChainFunds";
 import { Button } from "../ui/primitives";
 import { Empty, LoginPrompt } from "./shared";
 
@@ -37,23 +38,29 @@ export function WalletView() {
     <div className="space-y-4 px-4 py-5 lg:px-6">
       <h1 className="text-[24px] font-bold">Wallet</h1>
 
+      {user.address ? <OnChainFunds /> : null}
+
       <div className="grid gap-3 rounded-card border border-hairline bg-surface p-5 sm:grid-cols-[1fr_auto] sm:items-center">
         <div>
           <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-dim">
-            <Wallet size={14} /> Wallet balance
+            <Wallet size={14} /> {user.address ? "Trading balance" : "Wallet balance"}
           </p>
           <p className="mt-1 text-[30px] font-bold leading-none">{usd(balance, { cents: true })}</p>
           <p className="mt-2 text-[12px] text-muted">
-            The sum of every entry below. Demo money only.
+            {user.address
+              ? "The sum of every entry below. On-chain deposits and withdrawals are mirrored here. Offers and trades still settle off-chain in this build."
+              : "The sum of every entry below. Demo money only."}
             {pendingCash > 0
               ? ` ${usd(pendingCash, { cents: true })} is in offers waiting on sellers. It is not held, and only leaves your wallet if an offer is accepted.`
               : ""}
           </p>
         </div>
-        <Button variant="secondary" onClick={() => topUp(1000)}>
-          <Plus size={15} />
-          Top up $1,000 (demo)
-        </Button>
+        {user.address ? null : (
+          <Button variant="secondary" onClick={() => topUp(1000)}>
+            <Plus size={15} />
+            Top up $1,000 (demo)
+          </Button>
+        )}
       </div>
 
       {rows.length ? (

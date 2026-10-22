@@ -8,12 +8,15 @@ import {
   Search,
   ShieldCheck,
   MessagesSquare,
+  UserRound,
   Wallet,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useDisconnect } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { LISTINGS } from "@/lib/catalog";
+import { shortHash } from "@/lib/chain/config";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { Avatar, Button, inputClass } from "../ui/primitives";
@@ -42,6 +45,7 @@ export function PromoBanner() {
 export function TopBar() {
   const { user, balance, logout, setAuthOpen, resetDemo } = useStore();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { disconnect } = useDisconnect();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,7 +81,9 @@ export function TopBar() {
             <div className="pop-in absolute right-0 top-12 z-50 w-64 overflow-hidden rounded-2xl border border-hairline bg-[#0d0d11] shadow-2xl">
               <div className="border-b border-hairline p-4">
                 <p className="text-sm font-bold">{user.username}</p>
-                <p className="truncate text-[12px] text-dim">{user.email}</p>
+                <p className="truncate text-[12px] text-dim">
+                  {user.address ? `On-chain account · ${shortHash(user.address)}` : "Off-chain demo account"}
+                </p>
                 <Link
                   href="/wallet"
                   onClick={() => setMenuOpen(false)}
@@ -89,6 +95,9 @@ export function TopBar() {
                 </Link>
               </div>
               <div className="p-2">
+                <MenuLink href="/account" icon={<UserRound size={16} />} onGo={() => setMenuOpen(false)}>
+                  Account
+                </MenuLink>
                 <MenuLink href="/vault" icon={<ShieldCheck size={16} />} onGo={() => setMenuOpen(false)}>
                   Vault
                 </MenuLink>
@@ -111,7 +120,9 @@ export function TopBar() {
                 <button
                   onClick={() => {
                     setMenuOpen(false);
-                    logout();
+                    // A wallet account signs out by disconnecting; ChainSessionSync then clears the session.
+                    if (user.address) disconnect();
+                    else logout();
                   }}
                   className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-white/5 hover:text-white"
                 >
