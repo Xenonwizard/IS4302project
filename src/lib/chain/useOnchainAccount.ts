@@ -5,13 +5,16 @@
  * in one multicall (wagmi batches the four `eth_call`s into a single RPC request).
  */
 import { zeroAddress } from "viem";
-import { useAccount, useBalance, useBytecode, useReadContracts } from "wagmi";
+import { useAccount, useBalance, useBlockNumber, useBytecode, useReadContracts } from "wagmi";
 import { ACCOUNT_STATUS, IS_DEPLOYED, chain, contracts, fromUsdcUnits } from "./config";
 
 export function useOnchainAccount() {
   const { address, isConnected, chainId } = useAccount();
   const who = address ?? zeroAddress;
   const enabled = Boolean(address) && IS_DEPLOYED;
+
+  // Can we reach the chain at all? A stopped `npm run chain` fails this within one poll.
+  const { isError: unreachable } = useBlockNumber({ query: { refetchInterval: 5000, retry: false } });
 
   // Is there contract code at the registry address? A restarted local chain has none until redeploy.
   const { data: code, isFetched: codeChecked } = useBytecode({ address: contracts.accounts.address, query: { enabled: IS_DEPLOYED } });
@@ -35,6 +38,8 @@ export function useOnchainAccount() {
     address,
     isConnected,
     wrongChain: isConnected && chainId !== chain.id,
+    /** the RPC answers (false when the local Hardhat node isn't running) */
+    reachable: !unreachable,
     /** contracts exist on the chain the app is pointed at */
     deployed: IS_DEPLOYED && (!codeChecked || Boolean(code && code !== "0x")),
     loaded: isFetched,

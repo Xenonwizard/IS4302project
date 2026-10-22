@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { ChainConsole } from "../chain/ChainConsole";
+import { ChainDownBanner } from "../chain/ChainDownBanner";
 import { ChainSessionSync } from "../chain/ChainSessionSync";
+import { ChainVaultSync } from "../chain/ChainVaultSync";
 import { AuthModal } from "../modals/AuthModal";
 import { MobileNav, Sidebar } from "./Sidebar";
 import { Toasts } from "./Toasts";
@@ -13,6 +15,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col bg-black">
+      <ChainDownBanner />
       <PromoBanner />
       <TopBar />
       <div className="flex min-h-0 flex-1">
@@ -24,6 +27,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <MobileNav />
       <AuthModal />
       <ChainSessionSync />
+      <ChainVaultSync />
       <ChainConsole />
       <Toasts />
     </div>

@@ -1,11 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, PackageSearch, RefreshCw, Warehouse } from "lucide-react";
+import clsx from "clsx";
+import { Check, Loader2, PackageSearch, RefreshCw, Truck, Vault, Warehouse } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePublicClient } from "wagmi";
 import { getListing } from "@/lib/catalog";
-import { DEPLOY_BLOCK, chain, contracts } from "@/lib/chain/config";
+import { DEPLOY_BLOCK, OPEN_SUBMISSION, SUBMISSION_STATUS, chain, contracts } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useSlabChain, type MintOutcome } from "@/lib/chain/useSlabChain";
 import { useStore } from "@/lib/store";
@@ -18,13 +19,16 @@ interface Pending {
   submissionId: string;
   grader: Grader;
   certNumber: string;
+  /** SubmissionStatus: 1 Pending, 2 ReceivedByPokechain, 3 AtCustodian */
+  status: number;
+  forwardCarrier: string;
+  forwardTracking: string;
 }
 
 /**
- * Submissions waiting on Grade10, read from the chain: every SubmissionRequested event for this
- * wallet whose `submissionOf(id).status` is still Pending. While one is shown, the page polls
- * Grade10's registry. As soon as Grade10 has the slab (after the Postman intake call, or the
- * Simulate button) the operator verifies it on Solana and mints the Polygon token.
+ * Submissions still on their way into the vault, read from the chain: every SubmissionRequested
+ * event for this wallet whose `submissionOf(id).status` is still open. Each card shows where the
+ * slab is (you → Pokechain → Collector Crypt → token) and the call that moves it on.
  */
 export function PendingSubmissions({ onMinted }: { onMinted?: (listing: Listing | null) => void }) {
   const { address } = useOnchainAccount();
@@ -33,7 +37,7 @@ export function PendingSubmissions({ onMinted }: { onMinted?: (listing: Listing 
   const { data: pending = [], refetch } = useQuery({
     queryKey: ["pending-submissions", address],
     enabled: Boolean(address && client),
-    refetchInterval: 15_000,
+    refetchInterval: 10_000,
     queryFn: async (): Promise<Pending[]> => {
       const events = await client!.getContractEvents({
         ...contracts.slabVault,
@@ -46,8 +50,15 @@ export function PendingSubmissions({ onMinted }: { onMinted?: (listing: Listing 
       );
       return events
         .map((e, i) => ({ e, s: subs[i] }))
-        .filter(({ s }) => s.status === 1)
-        .map(({ e, s }) => ({ submissionId: e.args.submissionId!.toString(), grader: s.grader as Grader, certNumber: s.certNumber }));
+        .filter(({ s }) => OPEN_SUBMISSION.has(s.status))
+        .map(({ e, s }) => ({
+          submissionId: e.args.submissionId!.toString(),
+          grader: s.grader as Grader,
+          certNumber: s.certNumber,
+          status: s.status,
+          forwardCarrier: s.forwardCarrier,
+          forwardTracking: s.forwardTracking,
+        }));
     },
   });
 
@@ -55,21 +66,32 @@ export function PendingSubmissions({ onMinted }: { onMinted?: (listing: Listing 
   return (
     <div className="space-y-3">
       {pending.map((p) => (
-        <PendingCard key={p.submissionId} sub={p} onDone={(l) => { void refetch(); onMinted?.(l); }} />
+        <PendingCard
+          key={p.submissionId}
+          sub={p}
+          onChange={() => void refetch()}
+          onDone={(l) => {
+            void refetch();
+            onMinted?.(l);
+          }}
+        />
       ))}
     </div>
   );
 }
 
-function PendingCard({ sub, onDone }: { sub: Pending; onDone: (listing: Listing | null) => void }) {
-  const { verifyAndMint, simulateIntake } = useSlabChain();
+const STAGES = ["Submitted", "At Pokechain", "Sent to Collector Crypt", "Vaulted at CC", "Token minted"];
+
+function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => void; onDone: (listing: Listing | null) => void }) {
+  const { receive, forward, simulateVault, verifyAndMint } = useSlabChain();
   const { vault, submitSlab, attachToken, pushToast } = useStore();
-  const [state, setState] = useState<"waiting" | "intake" | "minting">("waiting");
+  const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   // Only rendered after the client-side chain query resolves, so window is always there.
   const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const id = sub.submissionId;
 
-  // If the slab is already in the vault off-chain (tokenising before a withdrawal), attach the token to it.
+  // A slab already in the vault off-chain (tokenising before a withdrawal) gets the token attached.
   const existingId = vault.find((v) => {
     const l = getListing(v.listingId);
     return l?.grader === sub.grader && l.certNumber === sub.certNumber;
@@ -88,7 +110,7 @@ function PendingCard({ sub, onDone }: { sub: Pending; onDone: (listing: Listing 
       let listing: Listing | null = null;
       if (existingId) attachToken(existingId, token);
       else listing = submitSlab({ grader: sub.grader, certNumber: sub.certNumber }, token);
-      pushToast({ title: `Token #${out.tokenId} minted`, body: "Grade10 custody verified on Solana.", tone: "success" });
+      pushToast({ title: `Token #${out.tokenId} minted`, body: "Collector Crypt's NFT is in Pokechain's escrow.", tone: "success" });
       onDone(listing);
     },
     [existingId, attachToken, submitSlab, pushToast, onDone, sub.grader, sub.certNumber],
@@ -97,84 +119,152 @@ function PendingCard({ sub, onDone }: { sub: Pending; onDone: (listing: Listing 
   const mint = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
-    setState("minting");
+    setBusy(true);
     try {
-      const out = await verifyAndMint(sub.submissionId, existingId);
+      const out = await verifyAndMint(id, existingId);
       if (out.result === "minted") finish(out);
-      else if (out.result === "rejected") {
-        pushToast({ title: "Submission rejected", body: out.reason, tone: "error" });
-        onDone(null);
-      } else if (out.result === "mismatch") {
-        pushToast({ title: "Grade10's Solana record doesn't match", body: out.checks.at(-1)?.detail, tone: "error" });
+      else if (out.result === "mismatch") {
+        pushToast({ title: "Collector Crypt's Solana record doesn't match", body: out.checks.at(-1)?.detail, tone: "error" });
       }
     } catch (e) {
       pushToast({ title: "Verification failed", body: (e as Error).message, tone: "error" });
     } finally {
       inFlight.current = false;
-      setState("waiting");
+      setBusy(false);
     }
-  }, [verifyAndMint, sub.submissionId, existingId, finish, pushToast, onDone]);
+  }, [verifyAndMint, id, existingId, finish, pushToast]);
 
-  // Poll Grade10's registry (a plain GET, not logged). Once the slab is there, run the operator check + mint.
+  // At Collector Crypt: poll CC's card lookup (a plain GET, not logged) and mint once it's vaulted.
   useEffect(() => {
+    if (sub.status !== 3) return;
     const timer = window.setInterval(async () => {
       if (inFlight.current || document.hidden) return;
-      const res = await fetch(`/api/grade10/certs/${sub.grader}/${sub.certNumber}`, { cache: "no-store" });
+      const res = await fetch(`/api/collector-crypt/cards/${sub.grader}/${sub.certNumber}`, { cache: "no-store" });
       if (res.ok) void mint();
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [sub.grader, sub.certNumber, mint]);
+  }, [sub.status, sub.grader, sub.certNumber, mint]);
 
-  const intake = async () => {
-    setState("intake");
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
     try {
-      await simulateIntake(sub.grader, sub.certNumber);
-      await mint();
+      await fn();
+      onChange();
     } catch (e) {
-      pushToast({ title: "Intake failed", body: (e as Error).message, tone: "error" });
-      setState("waiting");
+      pushToast({ title: "Step failed", body: (e as Error).message, tone: "error" });
+    } finally {
+      setBusy(false);
     }
   };
 
-  const curl = `curl -X POST ${origin}/api/grade10/intake -H 'content-type: application/json' -d '{"grader":"${sub.grader}","certNumber":"${sub.certNumber}"}'`;
+  const next =
+    sub.status === 1
+      ? {
+          label: "Simulate: Pokechain receives it",
+          icon: <Warehouse size={13} />,
+          action: () =>
+            run(async () => {
+              const r = await receive(id);
+              if (r.result === "rejected") {
+                pushToast({ title: "Submission rejected", body: r.reason, tone: "error" });
+                onDone(null);
+              }
+            }),
+          curl: `curl -X POST ${origin}/api/chain/receive -H 'content-type: application/json' -d '{"submissionId":"${id}"}'`,
+          note: (
+            <>
+              Ship the slab to Pokechain. When it arrives, staff check the cert and the operator calls{" "}
+              <Fn>SlabVault.markReceived({id})</Fn> (or <Fn>rejectSubmission</Fn> if the cert doesn&apos;t exist).
+            </>
+          ),
+        }
+      : sub.status === 2
+        ? {
+            label: "Simulate: forward to Collector Crypt",
+            icon: <Truck size={13} />,
+            action: () => run(() => forward(id)),
+            curl: `curl -X POST ${origin}/api/chain/forward -H 'content-type: application/json' -d '{"submissionId":"${id}"}'`,
+            note: (
+              <>
+                Pokechain ships it on to Collector Crypt&apos;s vault and records the parcel with{" "}
+                <Fn>SlabVault.markForwarded({id}, carrier, tracking)</Fn>, so the inbound leg is traceable too.
+              </>
+            ),
+          }
+        : {
+            label: "Simulate: Collector Crypt vaults it",
+            icon: <Vault size={13} />,
+            action: () =>
+              run(async () => {
+                await simulateVault(sub.grader, sub.certNumber, id);
+                await mint();
+              }),
+            curl: `curl -X POST ${origin}/api/collector-crypt/intake -H 'content-type: application/json' -d '{"grader":"${sub.grader}","certNumber":"${sub.certNumber}","depositorRef":"pokechain-submission-${id}"}'`,
+            note: (
+              <>
+                When Collector Crypt vaults it, CC mints the slab&apos;s Solana NFT straight to Pokechain&apos;s escrow
+                wallet. This page polls CC; then the operator calls Solana <Fn>getAsset</Fn>. It checks the NFT is
+                held by our escrow, sits in CC&apos;s collection, has the same cert and is Vaulted, and then runs{" "}
+                <Fn>SlabVault.mintSlab</Fn> with CC&apos;s asset id.
+              </>
+            ),
+          };
 
   return (
     <div className="rounded-card border border-warn/30 bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 text-[14px] font-bold">
-            {state === "minting" ? <Loader2 size={15} className="animate-spin text-accent" /> : <PackageSearch size={15} className="text-warn" />}
-            {state === "minting" ? "Checking Grade10 on Solana and minting…" : "Waiting for Grade10 to receive the slab"}
+            {busy ? <Loader2 size={15} className="animate-spin text-accent" /> : <PackageSearch size={15} className="text-warn" />}
+            Submission #{id}: {SUBMISSION_STATUS[sub.status]}
           </p>
           <p className="mt-1 text-[12.5px] text-muted">
-            Submission #{sub.submissionId} · {sub.grader} cert <span className="font-mono text-white">{sub.certNumber}</span> · Pending on-chain
+            {sub.grader} cert <span className="font-mono text-white">{sub.certNumber}</span>
+            {sub.forwardTracking ? ` · to Collector Crypt by ${sub.forwardCarrier} ${sub.forwardTracking}` : ""}
           </p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={mint} disabled={state !== "waiting"}>
-            <RefreshCw size={13} /> Check now
-          </Button>
-          <Button size="sm" onClick={intake} disabled={state !== "waiting"}>
-            <Warehouse size={13} /> Simulate Grade10 intake
+          {sub.status === 3 ? (
+            <Button size="sm" variant="secondary" onClick={mint} disabled={busy}>
+              <RefreshCw size={13} /> Check now
+            </Button>
+          ) : null}
+          <Button size="sm" onClick={next.action} disabled={busy}>
+            {next.icon} {next.label}
           </Button>
         </div>
       </div>
+
+      <ol className="mt-3 flex flex-wrap gap-1.5 text-[11px] font-semibold">
+        {STAGES.map((name, i) => {
+          const done = i < sub.status;
+          return (
+            <li
+              key={name}
+              className={clsx(
+                "flex items-center gap-1 rounded-md px-2 py-1",
+                done ? "bg-good-bg text-good" : i === sub.status ? "bg-warn/15 text-warn" : "bg-surface-2 text-dim",
+              )}
+            >
+              {done ? <Check size={11} /> : null}
+              {name}
+            </li>
+          );
+        })}
+      </ol>
+
       <div className="mt-3 rounded-xl bg-[#101014] p-3 text-[12px] text-muted">
-        <p className="mb-1.5 font-semibold text-white">Or play Grade10 from Postman (or a terminal):</p>
+        <p className="mb-1.5 font-semibold text-white">Or run this step from Postman (or a terminal):</p>
         <div className="flex items-start gap-2">
-          <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-dim">{curl}</code>
-          <CopyText text={curl} title="Copy the curl command" />
+          <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-dim">{next.curl}</code>
+          <CopyText text={next.curl} title="Copy the curl command" />
         </div>
-        <p className="mt-1.5 text-[11px] text-dim">This page polls Grade10 every few seconds and mints as soon as the slab shows up.</p>
+        {sub.status === 3 ? (
+          <p className="mt-1.5 text-[11px] text-dim">This page polls Collector Crypt every few seconds and mints once the slab is vaulted.</p>
+        ) : null}
       </div>
       <div className="mt-3">
-        <OnChainNote title="Why it waits">
-          <Fn>SlabVault.requestSubmission</Fn> only records your claim. Before <Fn>mintSlab</Fn>, the
-          operator asks Grade10&apos;s registry for the slab&apos;s Solana asset id. It then calls Solana
-          <Fn>getAsset</Fn> to check that the NFT is owned and frozen by Grade10&apos;s vault wallet, sits in
-          Grade10&apos;s collection, and carries the same cert number. The Polygon token stores that Solana id,
-          so each chain points at the other.
-        </OnChainNote>
+        <OnChainNote title="This step">{next.note}</OnChainNote>
       </div>
     </div>
   );

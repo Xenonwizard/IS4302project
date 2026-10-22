@@ -13,27 +13,34 @@ interface IAccountStatus {
 
 /**
  * @title SlabVault
- * @notice One ERC-721 token per physical graded slab held in the Pokechain vault.
+ * @notice One ERC-721 token per physical graded slab. The physical slab is stored by
+ *         Collector Crypt (CC), whose own Solana NFT for it is held by Pokechain's escrow
+ *         wallet. This token is the Pokechain-side title: trading moves this token only,
+ *         while CC's NFT stays locked in the escrow.
  *
- *  Onboarding a slab (the vault takes custody, a token is minted)
- *   1. `requestSubmission`  the collector declares grader + cert number. Status: Pending.
- *   2. `mintSlab`           the operator has confirmed the custodian (Grade10) holds the
- *                           slab: it looked the cert up in Grade10's registry and checked
- *                           Grade10's Solana record of it. It mints the token to the collector
- *                           and stores the Solana asset id, linking the two chains.
- *                           Custody: Vaulted.  (or `rejectSubmission`.)
+ *  Onboarding a slab (inbound trail, no token yet)
+ *   1. `requestSubmission`  the collector declares grader + cert and ships the slab to
+ *                           Pokechain. Submission: Pending.
+ *   2. `markReceived`       Pokechain's warehouse has it. Submission: ReceivedByPokechain.
+ *   3. `markForwarded`      Pokechain ships it on to CC (carrier + tracking recorded).
+ *                           Submission: AtCustodian.
+ *   4. `mintSlab`           CC vaulted it and minted its Solana NFT to Pokechain's escrow; the
+ *                           operator checked that NFT (DAS getAsset) and mints this token to the
+ *                           collector, storing CC's asset id. Custody: Vaulted.
+ *                           (`rejectSubmission` at any open stage.)
  *
  *  Offboarding a slab (the slab leaves the vault, the token stays)
- *   3. `requestRedemption`  the owner asks for the slab to be shipped. The token is locked:
- *                           it can no longer be transferred or traded. Custody: RedemptionRequested.
- *   4. `markShipped`        the operator records carrier + tracking number. Custody: Shipped.
- *   5. `confirmDelivery`    the owner confirms it arrived. Custody: Delivered.
- *      `reportLost`         or reports it lost in transit. Custody: Lost.
- *   6. `resolveLostReport`  the operator closes a lost report: found and delivered, or returned to the vault.
+ *   5. `requestRedemption`  the owner asks for the slab. The token is locked: it can no longer
+ *                           be transferred or traded. Custody: RedemptionRequested.
+ *   6. `markShipped`        Pokechain, as holder of CC's NFT, asked CC to ship to the owner;
+ *                           records CC's redemption id, carrier and tracking. Custody: Shipped.
+ *   7. `confirmDelivery`    the owner confirms it arrived. Custody: Delivered.
+ *      `reportLost`         or reports it lost. Custody: Lost.
+ *   8. `resolveLostReport`  the operator closes a lost report: delivered, or back in the vault.
  *
- *  The token is never burned. A withdrawn slab keeps its token, its owner and its full custody
- *  trail, so a lost-in-transit claim can be checked against the chain and the history of the
- *  physical card stays traceable.
+ *  Nothing is burned. Every step is a state change plus an event, so the slab's path from the
+ *  collector's hands, through Pokechain and CC, and back out to its final owner can be traced
+ *  end to end, on this chain and (through the stored ids) on Solana and with CC.
  */
 contract SlabVault is ERC721, AccessControl {
     using Strings for uint256;
@@ -52,6 +59,8 @@ contract SlabVault is ERC721, AccessControl {
     enum SubmissionStatus {
         None,
         Pending,
+        ReceivedByPokechain,
+        AtCustodian,
         Minted,
         Rejected
     }
@@ -61,12 +70,14 @@ contract SlabVault is ERC721, AccessControl {
         string certNumber;
         string title;
         string image;
-        /// The custodian's record of the physical slab: Grade10's Solana asset id.
+        /// Collector Crypt's Solana NFT (asset id) for this slab, held by Pokechain's escrow.
         string custodianRef;
         uint64 mintedAt;
         Custody custody;
         /// keccak256 of the shipping address. The address itself never goes on-chain.
         bytes32 shippingHash;
+        /// Collector Crypt's redemption id for the outbound shipment.
+        string redemptionRef;
         string carrier;
         string trackingNumber;
         uint64 custodyUpdatedAt;
@@ -79,6 +90,10 @@ contract SlabVault is ERC721, AccessControl {
         SubmissionStatus status;
         uint256 tokenId;
         uint64 requestedAt;
+        /// Pokechain → Collector Crypt leg
+        string forwardCarrier;
+        string forwardTracking;
+        uint64 updatedAt;
     }
 
     IAccountStatus public immutable accounts;
@@ -95,12 +110,16 @@ contract SlabVault is ERC721, AccessControl {
     mapping(address => uint256) public vaultedCount;
 
     event SubmissionRequested(uint256 indexed submissionId, address indexed owner, string grader, string certNumber);
+    event SubmissionReceived(uint256 indexed submissionId, address indexed owner);
+    event SubmissionForwarded(uint256 indexed submissionId, address indexed owner, string carrier, string trackingNumber);
     event SubmissionRejected(uint256 indexed submissionId, address indexed owner, string reason);
     event SlabMinted(
         uint256 indexed tokenId, uint256 indexed submissionId, address indexed owner, string certNumber, string custodianRef
     );
     event RedemptionRequested(uint256 indexed tokenId, address indexed owner, bytes32 shippingHash);
-    event SlabShipped(uint256 indexed tokenId, address indexed owner, string carrier, string trackingNumber);
+    event SlabShipped(
+        uint256 indexed tokenId, address indexed owner, string redemptionRef, string carrier, string trackingNumber
+    );
     event SlabDelivered(uint256 indexed tokenId, address indexed owner);
     event SlabReportedLost(uint256 indexed tokenId, address indexed owner, string trackingNumber, string details);
     event LostReportResolved(uint256 indexed tokenId, address indexed owner, Custody outcome);
@@ -109,6 +128,7 @@ contract SlabVault is ERC721, AccessControl {
     error CertAlreadyTokenised(uint256 tokenId);
     error CertAlreadyPending(uint256 submissionId);
     error SubmissionNotPending(uint256 submissionId);
+    error WrongSubmissionStatus(uint256 submissionId, SubmissionStatus current);
     error NotSlabOwner(uint256 tokenId);
     error WrongCustody(uint256 tokenId, Custody current);
     error SlabLocked(uint256 tokenId, Custody current);
@@ -122,7 +142,7 @@ contract SlabVault is ERC721, AccessControl {
 
     /* ---------------------------- slab onboarding ---------------------------- */
 
-    /// @notice Step 1: the collector declares a slab they are sending in.
+    /// @notice Step 1: the collector declares a slab they are sending to Pokechain.
     function requestSubmission(string calldata grader, string calldata certNumber) external returns (uint256 submissionId) {
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
         if (bytes(grader).length == 0 || bytes(certNumber).length == 0) revert EmptyField();
@@ -137,32 +157,52 @@ contract SlabVault is ERC721, AccessControl {
             certNumber: certNumber,
             status: SubmissionStatus.Pending,
             tokenId: 0,
-            requestedAt: uint64(block.timestamp)
+            requestedAt: uint64(block.timestamp),
+            forwardCarrier: "",
+            forwardTracking: "",
+            updatedAt: uint64(block.timestamp)
         });
         pendingSubmissionOfCert[key] = submissionId;
         emit SubmissionRequested(submissionId, msg.sender, grader, certNumber);
     }
 
+    /// @notice Step 2: Pokechain's warehouse has received the slab from the collector.
+    function markReceived(uint256 submissionId) external onlyRole(OPERATOR_ROLE) {
+        Submission storage s = _moveSubmission(submissionId, SubmissionStatus.Pending, SubmissionStatus.ReceivedByPokechain);
+        emit SubmissionReceived(submissionId, s.owner);
+    }
+
+    /// @notice Step 3: Pokechain ships the slab on to Collector Crypt's vault.
+    function markForwarded(uint256 submissionId, string calldata carrier, string calldata trackingNumber)
+        external
+        onlyRole(OPERATOR_ROLE)
+    {
+        if (bytes(trackingNumber).length == 0) revert EmptyField();
+        Submission storage s =
+            _moveSubmission(submissionId, SubmissionStatus.ReceivedByPokechain, SubmissionStatus.AtCustodian);
+        s.forwardCarrier = carrier;
+        s.forwardTracking = trackingNumber;
+        emit SubmissionForwarded(submissionId, s.owner, carrier, trackingNumber);
+    }
+
     /**
-     * @notice Step 2: the operator attests the custodian holds the slab and the cert checks out,
-     *         and mints the token to the collector.
+     * @notice Step 4: Collector Crypt has vaulted the slab and its Solana NFT sits in Pokechain's
+     *         escrow (the operator checked this off-chain). Mints the token to the collector.
      * @param title display name, e.g. "2021 Evolving Skies Umbreon VMAX #215 PSA 10"
      * @param image URL of the card image
-     * @param custodianRef Grade10's Solana asset id for this slab
+     * @param custodianRef Collector Crypt's Solana asset id for this slab
      */
     function mintSlab(uint256 submissionId, string calldata title, string calldata image, string calldata custodianRef)
         external
         onlyRole(OPERATOR_ROLE)
         returns (uint256 tokenId)
     {
-        Submission storage s = _submissions[submissionId];
-        if (s.status != SubmissionStatus.Pending) revert SubmissionNotPending(submissionId);
+        Submission storage s = _moveSubmission(submissionId, SubmissionStatus.AtCustodian, SubmissionStatus.Minted);
         if (!accounts.isActive(s.owner)) revert AccountNotActive(s.owner);
         if (bytes(custodianRef).length == 0) revert EmptyField();
 
         bytes32 key = certKey(s.grader, s.certNumber);
         tokenId = nextTokenId++;
-        s.status = SubmissionStatus.Minted;
         s.tokenId = tokenId;
         delete pendingSubmissionOfCert[key];
         tokenOfCert[key] = tokenId;
@@ -184,8 +224,9 @@ contract SlabVault is ERC721, AccessControl {
 
     function rejectSubmission(uint256 submissionId, string calldata reason) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _submissions[submissionId];
-        if (s.status != SubmissionStatus.Pending) revert SubmissionNotPending(submissionId);
+        if (!_isOpen(s.status)) revert SubmissionNotPending(submissionId);
         s.status = SubmissionStatus.Rejected;
+        s.updatedAt = uint64(block.timestamp);
         delete pendingSubmissionOfCert[certKey(s.grader, s.certNumber)];
         emit SubmissionRejected(submissionId, s.owner, reason);
     }
@@ -206,26 +247,33 @@ contract SlabVault is ERC721, AccessControl {
         emit RedemptionRequested(tokenId, msg.sender, shippingHash);
     }
 
-    /// @notice Step 4: the operator hands the slab to a carrier.
-    function markShipped(uint256 tokenId, string calldata carrier, string calldata trackingNumber)
-        external
-        onlyRole(OPERATOR_ROLE)
-    {
-        if (bytes(trackingNumber).length == 0) revert EmptyField();
+    /**
+     * @notice Step 6: Pokechain (holder of CC's NFT) asked Collector Crypt to ship the slab to the
+     *         owner. Records CC's redemption id and the carrier's tracking number.
+     */
+    function markShipped(
+        uint256 tokenId,
+        string calldata redemptionRef,
+        string calldata carrier,
+        string calldata trackingNumber
+    ) external onlyRole(OPERATOR_ROLE) {
+        if (bytes(trackingNumber).length == 0 || bytes(redemptionRef).length == 0) revert EmptyField();
         _moveCustody(tokenId, Custody.RedemptionRequested, Custody.Shipped);
-        _slabs[tokenId].carrier = carrier;
-        _slabs[tokenId].trackingNumber = trackingNumber;
-        emit SlabShipped(tokenId, ownerOf(tokenId), carrier, trackingNumber);
+        Slab storage slab = _slabs[tokenId];
+        slab.redemptionRef = redemptionRef;
+        slab.carrier = carrier;
+        slab.trackingNumber = trackingNumber;
+        emit SlabShipped(tokenId, ownerOf(tokenId), redemptionRef, carrier, trackingNumber);
     }
 
-    /// @notice Step 5a: the owner confirms the slab arrived.
+    /// @notice Step 7a: the owner confirms the slab arrived.
     function confirmDelivery(uint256 tokenId) external {
         if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         _moveCustody(tokenId, Custody.Shipped, Custody.Delivered);
         emit SlabDelivered(tokenId, msg.sender);
     }
 
-    /// @notice Step 5b: the owner reports the slab lost, before or after it was handed to the carrier.
+    /// @notice Step 7b: the owner reports the slab lost, before or after it was handed to the carrier.
     function reportLost(uint256 tokenId, string calldata details) external {
         if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         Custody c = _slabs[tokenId].custody;
@@ -235,7 +283,7 @@ contract SlabVault is ERC721, AccessControl {
     }
 
     /**
-     * @notice Step 6: the operator closes a lost report. `Delivered` if the carrier found it,
+     * @notice Step 8: the operator closes a lost report. `Delivered` if the carrier found it,
      *         `Vaulted` if it came back to the vault (it can then be traded again).
      */
     function resolveLostReport(uint256 tokenId, Custody outcome) external onlyRole(OPERATOR_ROLE) {
@@ -271,7 +319,7 @@ contract SlabVault is ERC721, AccessControl {
             '"image":"', s.image,
             '","attributes":[{"trait_type":"Grader","value":"', s.grader,
             '"},{"trait_type":"Cert number","value":"', s.certNumber,
-            '"},{"trait_type":"Custodian record (Solana)","value":"', s.custodianRef,
+            '"},{"trait_type":"Collector Crypt NFT (Solana)","value":"', s.custodianRef,
             '"},{"trait_type":"Custody","value":"', _custodyName(s.custody),
             '"}]}'
         );
@@ -299,6 +347,21 @@ contract SlabVault is ERC721, AccessControl {
         }
         if (to != address(0)) vaultedCount[to] += 1;
         return super._update(to, tokenId, auth);
+    }
+
+    function _isOpen(SubmissionStatus st) private pure returns (bool) {
+        return st == SubmissionStatus.Pending || st == SubmissionStatus.ReceivedByPokechain
+            || st == SubmissionStatus.AtCustodian;
+    }
+
+    function _moveSubmission(uint256 submissionId, SubmissionStatus expected, SubmissionStatus next)
+        private
+        returns (Submission storage s)
+    {
+        s = _submissions[submissionId];
+        if (s.status != expected) revert WrongSubmissionStatus(submissionId, s.status);
+        s.status = next;
+        s.updatedAt = uint64(block.timestamp);
     }
 
     function _moveCustody(uint256 tokenId, Custody expected, Custody next) private {

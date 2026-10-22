@@ -57,6 +57,10 @@ export const fromUsdcUnits = (units: bigint) => Number(formatUnits(units, USDC_D
 
 export const ACCOUNT_STATUS = ["None", "Active", "Closed"] as const;
 export const CUSTODY = ["None", "Vaulted", "Redemption requested", "Shipped", "Delivered", "Lost"] as const;
+export const SUBMISSION_STATUS = ["None", "Pending", "Received by Pokechain", "At Collector Crypt", "Minted", "Rejected"] as const;
+export type SubmissionStatusName = (typeof SUBMISSION_STATUS)[number];
+/** submission stages that are still in flight (not minted or rejected) */
+export const OPEN_SUBMISSION = new Set([1, 2, 3]);
 export type CustodyName = (typeof CUSTODY)[number];
 
 /* ---------------- explorer links ---------------- */

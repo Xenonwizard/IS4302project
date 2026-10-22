@@ -11,7 +11,7 @@
  *              3. waitForReceipt     wait until it's mined; the receipt holds block, gas, logs
  *  sign()      an off-chain EIP-712 signature (no gas, nothing broadcast)
  *  operator()  asks a server API route to send a transaction with the vault operator key
- *              (after it has checked Grade10's registry and Solana record where relevant)
+ *              (after it has checked Collector Crypt's API and Solana record where relevant)
  *
  * Each step is recorded in the Chain log.
  */
@@ -27,7 +27,7 @@ import {
 import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { CONTRACT_LABEL, chain, contracts, type ContractName } from "./config";
 import { useChainLog } from "./log";
-import type { CheckStep } from "../grade10/verify";
+import type { CheckStep } from "../collectorCrypt/client";
 import type { OperatorTx } from "./operator";
 
 type AbiOf<C extends ContractName> = (typeof contracts)[C]["abi"];
@@ -146,7 +146,7 @@ export function useChainTx() {
         log.update(id, { status: "failed", error: data.error ?? `HTTP ${res.status}` });
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
-      // The operator's off-chain reads (Grade10 registry, Solana getAsset) get their own lines.
+      // The operator's off-chain calls (Collector Crypt API, Solana getAsset) get their own lines.
       for (const c of data.checks ?? []) {
         log.add({ kind: "check", label, call: c.call, args: [c.detail], status: c.ok ? "success" : "failed" });
       }

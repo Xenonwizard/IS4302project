@@ -1,13 +1,17 @@
 {
   "info": {
-    "name": "Pokechain · Grade10 custody + Solana check",
-    "description": "Plays Grade10 (the custodian) and inspects the cross-chain custody check that gates every Pokechain mint.\n\nDemo order:\n1. In the app, submit a slab (SlabVault.requestSubmission). It shows 'Waiting for Grade10'.\n2. Set `grader` and `certNumber` below to match, then send **1 · Grade10 intake**. Grade10 now holds the slab and has recorded it on Solana.\n3. Within a few seconds the app runs the operator check (requests 2 and 3, server-side) and mints the Polygon token.\n4. Send 2 and 3 yourself to show what the operator saw.\n\nbaseUrl defaults to http://localhost:3000. If the dev server picked another port, change it.",
+    "name": "Pokechain · Collector Crypt custody flow",
+    "description": "Plays the parties outside the app: Pokechain's warehouse (operator), Collector Crypt (the vault) and the carrier. It also shows the Solana and trace calls the operator relies on. Nothing here talks to the real Collector Crypt; the app serves mocks with the real request shapes.\n\nInbound demo:\n1. In the app, submit a slab. SlabVault.requestSubmission creates submission #N, Pending.\n2. Set `submissionId`, `grader` and `certNumber`, then send **1**, **2** and **3** in order. The app's tracker moves at each step and mints the token after 3.\n3. Send **4** to show the Solana record the operator checked.\n\nOutbound demo:\n4. In the app, the token's current owner clicks Ship to me. Pokechain asks Collector Crypt to ship (redemption CCR-…).\n5. Set `redemptionId` (or send **6**, which stores it), then send **7** (in transit) and **8** (lost) or **9** (delivered).\n6. Send **10** for the full cross-chain trace.\n\nbaseUrl defaults to http://localhost:3000.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "http://localhost:3000"
+    },
+    {
+      "key": "submissionId",
+      "value": "1"
     },
     {
       "key": "grader",
@@ -22,16 +26,16 @@
       "value": ""
     },
     {
-      "key": "vaultWallet",
+      "key": "escrowWallet",
       "value": ""
-    },
-    {
-      "key": "submissionId",
-      "value": "1"
     },
     {
       "key": "tokenId",
       "value": "1"
+    },
+    {
+      "key": "redemptionId",
+      "value": "CCR-00001"
     },
     {
       "key": "rpcUrl",
@@ -40,10 +44,10 @@
   ],
   "item": [
     {
-      "name": "Grade10 (custodian, mocked)",
+      "name": "Inbound: collector → Pokechain → Collector Crypt → token",
       "item": [
         {
-          "name": "1 · Grade10 intake: slab arrives, recorded on Solana",
+          "name": "1 · Pokechain warehouse receives the slab (markReceived)",
           "request": {
             "method": "POST",
             "header": [
@@ -53,20 +57,86 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/grade10/intake",
+              "raw": "{{baseUrl}}/api/chain/receive",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "grade10",
+                "chain",
+                "receive"
+              ]
+            },
+            "description": "Operator tx: SlabVault.markReceived. If the cert doesn't exist, it sends rejectSubmission instead.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2 · Pokechain forwards it to Collector Crypt (markForwarded)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/chain/forward",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chain",
+                "forward"
+              ]
+            },
+            "description": "Operator tx: SlabVault.markForwarded(submissionId, carrier, tracking). This records the Pokechain → CC parcel.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "3 · Collector Crypt vaults it and mints its NFT to Pokechain's escrow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/intake",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
                 "intake"
               ]
             },
-            "description": "What Grade10's warehouse would call when the parcel arrives. Checks the slab in and mints its Solana vault NFT (owned and frozen by Grade10's vault wallet). 201 the first time, 200 if already received.",
+            "description": "What Collector Crypt does when the parcel arrives. It vaults the slab and mints its Solana NFT straight to Pokechain's escrow wallet. Within seconds the app checks it (Solana getAsset) and calls SlabVault.mintSlab.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"grader\": \"{{grader}}\",\n  \"certNumber\": \"{{certNumber}}\"\n}",
+              "raw": "{\n  \"grader\": \"{{grader}}\",\n  \"certNumber\": \"{{certNumber}}\",\n  \"depositorRef\": \"pokechain-submission-{{submissionId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -80,104 +150,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('received', () => pm.expect(pm.response.json().received).to.eql(true));",
-                  "pm.collectionVariables.set('assetId', pm.response.json().record.assetId);"
+                  "const c = pm.response.json().card;",
+                  "pm.test('NFT minted to Pokechain escrow', () => pm.expect(c.vaultStatus).to.eql('Vaulted'));",
+                  "pm.collectionVariables.set('assetId', c.assetId);",
+                  "pm.collectionVariables.set('escrowWallet', c.owner);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "2 · Grade10 registry: cert lookup",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/grade10/certs/{{grader}}/{{certNumber}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "grade10",
-                "certs",
-                "{{grader}}",
-                "{{certNumber}}"
-              ]
-            },
-            "description": "Step one of the operator's check. 404 until Grade10 has received the slab; then returns the Solana asset id."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 200) pm.collectionVariables.set('assetId', pm.response.json().solana.assetId);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Grade10 registry: every intake",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/grade10/intake",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "grade10",
-                "intake"
-              ]
-            },
-            "description": ""
-          }
-        },
-        {
-          "name": "Grade10 release: slab leaves the vault",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/grade10/release",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "grade10",
-                "release"
-              ]
-            },
-            "description": "Called by the operator when a redemption ships. The Solana NFT moves out of the vault wallet, so getAsset now shows another owner and frozen: false.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"assetId\": \"{{assetId}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Solana RPC (DAS API, mocked)",
-      "item": [
-        {
-          "name": "3 · getAsset: Grade10's on-chain record",
+          "name": "4 · Solana getAsset: the record the operator checks",
           "request": {
             "method": "POST",
             "header": [
@@ -196,7 +179,7 @@
                 "mock-solana"
               ]
             },
-            "description": "Step two of the operator's check, same JSON-RPC shape as Helius / Triton. The operator requires: ownership.owner == Grade10 vault wallet, ownership.frozen, !burnt, grouping.collection == Grade10 collection, attribute 'Cert number' == the submitted cert.",
+            "description": "DAS JSON-RPC, same shape as Helius. The operator requires: owner == Pokechain escrow, collection == Collector Crypt, attribute 'Cert number' == submitted cert, 'Vault status' == Vaulted, not burnt.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getAsset\",\n  \"params\": {\n    \"id\": \"{{assetId}}\"\n  }\n}",
@@ -206,92 +189,10 @@
                 }
               }
             }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const a = pm.response.json().result;",
-                  "pm.test('held by Grade10, frozen, not burnt', () => { pm.expect(a.ownership.frozen).to.eql(true); pm.expect(a.burnt).to.eql(false); });",
-                  "pm.collectionVariables.set('vaultWallet', a.ownership.owner);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "getAssetsByOwner: everything Grade10 holds",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/mock-solana",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "mock-solana"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getAssetsByOwner\",\n  \"params\": {\n    \"ownerAddress\": \"{{vaultWallet}}\"\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
           }
         },
         {
-          "name": "getSlot",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/mock-solana",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "mock-solana"
-              ]
-            },
-            "description": "",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getSlot\",\n  \"params\": []\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Pokechain operator (server key)",
-      "item": [
-        {
-          "name": "Verify custody and mint (SlabVault.mintSlab)",
+          "name": "Operator: verify custody and mint (mintSlab)",
           "request": {
             "method": "POST",
             "header": [
@@ -311,7 +212,7 @@
                 "mint"
               ]
             },
-            "description": "Runs the Grade10 + Solana check and, when verified, sends SlabVault.mintSlab from the operator key. Returns result: minted | awaiting_intake | mismatch | rejected, the checks, and the Polygon tx.",
+            "description": "The app polls this itself. Returns minted | awaiting_custodian | mismatch, plus the checks it ran.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",
@@ -324,7 +225,84 @@
           }
         },
         {
-          "name": "Ship a redemption (SlabVault.markShipped)",
+          "name": "Collector Crypt: card lookup",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/cards/{{grader}}/{{certNumber}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "cards",
+                "{{grader}}",
+                "{{certNumber}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Collector Crypt: every vaulted slab",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/intake",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "intake"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Solana getAssetsByOwner: everything in Pokechain's escrow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mock-solana",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mock-solana"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getAssetsByOwner\",\n  \"params\": {\n    \"ownerAddress\": \"{{escrowWallet}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Outbound: owner withdraws → Collector Crypt ships",
+      "item": [
+        {
+          "name": "5 · (normally via the app) Ship a redeemed token",
           "request": {
             "method": "POST",
             "header": [
@@ -344,16 +322,229 @@
                 "ship"
               ]
             },
-            "description": "Only works once the owner has called requestRedemption. Grade10 releases the slab, then the operator records carrier and tracking on Polygon.",
+            "description": "Only works after the owner's requestRedemption, and only with the exact address whose keccak256 they put on-chain. The operator asks Collector Crypt (as NFT holder) to ship, then records SlabVault.markShipped(tokenId, redemptionId, carrier, tracking).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tokenId\": \"{{tokenId}}\"\n}",
+              "raw": "{\n  \"tokenId\": \"{{tokenId}}\",\n  \"shipTo\": \"Misty, 2 Cerulean Gym Road, Cerulean City 000002\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             }
+          }
+        },
+        {
+          "name": "6 · Collector Crypt card lookup (stores redemptionId)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/cards/{{grader}}/{{certNumber}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "cards",
+                "{{grader}}",
+                "{{certNumber}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json(); if (r.redemptionId) pm.collectionVariables.set('redemptionId', r.redemptionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7 · Carrier scan: in transit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/redemptions/{{redemptionId}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "redemptions",
+                "{{redemptionId}}",
+                "events"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"in_transit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "8 · Carrier: parcel lost",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/redemptions/{{redemptionId}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "redemptions",
+                "{{redemptionId}}",
+                "events"
+              ]
+            },
+            "description": "Also written onto the Solana NFT (Vault status → Lost). The owner then files SlabVault.reportLost in the app.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"lost\",\n  \"note\": \"No scan for 10 days, parcel declared lost\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "9 · Carrier: delivered",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/redemptions/{{redemptionId}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "redemptions",
+                "{{redemptionId}}",
+                "events"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"delivered\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Collector Crypt: redemption tracking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/redemptions/{{redemptionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "redemptions",
+                "{{redemptionId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Solana getSignaturesForAsset: the NFT's history",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mock-solana",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mock-solana"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getSignaturesForAsset\",\n  \"params\": {\n    \"id\": \"{{assetId}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Trace",
+      "item": [
+        {
+          "name": "10 · Full cross-chain trace of a token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/trace/{{tokenId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "trace",
+                "{{tokenId}}"
+              ]
+            },
+            "description": "Polygon SlabVault events (inbound trail, mint, every Transfer, redemption, shipping, lost) + Solana getAsset/getSignaturesForAsset + Collector Crypt tracking, in one document. Also at /trace/{tokenId} in the app."
           }
         }
       ]

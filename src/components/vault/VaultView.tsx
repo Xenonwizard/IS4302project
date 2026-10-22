@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Blocks, MessagesSquare, Package, PackageOpen, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, MessagesSquare, Package, PackageOpen, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
@@ -13,6 +13,7 @@ import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
 import { PendingSubmissions } from "../chain/PendingSubmissions";
 import { RedeemModal } from "../chain/RedeemModal";
+import { TransferModal } from "../chain/TransferModal";
 import { WithdrawnList } from "../chain/WithdrawnList";
 import { Slab } from "../slab/Slab";
 import { Badge, Button, Modal, TimeAgo } from "../ui/primitives";
@@ -44,6 +45,7 @@ export function VaultView() {
   );
   const [sellTarget, setSellTarget] = useState<Listing | null>(null);
   const [redeemTarget, setRedeemTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  const [transferTarget, setTransferTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
 
   const allItems = useMemo(
     () =>
@@ -83,7 +85,9 @@ export function VaultView() {
     <div className="px-4 py-5 lg:px-6">
       <h1 className="text-[24px] font-bold">Vault</h1>
       <p className="mt-1 text-[13px] text-muted">
-        Held in the {BRAND.vaultCity} vault, insured at full market value.
+        {user.address
+          ? "Stored by Collector Crypt. Each slab's token is yours on Polygon, and its Collector Crypt NFT is held in Pokechain's escrow."
+          : `Held in the ${BRAND.vaultCity} vault, insured at full market value.`}
       </p>
 
       {user.address ? (
@@ -130,6 +134,7 @@ export function VaultView() {
                   onManage={() => setTab("listed")}
                   onSell={() => setSellTarget(listing)}
                   onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
+                  onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
                 />
               ))}
             </div>
@@ -220,6 +225,7 @@ export function VaultView() {
       </div>
 
       <RedeemModal target={redeemTarget} onClose={() => setRedeemTarget(null)} />
+      <TransferModal target={transferTarget} onClose={() => setTransferTarget(null)} />
 
       {/* list-for-sale modal */}
       <Modal
@@ -272,12 +278,15 @@ function SlabCard({
   onManage,
   onSell,
   onShip,
+  onTransfer,
 }: {
   entry: VaultItem;
   listing: Listing;
   onManage: () => void;
   onSell: () => void;
   onShip: () => void;
+  /** tokenised slabs on a wallet account only */
+  onTransfer?: () => void;
 }) {
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
@@ -301,9 +310,13 @@ function SlabCard({
           {entry.via} · <TimeAgo value={entry.acquiredAt} />
         </p>
         {entry.token ? (
-          <p className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-accent" title="ERC-721 in SlabVault">
-            <Blocks size={11} /> Token #{entry.token.tokenId}
-          </p>
+          <Link
+            href={`/trace/${entry.token.tokenId}`}
+            className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
+            title="Trace this slab across Polygon, Solana and Collector Crypt"
+          >
+            <Blocks size={11} /> Token #{entry.token.tokenId} · <Route size={11} /> Trace
+          </Link>
         ) : null}
         <div className="mt-3 grid gap-2">
           {entry.status === "Listed" ? (
@@ -320,6 +333,12 @@ function SlabCard({
             <Button size="sm" variant="outline" onClick={onShip}>
               <Truck size={13} />
               Ship to me
+            </Button>
+          ) : null}
+          {entry.status === "Vaulted" && onTransfer ? (
+            <Button size="sm" variant="outline" onClick={onTransfer}>
+              <Send size={13} />
+              Transfer
             </Button>
           ) : null}
         </div>

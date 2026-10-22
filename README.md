@@ -10,8 +10,9 @@ else — owners, grades, asks, bids, sales — is generated dummy data.
 **Account and slab onboarding / offboarding run on-chain.** Users sign up with a wallet
 (RainbowKit + MetaMask), and their handle is registered in a Solidity `AccountRegistry`. They
 deposit and withdraw test USDC (EIP-2612 permit) and can close the account. Slabs are minted as
-ERC-721s in `SlabVault` once the operator has checked Grade10's Solana custody record. Withdrawn
-slabs keep their token, locked, so a lost parcel can be reported on-chain. See
+ERC-721s in `SlabVault` once Collector Crypt (simulated) has vaulted them and its Solana NFT is in
+Pokechain's escrow. They can be transferred between collectors. Withdrawn slabs keep their token,
+locked, so a lost parcel can be reported and traced across Polygon, Solana and Collector Crypt. See
 **[docs/blockchain-onboarding.md](docs/blockchain-onboarding.md)** for the full explanation. Trading
 (offers, negotiation rooms) still lives in React context and `localStorage`.
 
@@ -30,7 +31,7 @@ npm run dev       # terminal 2: the app
 
 Then open http://localhost:3000 and sign up with **Hardhat test collector #1** (or MetaMask).
 `npm run contracts:test` runs the Solidity tests. `docs/postman/` has the Postman collection that
-plays Grade10. Node 20+ is required (Next 16). `./dev.sh` pins the Homebrew
+plays Pokechain's warehouse, Collector Crypt and the carrier. Node 20+ is required (Next 16). `./dev.sh` pins the Homebrew
 Node build if `npm run dev` complains about the version. The dev server needs internet access to
 fetch card images.
 
@@ -52,7 +53,8 @@ npm run lint                 # eslint
 | `/vault` | Collection, my listings, offers made, orders, watchlist; list for sale, delist, open trade room, request shipping |
 | `/checkout`, `/checkout/success` | Cart review, payment method, order receipt with tx hash |
 | `/profile/[username]` | Any seller's public collection and activity |
-| `/submit` | Slab submission: `requestSubmission` on-chain, waits for Grade10 + Solana check, then mints |
+| `/submit` | Slab submission: `requestSubmission` on-chain, then tracked through Pokechain → Collector Crypt → Solana check → mint |
+| `/trace/[tokenId]` | One slab's journey across Polygon, Solana and Collector Crypt |
 | `/account` | On-chain account record, event history (`eth_getLogs`), close account |
 
 ## User flows that work
@@ -107,7 +109,7 @@ is rendered client-side only.
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · lucide-react · `next/image`.
 
 Blockchain: Solidity 0.8.28 · OpenZeppelin 5 · Hardhat 3 + Ignition · viem · wagmi 2 · RainbowKit ·
-MetaMask · Polygon (local Hardhat or Amoy) · Solana DAS API (mocked Grade10 custody record).
+MetaMask · Polygon (local Hardhat or Amoy) · Solana DAS API (simulated Collector Crypt vault NFTs).
 
 ## On-chain
 

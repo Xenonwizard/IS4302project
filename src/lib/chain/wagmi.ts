@@ -13,7 +13,7 @@
 import { connectorsForWallets, type Wallet } from "@rainbow-me/rainbowkit";
 import { injectedWallet, metaMaskWallet } from "@rainbow-me/rainbowkit/wallets";
 import type { Address } from "viem";
-import { createConfig, createConnector, http, mock } from "wagmi";
+import { createConfig, createConnector, http, injected, mock } from "wagmi";
 import { BRAND } from "../brand";
 import { IS_LOCAL, chain } from "./config";
 
@@ -79,15 +79,36 @@ function testCollectorWallet({ index, address, hue }: (typeof TEST_COLLECTORS)[n
   });
 }
 
+const WALLETCONNECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
+
+/**
+ * MetaMask through its browser extension only. RainbowKit's own MetaMask entry also sets up
+ * WalletConnect for phones, which needs a real WalletConnect project id; without one it fails
+ * to reach the relay and logs errors. So, unless an id is configured, use the extension directly.
+ */
+function metaMaskExtension(): Wallet {
+  const rk = metaMaskWallet({ projectId: "unused" });
+  return {
+    id: "metamask-extension",
+    name: "MetaMask",
+    iconUrl: rk.iconUrl,
+    iconBackground: rk.iconBackground,
+    installed: typeof window !== "undefined" && Boolean((window as { ethereum?: { isMetaMask?: boolean } }).ethereum?.isMetaMask),
+    downloadUrls: rk.downloadUrls,
+    createConnector: (walletDetails) =>
+      createConnector((config) => ({ ...injected({ target: "metaMask" })(config), ...walletDetails })),
+  };
+}
+
 const connectors = connectorsForWallets(
   [
-    { groupName: "Your wallet", wallets: [metaMaskWallet, injectedWallet] },
+    { groupName: "Your wallet", wallets: WALLETCONNECT_ID ? [metaMaskWallet, injectedWallet] : [metaMaskExtension, injectedWallet] },
     ...(IS_LOCAL ? [{ groupName: "Local test wallets", wallets: TEST_COLLECTORS.map(testCollectorWallet) }] : []),
   ],
   {
     appName: BRAND.name,
-    // Only needed for WalletConnect (phone wallets). MetaMask in the browser works without one.
-    projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "pokechain-local-demo",
+    // Only used for WalletConnect (phone wallets). MetaMask in the browser works without one.
+    projectId: WALLETCONNECT_ID || "pokechain-local-demo",
   },
 );
 

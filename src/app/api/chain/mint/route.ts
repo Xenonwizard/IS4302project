@@ -1,16 +1,17 @@
 /**
- * Vault operator: check Grade10 custody (registry + Solana) and, once verified, mint the token
- * for a pending slab submission (SlabVault.mintSlab). The browser calls this after the
- * collector's requestSubmission transaction confirms, and again while it waits for Grade10.
+ * Pokechain operator: once Collector Crypt has vaulted the slab, check CC's API and the Solana NFT
+ * (held by Pokechain's escrow?) and mint the Polygon token (SlabVault.mintSlab). The browser
+ * polls this while a submission is at Collector Crypt.
+ *
+ *   POST /api/chain/mint   { "submissionId": "1" }
  */
-import { mintSubmission } from "@/lib/chain/operator";
+import { mintSubmission, operatorError } from "@/lib/chain/operator";
 
 export async function POST(request: Request) {
   try {
     const { submissionId, listingId } = (await request.json()) as { submissionId: string; listingId?: string };
-    const result = await mintSubmission(new URL(request.url).origin, BigInt(submissionId), listingId);
-    return Response.json(result);
+    return Response.json(await mintSubmission(new URL(request.url).origin, BigInt(submissionId), listingId));
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : "Mint failed" }, { status: 400 });
+    return Response.json({ error: operatorError(e, "Mint failed") }, { status: 400 });
   }
 }

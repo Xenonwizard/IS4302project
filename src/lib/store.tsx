@@ -99,6 +99,20 @@ const EMPTY: PersistShape = {
   lostReports: [],
 };
 
+/** A slab token the connected wallet owns, as SlabVault reports it. */
+export interface ChainSlab {
+  token: SlabToken;
+  grader: Grader;
+  certNumber: string;
+  /** SlabVault custody, e.g. "Vaulted", "Shipped" */
+  custody: string;
+  /** minted to this wallet, or received from another collector */
+  via: "Submission" | "Transfer";
+  carrier?: string;
+  trackingNumber?: string;
+  redemptionRef?: string;
+}
+
 export interface SlabSubmission {
   grader: Grader;
   certNumber: string;
@@ -128,6 +142,11 @@ interface StoreValue extends PersistShape {
   recordChainCash: (amount: number, label: string, txHash: string) => void;
   /** a slab already in the vault has been minted on-chain */
   attachToken: (listingId: string, token: SlabToken) => void;
+  /**
+   * For tokenised slabs the chain is the source of truth: adds tokens this wallet received
+   * (e.g. a transfer from another collector) and drops tokens it no longer owns.
+   */
+  syncChainSlabs: (owned: ChainSlab[], ownedByOthers: string[]) => void;
   /** the slab has left the vault: unlisted, its chats closed, moved to the Withdrawn tab */
   withdrawSlab: (listingId: string, withdrawal: Withdrawal) => void;
   updateWithdrawal: (listingId: string, patch: Partial<Withdrawal>) => void;
@@ -541,10 +560,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const user = state.user;
       if (!user) return null;
       const cert = input.certNumber.trim();
-      const duplicate = state.vault.some((v) => {
+      const duplicate = state.vault.find((v) => {
         const l = getListing(v.listingId);
         return l?.grader === input.grader && l.certNumber === cert;
       });
+      // The chain sync may already have added this freshly minted token: that's the same slab, not an error.
+      if (duplicate && token && duplicate.token?.tokenId === token.tokenId) return getListing(duplicate.listingId) ?? null;
       if (duplicate) {
         pushToast({ title: "Already in your slabs", body: `${input.grader} cert ${cert} is already vaulted.`, tone: "error" });
         return null;
@@ -656,6 +677,68 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       vault: prev.vault.map((v) => (v.listingId === listingId ? { ...v, token } : v)),
     }));
   }, []);
+
+  const syncChainSlabs = useCallback(
+    (owned: ChainSlab[], ownedByOthers: string[]) => {
+      const snapshot = latest.current;
+      const me = snapshot.user;
+      if (!me?.address) return;
+      // Only drop a token when ownerOf positively names someone else, so a read that started
+      // before a fresh mint can never make that slab vanish.
+      const others = new Set(ownedByOthers);
+      const known = new Set(snapshot.vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])));
+      const gone = snapshot.vault.filter((v) => v.token && others.has(v.token.tokenId));
+      const arrived = owned.filter((o) => !known.has(o.token.tokenId));
+      if (!gone.length && !arrived.length) return;
+
+      const added: { listing: Listing; item: VaultItem }[] = [];
+      for (const o of arrived) {
+        const made = makeSubmittedListing({ grader: o.grader, certNumber: o.certNumber, owner: me.username, nowMs: Date.now() });
+        if (!made) continue;
+        const listing = { ...made, tokenId: o.token.tokenId, contract: o.token.contract, ownerAddress: o.token.owner };
+        registerListing(listing);
+        const withdrawn = o.custody !== "Vaulted";
+        added.push({
+          listing,
+          item: {
+            listingId: listing.id,
+            acquiredAt: new Date().toISOString(),
+            via: o.via,
+            status: withdrawn ? "Withdrawn" : "Vaulted",
+            token: o.token,
+            withdrawal: withdrawn
+              ? {
+                  requestedAt: new Date().toISOString(),
+                  requestTx: "",
+                  shippingHash: "",
+                  shipTo: "",
+                  redemptionRef: o.redemptionRef,
+                  carrier: o.carrier,
+                  trackingNumber: o.trackingNumber,
+                }
+              : undefined,
+          },
+        });
+      }
+
+      setState((prev) => {
+        const goneIds = new Set(gone.map((v) => v.listingId));
+        const addIds = new Set(added.map((a) => a.listing.id));
+        return {
+          ...prev,
+          slabs: [...added.map((a) => a.listing), ...prev.slabs.filter((l) => !addIds.has(l.id))],
+          vault: [...added.map((a) => a.item), ...prev.vault.filter((v) => !goneIds.has(v.listingId) && !addIds.has(v.listingId))],
+          overrides: {
+            ...prev.overrides,
+            ...Object.fromEntries([...goneIds, ...addIds].map((id) => [id, { ...prev.overrides[id], delisted: true }])),
+          },
+        };
+      });
+      for (const a of added) pushToast({ title: `Token #${a.item.token!.tokenId} arrived`, body: `${a.listing.shortName} is now in your Vault.`, tone: "success" });
+      for (const v of gone) pushToast({ title: `Token #${v.token!.tokenId} left your wallet`, body: "Another collector owns it now." });
+    },
+    [pushToast],
+  );
 
   const withdrawSlab = useCallback(
     (listingId: string, withdrawal: Withdrawal) => {
@@ -956,6 +1039,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     requestShipping,
     recordChainCash,
     attachToken,
+    syncChainSlabs,
     withdrawSlab,
     updateWithdrawal,
     offboard,

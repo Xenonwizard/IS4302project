@@ -42,11 +42,20 @@ contract PokechainTest is Test {
         vm.stopPrank();
     }
 
-    function _mint(address who, string memory cert) internal returns (uint256 tokenId) {
+    /// Submit, then walk the inbound trail: Pokechain receives it and forwards it to Collector Crypt.
+    function _submitAndForward(address who, string memory cert) internal returns (uint256 sid) {
         vm.prank(who);
-        uint256 sid = vault.requestSubmission("PSA", cert);
+        sid = vault.requestSubmission("PSA", cert);
+        vm.startPrank(operator);
+        vault.markReceived(sid);
+        vault.markForwarded(sid, "SingPost", "SP123");
+        vm.stopPrank();
+    }
+
+    function _mint(address who, string memory cert) internal returns (uint256 tokenId) {
+        uint256 sid = _submitAndForward(who, cert);
         vm.prank(operator);
-        tokenId = vault.mintSlab(sid, "Charizard PSA 10", "https://images.pokemontcg.io/base1/4_hires.png", "G10sol1111");
+        tokenId = vault.mintSlab(sid, "Charizard PSA 10", "https://images.pokemontcg.io/base1/4_hires.png", "CCsol1111");
     }
 
     /* ------------------------ account onboarding ------------------------ */
@@ -201,7 +210,7 @@ contract PokechainTest is Test {
         SlabVault.Slab memory s = vault.slabOf(tokenId);
         assertEq(uint8(s.custody), uint8(SlabVault.Custody.Vaulted));
         assertEq(s.certNumber, "12345678");
-        assertEq(s.custodianRef, "G10sol1111");
+        assertEq(s.custodianRef, "CCsol1111");
         assertEq(vault.tokenOfCert(vault.certKey("PSA", "12345678")), tokenId);
     }
 
@@ -213,17 +222,73 @@ contract PokechainTest is Test {
 
     function test_OnlyOperatorMints() public {
         _register(alice, "alice");
-        vm.prank(alice);
-        uint256 sid = vault.requestSubmission("PSA", "12345678");
+        uint256 sid = _submitAndForward(alice, "12345678");
         vm.prank(alice);
         vm.expectRevert();
         vault.mintSlab(sid, "x", "y", "z");
     }
 
-    function test_MintNeedsCustodianRecord() public {
+    function test_InboundTrailIsRecorded() public {
         _register(alice, "alice");
         vm.prank(alice);
         uint256 sid = vault.requestSubmission("PSA", "12345678");
+
+        vm.expectEmit(true, true, false, false);
+        emit SlabVault.SubmissionReceived(sid, alice);
+        vm.prank(operator);
+        vault.markReceived(sid);
+
+        vm.expectEmit(true, true, false, true);
+        emit SlabVault.SubmissionForwarded(sid, alice, "SingPost", "SP123");
+        vm.prank(operator);
+        vault.markForwarded(sid, "SingPost", "SP123");
+
+        SlabVault.Submission memory sub = vault.submissionOf(sid);
+        assertEq(uint8(sub.status), uint8(SlabVault.SubmissionStatus.AtCustodian));
+        assertEq(sub.forwardTracking, "SP123");
+    }
+
+    function test_CannotMintBeforeCollectorCryptHasIt() public {
+        _register(alice, "alice");
+        vm.prank(alice);
+        uint256 sid = vault.requestSubmission("PSA", "12345678");
+        vm.prank(operator);
+        vault.markReceived(sid);
+        // Still at Pokechain's warehouse, not yet forwarded to Collector Crypt.
+        vm.prank(operator);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SlabVault.WrongSubmissionStatus.selector, sid, SlabVault.SubmissionStatus.ReceivedByPokechain
+            )
+        );
+        vault.mintSlab(sid, "x", "y", "z");
+    }
+
+    function test_InboundStepsMustBeInOrder() public {
+        _register(alice, "alice");
+        vm.prank(alice);
+        uint256 sid = vault.requestSubmission("PSA", "12345678");
+        vm.prank(operator);
+        vm.expectRevert(
+            abi.encodeWithSelector(SlabVault.WrongSubmissionStatus.selector, sid, SlabVault.SubmissionStatus.Pending)
+        );
+        vault.markForwarded(sid, "SingPost", "SP123");
+    }
+
+    function test_RejectAtAnyOpenStage() public {
+        _register(alice, "alice");
+        uint256 sid = _submitAndForward(alice, "12345678");
+        vm.prank(operator);
+        vault.rejectSubmission(sid, "Collector Crypt found the slab was cracked");
+        assertEq(uint8(vault.submissionOf(sid).status), uint8(SlabVault.SubmissionStatus.Rejected));
+        // The cert is free to be submitted again.
+        vm.prank(alice);
+        vault.requestSubmission("PSA", "12345678");
+    }
+
+    function test_MintNeedsCustodianRecord() public {
+        _register(alice, "alice");
+        uint256 sid = _submitAndForward(alice, "12345678");
         vm.prank(operator);
         vm.expectRevert(SlabVault.EmptyField.selector);
         vault.mintSlab(sid, "x", "y", "");
@@ -263,7 +328,7 @@ contract PokechainTest is Test {
         assertEq(vault.vaultedCount(alice), 0);
 
         vm.prank(operator);
-        vault.markShipped(tokenId, "DHL", "JD0123456789");
+        vault.markShipped(tokenId, "CCR-1", "DHL", "JD0123456789");
 
         vm.prank(alice);
         vault.confirmDelivery(tokenId);
@@ -271,7 +336,29 @@ contract PokechainTest is Test {
         SlabVault.Slab memory s = vault.slabOf(tokenId);
         assertEq(uint8(s.custody), uint8(SlabVault.Custody.Delivered));
         assertEq(s.trackingNumber, "JD0123456789");
+        assertEq(s.redemptionRef, "CCR-1");
         assertEq(vault.ownerOf(tokenId), alice); // never burned
+    }
+
+    /// A sells to B on Pokechain (the token moves), B withdraws: the slab ships to B, A has no claim.
+    function test_TransferThenNewOwnerRedeems() public {
+        _register(alice, "alice");
+        _register(bob, "bob");
+        uint256 tokenId = _mint(alice, "12345678");
+        vm.prank(alice);
+        vault.transferFrom(alice, bob, tokenId);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.NotSlabOwner.selector, tokenId));
+        vault.requestRedemption(tokenId, bytes32(0));
+
+        vm.prank(bob);
+        vault.requestRedemption(tokenId, keccak256("Bob, 2 Cerulean City"));
+        vm.prank(operator);
+        vault.markShipped(tokenId, "CCR-7", "DHL", "JD999");
+        vm.prank(bob);
+        vault.confirmDelivery(tokenId);
+        assertEq(vault.ownerOf(tokenId), bob);
     }
 
     function test_RedeemedTokenIsLocked() public {
@@ -294,7 +381,7 @@ contract PokechainTest is Test {
         vm.prank(alice);
         vault.requestRedemption(tokenId, bytes32(0));
         vm.prank(operator);
-        vault.markShipped(tokenId, "DHL", "JD0123456789");
+        vault.markShipped(tokenId, "CCR-1", "DHL", "JD0123456789");
 
         vm.expectEmit(true, true, false, true);
         emit SlabVault.SlabReportedLost(tokenId, alice, "JD0123456789", "Not delivered after 10 days");

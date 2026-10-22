@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { PackageCheck, PackageX } from "lucide-react";
+import { PackageCheck, PackageX, Route } from "lucide-react";
 import { useState } from "react";
 import { useReadContracts } from "wagmi";
 import { CUSTODY, contracts, type CustodyName } from "@/lib/chain/config";
@@ -18,8 +18,9 @@ import { Fn } from "./ui";
 const TRAIL: CustodyName[] = ["Vaulted", "Redemption requested", "Shipped", "Delivered"];
 
 /**
- * Slabs that have left the vault. Their custody state comes live from `SlabVault.slabOf(tokenId)`;
- * the token never goes away, so this list is the traceable record of everything withdrawn.
+ * Slabs that have left the vault. Their custody state, Collector Crypt redemption id and tracking
+ * come live from `SlabVault.slabOf(tokenId)`; the token never goes away, so this list is the
+ * traceable record of everything withdrawn, and each row links to the full cross-chain trace.
  */
 export function WithdrawnList({ items }: { items: { entry: VaultItem; listing: Listing }[] }) {
   const tokenIds = items.map((i) => BigInt(i.entry.token?.tokenId ?? 0));
@@ -31,19 +32,32 @@ export function WithdrawnList({ items }: { items: { entry: VaultItem; listing: L
   return (
     <ul className="space-y-3">
       {items.map((item, i) => {
-        const slab = data?.[i]?.result as { custody: number; carrier: string; trackingNumber: string; custodianRef: string } | undefined;
-        return <Row key={item.listing.id} item={item} custody={slab ? CUSTODY[slab.custody] : null} onChange={() => void refetch()} />;
+        const slab = data?.[i]?.result as OnChainSlab | undefined;
+        return (
+          <Row key={item.listing.id} item={item} slab={slab} custody={slab ? CUSTODY[slab.custody] : null} onChange={() => void refetch()} />
+        );
       })}
     </ul>
   );
 }
 
+interface OnChainSlab {
+  custody: number;
+  carrier: string;
+  trackingNumber: string;
+  redemptionRef: string;
+  custodianRef: string;
+  shippingHash: string;
+}
+
 function Row({
   item: { entry, listing },
+  slab,
   custody,
   onChange,
 }: {
   item: { entry: VaultItem; listing: Listing };
+  slab?: OnChainSlab;
   custody: CustodyName | null;
   onChange: () => void;
 }) {
@@ -71,7 +85,7 @@ function Row({
 
   const lost = custody === "Lost";
   // A lost slab got as far as Shipped if it has a tracking number, otherwise Redemption requested.
-  const step = lost ? (w?.trackingNumber ? 2 : 1) : custody ? TRAIL.indexOf(custody) : -1;
+  const step = lost ? (slab?.trackingNumber ? 2 : 1) : custody ? TRAIL.indexOf(custody) : -1;
 
   return (
     <li className="rounded-card border border-hairline bg-surface p-4">
@@ -87,8 +101,8 @@ function Row({
             <Badge tone={lost ? "warn" : custody === "Delivered" ? "good" : "accent"}>{custody ?? "Reading chain…"}</Badge>
           </div>
           <p className="mt-1 text-[12px] text-muted">
-            Token #{token?.tokenId} · still owned by you · {w ? `requested ${shortDate(w.requestedAt)}` : ""}
-            {w?.trackingNumber ? ` · ${w.carrier} ${w.trackingNumber}` : ""}
+            Token #{token?.tokenId} · still owned by you{w?.requestTx ? ` · requested ${shortDate(w.requestedAt)}` : ""}
+            {slab?.trackingNumber ? ` · Collector Crypt ${slab.redemptionRef} · ${slab.carrier} ${slab.trackingNumber}` : ""}
           </p>
 
           {/* custody trail, as SlabVault records it */}
@@ -108,10 +122,13 @@ function Row({
           </ol>
 
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-dim">
-            {w ? <span>request tx <CopyText text={w.requestTx} /></span> : null}
+            {w?.requestTx ? <span>request tx <CopyText text={w.requestTx} /></span> : null}
             {w?.shipTx ? <span>ship tx <CopyText text={w.shipTx} /></span> : null}
-            {w ? <span>shippingHash <CopyText text={w.shippingHash} /></span> : null}
-            {token?.custodianRef ? <span>Grade10 Solana asset <CopyText text={token.custodianRef} /></span> : null}
+            {slab?.shippingHash ? <span>shippingHash <CopyText text={slab.shippingHash} /></span> : null}
+            {slab?.custodianRef ? <span>Collector Crypt NFT <CopyText text={slab.custodianRef} /></span> : null}
+            <Link href={`/trace/${token?.tokenId}`} className="inline-flex items-center gap-1 font-semibold text-accent hover:underline">
+              <Route size={11} /> Full trace
+            </Link>
           </div>
         </div>
 
@@ -133,8 +150,9 @@ function Row({
         <div className="mt-3 space-y-2 rounded-xl bg-[#101014] p-3">
           <p className="text-[12px] text-muted">
             Calls <Fn>SlabVault.reportLost(tokenId, details)</Fn>. Custody becomes <b className="text-white">Lost</b> and{" "}
-            <Fn>SlabReportedLost</Fn> is emitted with the tracking number. Grade10 can then match it against its release
-            record, the carrier and the <Fn>shippingHash</Fn>.
+            <Fn>SlabReportedLost</Fn> is emitted with the tracking number. The Trace page lines this up with Collector
+            Crypt&apos;s redemption record, the carrier scans and the Solana NFT, which is frozen in Pokechain&apos;s escrow
+            and never burned.
           </p>
           <div className="flex gap-2">
             <input className={inputClass} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Not delivered after 10 days, carrier has no scan since dispatch" />

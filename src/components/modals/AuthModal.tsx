@@ -78,7 +78,16 @@ function Onboarding() {
 
   return (
     <div className="space-y-5 p-5">
-      {!acct.deployed ? (
+      {!acct.reachable ? (
+        <div className="flex gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-[12.5px] text-warn">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            {IS_LOCAL
+              ? "The local blockchain isn't running, so nothing can be sent yet. Start it in a terminal with npm run chain (it also deploys the contracts), then try again."
+              : `Can't reach ${chain.name}.`}
+          </span>
+        </div>
+      ) : !acct.deployed ? (
         <div className="flex gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-[12.5px] text-warn">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           <span>
@@ -123,7 +132,7 @@ function Onboarding() {
               Switch network
             </Button>
           ) : IS_LOCAL ? (
-            <Button className="w-full" onClick={getGas} disabled={busy === "gas"}>
+            <Button className="w-full" onClick={getGas} disabled={busy === "gas" || !acct.reachable}>
               <Fuel size={15} />
               Send me 10 test ETH
             </Button>
@@ -155,7 +164,7 @@ function Onboarding() {
               />
             </Field>
             {error ? <p className="text-[13px] font-medium text-bad">{error}</p> : null}
-            <Button type="submit" className="w-full" size="lg" disabled={busy === "register"}>
+            <Button type="submit" className="w-full" size="lg" disabled={busy === "register" || !acct.reachable}>
               {busy === "register" ? "Confirm in your wallet…" : "Open account"}
             </Button>
           </form>

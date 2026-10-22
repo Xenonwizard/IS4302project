@@ -2,13 +2,13 @@
 
 /**
  * A running log of every blockchain interaction the app makes: wallet transactions,
- * off-chain signatures, the vault operator's server-side transactions and its Grade10 /
+ * off-chain signatures, the operator's server-side transactions and its Collector Crypt /
  * Solana custody checks. The Chain log panel shows it, so a demo can point at exactly which
  * contract function ran, with which arguments, in which block, for how much gas.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-/** tx: user's wallet · signature: off-chain EIP-712 · operator: server key · check: Grade10 / Solana read */
+/** tx: user's wallet · signature: off-chain EIP-712 · operator: server key · check: Collector Crypt / Solana call */
 export type ChainLogKind = "tx" | "signature" | "operator" | "check";
 
 export interface ChainLogEntry {

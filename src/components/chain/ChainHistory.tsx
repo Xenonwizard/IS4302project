@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
-import type { Address } from "viem";
+import { zeroAddress, type Address } from "viem";
 import { usePublicClient } from "wagmi";
 import { DEPLOY_BLOCK, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
 import { usd } from "@/lib/format";
@@ -31,7 +31,7 @@ export function ChainHistory({ address }: { address: Address }) {
     refetchInterval: 10_000,
     queryFn: async (): Promise<Row[]> => {
       const from = { fromBlock: DEPLOY_BLOCK };
-      const [accountEvents, vaultEvents] = await Promise.all([
+      const [accountEvents, vaultEvents, sentOut, received] = await Promise.all([
         Promise.all(
           (["AccountOpened", "Deposited", "Withdrawn", "AccountClosed"] as const).map((eventName) =>
             client!.getContractEvents({ ...contracts.accounts, eventName, args: { account: address }, ...from }),
@@ -40,6 +40,9 @@ export function ChainHistory({ address }: { address: Address }) {
         Promise.all(
           ([
             "SubmissionRequested",
+            "SubmissionReceived",
+            "SubmissionForwarded",
+            "SubmissionRejected",
             "SlabMinted",
             "RedemptionRequested",
             "SlabShipped",
@@ -50,6 +53,9 @@ export function ChainHistory({ address }: { address: Address }) {
             client!.getContractEvents({ ...contracts.slabVault, eventName, args: { owner: address }, ...from }),
           ),
         ),
+        // ERC-721 ownership changes between collectors (mints are covered by SlabMinted)
+        client!.getContractEvents({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, ...from }),
+        client!.getContractEvents({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, ...from }),
       ]);
       const rows: Row[] = [];
       for (const log of accountEvents.flat()) {
@@ -67,14 +73,27 @@ export function ChainHistory({ address }: { address: Address }) {
         const detail =
           log.eventName === "SubmissionRequested"
             ? `submission #${a.submissionId} · ${a.grader} ${a.certNumber}`
-            : log.eventName === "SlabMinted"
-              ? `token #${a.tokenId} · cert ${a.certNumber} · Solana ${String(a.custodianRef).slice(0, 8)}…`
-              : log.eventName === "SlabShipped"
-                ? `token #${a.tokenId} · ${a.carrier} ${a.trackingNumber}`
-                : log.eventName === "SlabReportedLost"
-                  ? `token #${a.tokenId} · tracking ${a.trackingNumber}`
-                  : `token #${a.tokenId}`;
+            : log.eventName === "SubmissionReceived"
+              ? `submission #${a.submissionId} · at Pokechain's warehouse`
+              : log.eventName === "SubmissionForwarded"
+                ? `submission #${a.submissionId} · to Collector Crypt by ${a.carrier} ${a.trackingNumber}`
+                : log.eventName === "SubmissionRejected"
+                  ? `submission #${a.submissionId} · ${a.reason}`
+                  : log.eventName === "SlabMinted"
+                    ? `token #${a.tokenId} · cert ${a.certNumber} · CC NFT ${String(a.custodianRef).slice(0, 8)}…`
+                    : log.eventName === "SlabShipped"
+                      ? `token #${a.tokenId} · Collector Crypt ${a.redemptionRef} · ${a.carrier} ${a.trackingNumber}`
+                      : log.eventName === "SlabReportedLost"
+                        ? `token #${a.tokenId} · tracking ${a.trackingNumber}`
+                        : `token #${a.tokenId}`;
         rows.push({ key: `${log.transactionHash}-${log.logIndex}`, contract: "SlabVault", event: log.eventName, detail, block: log.blockNumber, tx: log.transactionHash });
+      }
+      for (const log of [...sentOut, ...received]) {
+        if (log.args.from === zeroAddress) continue;
+        const out = log.args.from === address;
+        const other = out ? log.args.to! : log.args.from!;
+        const detail = `token #${log.args.tokenId} ${out ? "sent to" : "received from"} ${other.slice(0, 6)}…${other.slice(-4)}`;
+        rows.push({ key: `${log.transactionHash}-${log.logIndex}`, contract: "SlabVault", event: "Transfer", detail, block: log.blockNumber, tx: log.transactionHash });
       }
       return rows.sort((x, y) => Number(y.block - x.block));
     },

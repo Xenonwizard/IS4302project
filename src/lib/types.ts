@@ -88,7 +88,7 @@ export interface SlabToken {
   tokenId: string;
   owner: string;
   mintTx: string;
-  /** Grade10's Solana asset id, stored in the token as its custodian reference */
+  /** Collector Crypt's Solana NFT (asset id) for the slab, held by Pokechain's escrow */
   custodianRef: string;
 }
 
@@ -100,6 +100,8 @@ export interface Withdrawal {
   shippingHash: string;
   /** the address itself, kept only in this browser */
   shipTo: string;
+  /** Collector Crypt's redemption id */
+  redemptionRef?: string;
   carrier?: string;
   trackingNumber?: string;
   shipTx?: string;
@@ -108,7 +110,7 @@ export interface Withdrawal {
 export interface VaultItem {
   listingId: string;
   acquiredAt: string;
-  via: "Purchase" | "Trade" | "Submission";
+  via: "Purchase" | "Trade" | "Submission" | "Transfer";
   status: "Vaulted" | "Shipping requested" | "Listed" | "Withdrawn";
   listedPrice?: number;
   token?: SlabToken;

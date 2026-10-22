@@ -36,7 +36,7 @@ export function SubmitForm() {
     // Signing in re-renders the form, so the user sends again rather than replaying a stale callback.
     if (!requireAuth()) return;
     if (user?.address) {
-      // On-chain: record the submission, then PendingSubmissions waits for Grade10 and mints.
+      // On-chain: record the submission; PendingSubmissions then tracks it to Pokechain, CC and the mint.
       setSending(true);
       try {
         await submitOnChain(form.grader, form.cert.trim());
@@ -73,7 +73,7 @@ export function SubmitForm() {
           </h1>
           <p className="mt-2 text-sm text-muted">
             {vaulted.grader} cert <span className="font-mono font-bold text-white">{vaulted.certNumber}</span>{" "}
-            checked out. Grade10 holds the slab, and its token was minted to your wallet on{" "}
+            checked out. Collector Crypt holds the slab, and its token was minted to your wallet on{" "}
             {BRAND.chain}
             {vault.find((v) => v.listingId === vaulted.id)?.token
               ? ` as token #${vault.find((v) => v.listingId === vaulted.id)!.token!.tokenId}`
@@ -144,8 +144,9 @@ export function SubmitForm() {
     <div className="mx-auto max-w-lg">
       <h1 className="text-[24px] font-bold">Vault a graded slab</h1>
       <p className="mt-1.5 text-[14px] text-muted">
-        Tell us the grader and the cert number on the label, then send the slab to Grade10 through us.
-        Grade10 checks it in and records it on Solana. Once we&apos;ve verified that record, your
+        Tell us the grader and the cert number on the label, then ship the slab to Pokechain. We forward it
+        to Collector Crypt&apos;s vault, where it is recorded as a Solana NFT held by Pokechain&apos;s escrow. Once
+        we&apos;ve verified that NFT, your
         Pokechain token is minted on {BRAND.chain} and the slab shows up in your Vault.
       </p>
 
@@ -207,7 +208,7 @@ export function SubmitForm() {
 
         <Button type="submit" size="lg" className="w-full" disabled={!preview || sending}>
           <ShieldCheck size={17} />
-          {sending ? "Confirm in your wallet…" : user ? "Submit and send to Grade10" : "Log in and send to the vault"}
+          {sending ? "Confirm in your wallet…" : user ? "Submit and ship to Pokechain" : "Log in and send to the vault"}
         </Button>
         {user?.address ? (
           <OnChainNote>
