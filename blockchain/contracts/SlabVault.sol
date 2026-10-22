@@ -132,6 +132,7 @@ contract SlabVault is ERC721, AccessControl {
     error NotSlabOwner(uint256 tokenId);
     error WrongCustody(uint256 tokenId, Custody current);
     error SlabLocked(uint256 tokenId, Custody current);
+    error SelfTransfer(uint256 tokenId);
     error EmptyField();
 
     constructor(IAccountStatus accounts_, address operator) ERC721("Pokechain Slab", "SLAB") {
@@ -334,13 +335,14 @@ contract SlabVault is ERC721, AccessControl {
 
     /**
      * @dev Every mint and transfer passes through here. A slab can only move while it is
-     *      Vaulted (once redemption starts the token is locked), only to an active account,
-     *      and the per-owner vaulted count follows it.
+     *      Vaulted (once redemption starts the token is locked), only to an active account
+     *      other than its current owner, and the per-owner vaulted count follows it.
      */
     function _update(address to, uint256 tokenId, address auth) internal override returns (address from) {
         from = _ownerOf(tokenId);
         if (to != address(0) && !accounts.isActive(to)) revert AccountNotActive(to);
         if (from != address(0)) {
+            if (to == from) revert SelfTransfer(tokenId);
             Custody c = _slabs[tokenId].custody;
             if (c != Custody.Vaulted) revert SlabLocked(tokenId, c);
             vaultedCount[from] -= 1;

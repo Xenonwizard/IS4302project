@@ -113,7 +113,7 @@ operator can resolve Lost back to `Delivered` or `Vaulted`).
 | `reportLost(tokenId, details)` | owner | Custody → **Lost** (from RedemptionRequested or Shipped) | `SlabReportedLost` (carries the tracking number) |
 | `resolveLostReport(tokenId, outcome)` | operator | Lost → Delivered, or back to Vaulted | `LostReportResolved` |
 | `tokenURI(tokenId)` | view | **Fully on-chain metadata**: a base64 JSON document with grader, cert, Solana ref and live custody | |
-| `_update` (internal hook) | every transfer | Transfers only while **Vaulted**, only **to an Active account**, and keeps `vaultedCount` right | `SlabLocked`, `AccountNotActive` |
+| `_update` (internal hook) | every transfer | Transfers only while **Vaulted**, only **to an Active account other than the owner**, and keeps `vaultedCount` right | `SlabLocked`, `AccountNotActive`, `SelfTransfer` |
 
 ### MockUSDC (`blockchain/contracts/MockUSDC.sol`)
 
@@ -294,8 +294,7 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
   `simulateContract` → `writeContract` → `waitForTransactionReceipt`).
 * **"What happens on-chain" panels** under every action name the function, the checks it makes
   and the event it emits.
-* **Account page** shows the raw view-function results, labelled with the call that produced each,
-  plus the `eth_getLogs` history.
+* **Account page** shows your on-chain status, the close-account check, and the `eth_getLogs` history.
 * **Trace page** (`/trace/<tokenId>`, linked from every token) lines up Polygon events, Solana
   transactions and Collector Crypt's carrier scans in one timeline.
 * **The Hardhat node terminal** prints every RPC call and every mined tx with gas and block.
@@ -356,7 +355,7 @@ Requirements: Node 20+ (`./dev.sh` pins Homebrew Node), and optionally MetaMask.
 
 ```bash
 npm run setup          # installs the app and blockchain/ dependencies
-npm run contracts:test # 27 Solidity unit + fuzz tests
+npm run contracts:test # 28 Solidity unit + fuzz tests
 npm run chain          # terminal 1: local chain + deploy + ABI export (leave running)
 npm run dev            # terminal 2: the app on http://localhost:3000
 ```
@@ -365,8 +364,13 @@ npm run dev            # terminal 2: the app on http://localhost:3000
 `blockchain/scripts/export-frontend.mjs`. That writes every ABI and address into
 `src/lib/chain/generated.ts`, so the frontend's types always match the deployed contracts. The node
 is in-memory: restart it and everything resets to block 0 (with the same addresses), and the mock
-Collector Crypt records are cleared to match. Use **Reset demo data** in the user menu to clear the
-browser side too.
+Collector Crypt records are cleared to match.
+
+**Resetting between test runs (no restart):** `npm run chain` takes an EVM snapshot right after
+deploying. **Reset chain + demo data** (in the Chain log panel, or *Reset demo data* in the user
+menu) calls `POST /api/dev/reset`, which rolls the node back to that snapshot with `evm_revert`.
+Every account, deposit, slab and transfer is gone, and the contract addresses are unchanged. It also
+clears the mock Collector Crypt records and this browser's saved state, and disconnects the wallet.
 
 **Using MetaMask on the local chain:** connect with MetaMask and approve *Add network* (RPC
 `http://127.0.0.1:8545`, chain id 31337). Press *Send me 10 test ETH* for gas. After restarting the
@@ -399,7 +403,7 @@ blockchain/
   contracts/AccountRegistry.sol   account onboarding / offboarding, USDC custody
   contracts/SlabVault.sol         ERC-721 slab tokens, custody state machine
   contracts/MockUSDC.sol          test USDC with EIP-2612 permit
-  test/Pokechain.t.sol            27 unit + fuzz tests
+  test/Pokechain.t.sol            28 unit + fuzz tests
   ignition/modules/Pokechain.ts   deployment + wiring
   scripts/dev-chain.mjs           npm run chain
   scripts/export-frontend.mjs     ABIs + addresses → src/lib/chain/generated.ts

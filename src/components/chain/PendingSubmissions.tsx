@@ -257,7 +257,7 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
         <p className="mb-1.5 font-semibold text-white">Or run this step from Postman (or a terminal):</p>
         <div className="flex items-start gap-2">
           <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-dim">{next.curl}</code>
-          <CopyText text={next.curl} title="Copy the curl command" />
+          <CopyText text={next.curl} title="Copy the curl command" label="Copy" />
         </div>
         {sub.status === 3 ? (
           <p className="mt-1.5 text-[11px] text-dim">This page polls Collector Crypt every few seconds and mints once the slab is vaulted.</p>

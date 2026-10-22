@@ -1,5 +1,6 @@
 "use client";
 
+import clsx from "clsx";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -17,6 +18,7 @@ import { useDisconnect } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { LISTINGS } from "@/lib/catalog";
 import { shortHash } from "@/lib/chain/config";
+import { useResetDemo } from "@/lib/chain/useResetDemo";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { Avatar, Button, inputClass } from "../ui/primitives";
@@ -43,7 +45,8 @@ export function PromoBanner() {
 }
 
 export function TopBar() {
-  const { user, balance, logout, setAuthOpen, resetDemo } = useStore();
+  const { user, balance, logout, setAuthOpen } = useStore();
+  const { request: requestReset, armed, resetting } = useResetDemo();
   const [menuOpen, setMenuOpen] = useState(false);
   const { disconnect } = useDisconnect();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -107,15 +110,17 @@ export function TopBar() {
                 <MenuLink href="/trades" icon={<MessagesSquare size={16} />} onGo={() => setMenuOpen(false)}>
                   Negotiation rooms
                 </MenuLink>
+                {/* Stays open on the first click so the second (confirming) click lands. */}
                 <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                    resetDemo();
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-white/5 hover:text-white"
+                  onClick={requestReset}
+                  disabled={resetting}
+                  className={clsx(
+                    "flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition hover:bg-white/5",
+                    armed ? "text-bad" : "text-muted hover:text-white",
+                  )}
                 >
                   <RotateCcw size={16} />
-                  Reset demo data
+                  {resetting ? "Resetting…" : armed ? "Click again to wipe everything" : "Reset demo data"}
                 </button>
                 <button
                   onClick={() => {

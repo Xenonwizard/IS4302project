@@ -37,17 +37,22 @@ function Transfer({ entry, listing, onClose }: { entry: VaultItem; listing: List
   const [busy, setBusy] = useState(false);
   const tokenId = entry.token!.tokenId;
 
-  /** Handle → wallet, straight from AccountRegistry: handleOwner(keccak256(handle)), then isActive. */
+  /**
+   * Handle → wallet, straight from AccountRegistry: handleOwner(keccak256(handle)), then accountOf.
+   * Closed handles stay reserved to their old wallet, so the handle must also be that wallet's
+   * *current* one, and the wallet can't be your own.
+   */
   const lookup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setTo(null);
     const h = handle.trim().toLowerCase().replace(/^@/, "");
-    if (h === user?.username) return setError("That's you.");
     const address = await client!.readContract({ ...contracts.accounts, functionName: "handleOwner", args: [keccak256(toBytes(h))] });
     if (address === zeroAddress) return setError(`No Pokechain account is called @${h}.`);
-    const active = await client!.readContract({ ...contracts.accounts, functionName: "isActive", args: [address] });
-    if (!active) return setError(`@${h}'s account is closed, so it can't receive slabs.`);
+    if (address.toLowerCase() === user?.address?.toLowerCase()) return setError(`@${h} is your own wallet.`);
+    const account = await client!.readContract({ ...contracts.accounts, functionName: "accountOf", args: [address] });
+    if (account.status !== 1) return setError(`@${h}'s account is closed, so it can't receive slabs.`);
+    if (account.handle !== h) return setError(`@${h} is a retired handle. That wallet is now @${account.handle}.`);
     setTo({ address, handle: h });
   };
 
@@ -99,7 +104,8 @@ function Transfer({ entry, listing, onClose }: { entry: VaultItem; listing: List
       {error ? <p className="text-[13px] font-medium text-bad">{error}</p> : null}
 
       <OnChainNote>
-        1. Reads <Fn>AccountRegistry.handleOwner(keccak256(handle))</Fn> and <Fn>isActive</Fn> to find their wallet.
+        1. Reads <Fn>AccountRegistry.handleOwner(keccak256(handle))</Fn> and <Fn>accountOf</Fn> to find their wallet
+        and check it&apos;s an active account still using that handle (and isn&apos;t yours).
         <br />
         2. <Fn>SlabVault.safeTransferFrom(you, them, tokenId)</Fn> moves the token. SlabVault&apos;s <Fn>_update</Fn> only
         allows it while the slab is <b className="text-white">Vaulted</b> and the receiver&apos;s account is Active. It also

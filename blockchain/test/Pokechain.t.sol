@@ -340,6 +340,15 @@ contract PokechainTest is Test {
         assertEq(vault.ownerOf(tokenId), alice); // never burned
     }
 
+    function test_CannotTransferToSelf() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.SelfTransfer.selector, tokenId));
+        vault.transferFrom(alice, alice, tokenId);
+        assertEq(vault.vaultedCount(alice), 1);
+    }
+
     /// A sells to B on Pokechain (the token moves), B withdraws: the slab ships to B, A has no claim.
     function test_TransferThenNewOwnerRedeems() public {
         _register(alice, "alice");

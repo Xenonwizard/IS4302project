@@ -55,7 +55,6 @@ export function AccountView() {
         </Link>
       </div>
 
-      <RecordCard acct={acct} />
       <CloseAccount acct={acct} />
       <ChainHistory address={acct.address} />
     </div>
@@ -63,37 +62,6 @@ export function AccountView() {
 }
 
 type Acct = ReturnType<typeof useOnchainAccount>;
-
-/** The raw view-function results, labelled with the call that produced them. */
-function RecordCard({ acct }: { acct: Acct }) {
-  const rows: [React.ReactNode, React.ReactNode][] = [
-    [<Fn key="a">AccountRegistry.accountOf(you).handle</Fn>, `@${acct.handle}`],
-    [<Fn key="b">AccountRegistry.accountOf(you).status</Fn>, acct.status],
-    [<Fn key="c">AccountRegistry.accountOf(you).openedAt</Fn>, acct.openedAt?.toLocaleString() ?? "—"],
-    [<Fn key="d">AccountRegistry.balanceOf(you)</Fn>, `${usd(acct.custodyBalance, { cents: true })} USDC in custody`],
-    [<Fn key="e">MockUSDC.balanceOf(you)</Fn>, `${usd(acct.walletUsdc, { cents: true })} USDC in your wallet`],
-    [<Fn key="f">SlabVault.vaultedCount(you)</Fn>, `${acct.vaultedCount} slab${acct.vaultedCount === 1 ? "" : "s"} in the vault`],
-    [<Fn key="g">eth_getBalance(you)</Fn>, `${acct.gasBalance.toFixed(4)} ${acct.gasSymbol} for gas`],
-  ];
-  return (
-    <section className="rounded-card border border-hairline bg-surface">
-      <header className="border-b border-hairline px-4 py-3">
-        <h2 className="text-[14px] font-bold">Your account, read from the chain</h2>
-        <p className="mt-0.5 text-[11px] text-dim">
-          Free <Fn>eth_call</Fn> reads (no transaction, no gas), batched into one multicall and refreshed every 8 seconds.
-        </p>
-      </header>
-      <dl className="divide-y divide-[rgba(255,255,255,0.08)]">
-        {rows.map(([k, v], i) => (
-          <div key={i} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-[13px]">
-            <dt>{k}</dt>
-            <dd className="font-semibold">{v}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  );
-}
 
 /** Offboarding: AccountRegistry.closeAccount() refunds the custody balance and marks the account Closed. */
 function CloseAccount({ acct }: { acct: Acct }) {

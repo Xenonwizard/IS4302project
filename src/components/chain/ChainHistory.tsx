@@ -88,12 +88,17 @@ export function ChainHistory({ address }: { address: Address }) {
                         : `token #${a.tokenId}`;
         rows.push({ key: `${log.transactionHash}-${log.logIndex}`, contract: "SlabVault", event: log.eventName, detail, block: log.blockNumber, tx: log.transactionHash });
       }
-      for (const log of [...sentOut, ...received]) {
+      // A transfer to yourself matches both queries; keep each log once.
+      const transfers = new Map([...sentOut, ...received].map((l) => [`${l.transactionHash}-${l.logIndex}`, l]));
+      for (const [key, log] of transfers) {
         if (log.args.from === zeroAddress) continue;
+        const self = log.args.from === log.args.to;
         const out = log.args.from === address;
         const other = out ? log.args.to! : log.args.from!;
-        const detail = `token #${log.args.tokenId} ${out ? "sent to" : "received from"} ${other.slice(0, 6)}…${other.slice(-4)}`;
-        rows.push({ key: `${log.transactionHash}-${log.logIndex}`, contract: "SlabVault", event: "Transfer", detail, block: log.blockNumber, tx: log.transactionHash });
+        const detail = self
+          ? `token #${log.args.tokenId} sent to yourself`
+          : `token #${log.args.tokenId} ${out ? "sent to" : "received from"} ${other.slice(0, 6)}…${other.slice(-4)}`;
+        rows.push({ key, contract: "SlabVault", event: "Transfer", detail, block: log.blockNumber, tx: log.transactionHash });
       }
       return rows.sort((x, y) => Number(y.block - x.block));
     },

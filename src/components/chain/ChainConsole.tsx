@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { Hash } from "viem";
 import { IS_LOCAL, chain, contracts, explorerAddress, explorerTx, shortHash, CONTRACT_LABEL } from "@/lib/chain/config";
 import { useChainLog, type ChainLogEntry, type ChainLogKind } from "@/lib/chain/log";
+import { useResetDemo } from "@/lib/chain/useResetDemo";
 import { Drawer, TimeAgo } from "../ui/primitives";
 
 const KIND: Record<ChainLogKind, { label: string; className: string }> = {
@@ -18,6 +19,7 @@ const KIND: Record<ChainLogKind, { label: string; className: string }> = {
 /** Floating button + drawer listing every blockchain call the app has made. */
 export function ChainConsole() {
   const { entries, open, setOpen, clear } = useChainLog();
+  const { request: requestReset, armed, resetting } = useResetDemo();
   const pending = entries.some((e) => e.status === "pending");
 
   return (
@@ -41,11 +43,22 @@ export function ChainConsole() {
             <span>
               {chain.name} · chain id {chain.id}
             </span>
-            {entries.length ? (
-              <button onClick={clear} className="font-semibold text-muted hover:text-white">
-                Clear
+            <span className="flex gap-3">
+              {entries.length ? (
+                <button onClick={clear} className="font-semibold text-muted hover:text-white">
+                  Clear log
+                </button>
+              ) : null}
+              <button onClick={requestReset} disabled={resetting} className="font-semibold text-bad hover:underline">
+                {resetting
+                  ? "Resetting…"
+                  : armed
+                    ? "Click again to wipe everything"
+                    : IS_LOCAL
+                      ? "Reset chain + demo data"
+                      : "Reset demo data"}
               </button>
-            ) : null}
+            </span>
           </div>
         }
       >
@@ -131,7 +144,8 @@ function Entry({ entry: e }: { entry: ChainLogEntry }) {
   );
 }
 
-export function CopyText({ text, title }: { text: string; title?: string }) {
+/** Copies `text`. Shows it shortened (hashes, addresses) unless a `label` is given, e.g. "Copy". */
+export function CopyText({ text, title, label }: { text: string; title?: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -141,9 +155,9 @@ export function CopyText({ text, title }: { text: string; title?: string }) {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1200);
       }}
-      className="inline-flex items-center gap-1 font-mono text-muted hover:text-white"
+      className={clsx("inline-flex shrink-0 items-center gap-1 text-muted hover:text-white", label ? "font-semibold" : "font-mono")}
     >
-      {shortHash(text)}
+      {label ? (copied ? "Copied" : label) : shortHash(text)}
       {copied ? <Check size={10} className="text-good" /> : <Copy size={10} />}
     </button>
   );
