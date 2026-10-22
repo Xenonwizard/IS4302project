@@ -5,7 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {SlabVault, IAccountStatus} from "./SlabVault.sol";
+import {SlabVault} from "./SlabVault.sol";
+import {AccountRegistry} from "./AccountRegistry.sol";
 
 /**
  * @title SlabMarket
@@ -42,9 +43,21 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         uint64 settledAt;
     }
 
+    struct ActiveListing {
+        uint256 tokenId;
+        address seller;
+        string sellerHandle;
+        uint256 price;
+        uint64 listedAt;
+        string grader;
+        string certNumber;
+        string title;
+        string image;
+    }
+
     SlabVault public immutable vault;
     IERC20 public immutable usdc;
-    IAccountStatus public immutable accounts;
+    AccountRegistry public immutable accounts;
 
     /// @notice tokenId => active listing
     mapping(uint256 => Listing) public listings;
@@ -74,7 +87,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     error TokenRestricted(uint256 tokenId);
     error SelfPurchase(uint256 tokenId);
 
-    constructor(SlabVault vault_, IERC20 usdc_, IAccountStatus accounts_) Ownable(msg.sender) {
+    constructor(SlabVault vault_, IERC20 usdc_, AccountRegistry accounts_) Ownable(msg.sender) {
         vault = vault_;
         usdc = usdc_;
         accounts = accounts_;
@@ -91,11 +104,13 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
         if (vault.ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         if (price == 0) revert InvalidPrice();
-        if (listings[tokenId].seller != address(0)) revert AlreadyListed(tokenId);
+
+        address currentSeller = listings[tokenId].seller;
+        if (currentSeller != address(0) && currentSeller != msg.sender) revert AlreadyListed(tokenId);
 
         SlabVault.Slab memory s = vault.slabOf(tokenId);
         if (s.custody != SlabVault.Custody.Vaulted) revert NotVaulted(tokenId, s.custody);
-        if (vault.isRestricted(tokenId)) revert TokenRestricted(tokenId);
+        if (currentSeller == address(0) && vault.isRestricted(tokenId)) revert TokenRestricted(tokenId);
 
         listings[tokenId] = Listing({
             seller: msg.sender,
@@ -104,7 +119,9 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         });
 
         // Lock the token from ordinary transfer and redemption while listed (Rule 5).
-        vault.setListingRestriction(tokenId, true);
+        if (currentSeller == address(0)) {
+            vault.setListingRestriction(tokenId, true);
+        }
 
         emit CardListed(tokenId, msg.sender, price, uint64(block.timestamp));
     }
@@ -195,6 +212,40 @@ contract SlabMarket is Ownable, ReentrancyGuard {
 
     function getAllSales() external view returns (SaleRecord[] memory) {
         return sales;
+    }
+
+    /**
+     * @notice Returns all currently active listings across Pokéchain with card metadata.
+     *         Allows any collector or visitor to view live marketplace inventory on-chain.
+     */
+    function getActiveListings() external view returns (ActiveListing[] memory) {
+        uint256 maxId = vault.nextTokenId();
+        uint256 count = 0;
+        for (uint256 i = 1; i < maxId; ++i) {
+            if (listings[i].seller != address(0)) {
+                count++;
+            }
+        }
+        ActiveListing[] memory result = new ActiveListing[](count);
+        uint256 idx = 0;
+        for (uint256 i = 1; i < maxId; ++i) {
+            if (listings[i].seller != address(0)) {
+                SlabVault.Slab memory s = vault.slabOf(i);
+                string memory handle = accounts.accountOf(listings[i].seller).handle;
+                result[idx++] = ActiveListing({
+                    tokenId: i,
+                    seller: listings[i].seller,
+                    sellerHandle: handle,
+                    price: listings[i].price,
+                    listedAt: listings[i].listedAt,
+                    grader: s.grader,
+                    certNumber: s.certNumber,
+                    title: s.title,
+                    image: s.image
+                });
+            }
+        }
+        return result;
     }
 }
 

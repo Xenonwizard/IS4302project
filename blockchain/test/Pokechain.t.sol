@@ -25,7 +25,7 @@ contract PokechainTest is Test {
         accounts = new AccountRegistry(usdc);
         vault = new SlabVault(IAccountStatus(address(accounts)), operator);
         accounts.setSlabVault(ISlabVaultCustody(address(vault)));
-        market = new SlabMarket(vault, usdc, IAccountStatus(address(accounts)));
+        market = new SlabMarket(vault, usdc, accounts);
         vault.setMarketplace(address(market));
 
         vm.prank(alice);
@@ -443,6 +443,23 @@ contract PokechainTest is Test {
         assertEq(l.price, 150 * USD);
     }
 
+    function test_GetActiveListings() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        assertEq(market.getActiveListings().length, 0);
+
+        vm.prank(alice);
+        market.list(tokenId, 150 * USD);
+
+        SlabMarket.ActiveListing[] memory active = market.getActiveListings();
+        assertEq(active.length, 1);
+        assertEq(active[0].tokenId, tokenId);
+        assertEq(active[0].seller, alice);
+        assertEq(active[0].sellerHandle, "alice");
+        assertEq(active[0].price, 150 * USD);
+    }
+
     function test_CannotListIfNotOwner() public {
         _register(alice, "alice");
         _register(bob, "bob");
@@ -467,16 +484,18 @@ contract PokechainTest is Test {
         market.list(tokenId, 100 * USD);
     }
 
-    function test_CannotListIfAlreadyListed() public {
+    function test_CanUpdateListingPrice() public {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");
 
         vm.prank(alice);
         market.list(tokenId, 100 * USD);
+        assertEq(market.getListing(tokenId).price, 100 * USD);
 
+        // Owner can update price
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(SlabMarket.AlreadyListed.selector, tokenId));
         market.list(tokenId, 200 * USD);
+        assertEq(market.getListing(tokenId).price, 200 * USD);
     }
 
     function test_CannotTransferWhileListed() public {

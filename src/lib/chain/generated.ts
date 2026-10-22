@@ -5,7 +5,7 @@ export const deployments = {
     "MockUSDC": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
     "AccountRegistry": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
     "SlabVault": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-    "SlabMarket": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+    "SlabMarket": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
     "fromBlock": 1
   }
 } as const;
@@ -2798,7 +2798,7 @@ export const slabMarketAbi = [
         "type": "address"
       },
       {
-        "internalType": "contract IAccountStatus",
+        "internalType": "contract AccountRegistry",
         "name": "accounts_",
         "type": "address"
       }
@@ -3065,7 +3065,7 @@ export const slabMarketAbi = [
     "name": "accounts",
     "outputs": [
       {
-        "internalType": "contract IAccountStatus",
+        "internalType": "contract AccountRegistry",
         "name": "",
         "type": "address"
       }
@@ -3097,6 +3097,66 @@ export const slabMarketAbi = [
     "name": "cancelListing",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getActiveListings",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "seller",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "sellerHandle",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "price",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint64",
+            "name": "listedAt",
+            "type": "uint64"
+          },
+          {
+            "internalType": "string",
+            "name": "grader",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "certNumber",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "image",
+            "type": "string"
+          }
+        ],
+        "internalType": "struct SlabMarket.ActiveListing[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {

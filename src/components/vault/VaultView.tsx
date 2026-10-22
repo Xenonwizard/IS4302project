@@ -151,7 +151,7 @@ export function VaultView() {
                   entry={entry}
                   listing={listing}
                   onManage={() => setTab("listed")}
-                  onSell={() => setSellTarget(listing)}
+                  onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
                   onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                   onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
                 />

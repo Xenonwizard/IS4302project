@@ -111,6 +111,8 @@ export interface ChainSlab {
   carrier?: string;
   trackingNumber?: string;
   redemptionRef?: string;
+  isListed?: boolean;
+  listedPrice?: number;
 }
 
 export interface SlabSubmission {
@@ -148,6 +150,7 @@ interface StoreValue extends PersistShape {
    * (e.g. a transfer from another collector) and drops tokens it no longer owns.
    */
   syncChainSlabs: (owned: ChainSlab[], ownedByOthers: string[]) => void;
+  syncMarketListings: (listings: { listing: Listing; price: number; seller: string }[]) => void;
   /** the transfer to another collector confirmed: the slab leaves this vault and its chats close */
   handOver: (listingId: string, toHandle: string) => void;
   /** the slab has left the vault: unlisted, its chats closed, moved to the Withdrawn tab */
@@ -794,25 +797,47 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Only drop a token when ownerOf positively names someone else, so a read that started
       // before a fresh mint can never make that slab vanish.
       const others = new Set(ownedByOthers);
+      const ownedMap = new Map(owned.map((o) => [o.token.tokenId, o]));
       const known = new Set(snapshot.vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])));
       const gone = snapshot.vault.filter((v) => v.token && others.has(v.token.tokenId));
       const arrived = owned.filter((o) => !known.has(o.token.tokenId));
-      if (!gone.length && !arrived.length) return;
+
+      let updatedExisting = false;
+      for (const v of snapshot.vault) {
+        if (!v.token) continue;
+        const o = ownedMap.get(v.token.tokenId);
+        if (!o) continue;
+        const newStatus = o.custody !== "Vaulted" ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+        if (v.status !== newStatus || v.listedPrice !== o.listedPrice) {
+          updatedExisting = true;
+          break;
+        }
+      }
+
+      if (!gone.length && !arrived.length && !updatedExisting) return;
 
       const added: { listing: Listing; item: VaultItem }[] = [];
       for (const o of arrived) {
         const made = makeSubmittedListing({ grader: o.grader, certNumber: o.certNumber, owner: me.username, nowMs: Date.now() });
         if (!made) continue;
-        const listing = { ...made, tokenId: o.token.tokenId, contract: o.token.contract, ownerAddress: o.token.owner };
+        const listing = {
+          ...made,
+          price: o.isListed && o.listedPrice ? o.listedPrice : made.price,
+          tokenId: o.token.tokenId,
+          contract: o.token.contract,
+          ownerAddress: o.token.owner,
+        };
         registerListing(listing);
         const withdrawn = o.custody !== "Vaulted";
+        const status: VaultItem["status"] = withdrawn ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
         added.push({
           listing,
           item: {
             listingId: listing.id,
             acquiredAt: new Date().toISOString(),
             via: o.via,
-            status: withdrawn ? "Withdrawn" : "Vaulted",
+            status,
+            listedPrice: o.listedPrice,
             token: o.token,
             withdrawal: withdrawn
               ? {
@@ -836,21 +861,85 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         for (const id of goneIds) {
           negotiations = closeSellerChats({ ...prev, negotiations }, id, "The seller no longer owns this slab.");
         }
+
+        const updatedVault = prev.vault
+          .filter((v) => !goneIds.has(v.listingId) && !addIds.has(v.listingId))
+          .map((v) => {
+            if (!v.token) return v;
+            const o = ownedMap.get(v.token.tokenId);
+            if (!o) return v;
+            const status: VaultItem["status"] = o.custody !== "Vaulted" ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+            return { ...v, status, listedPrice: o.listedPrice };
+          });
+
+        const newOverrides = { ...prev.overrides };
+        for (const id of goneIds) {
+          newOverrides[id] = { ...newOverrides[id], delisted: true };
+        }
+        for (const a of added) {
+          if (a.item.status === "Listed") {
+            newOverrides[a.listing.id] = { ...newOverrides[a.listing.id], price: a.item.listedPrice, delisted: false };
+          } else {
+            newOverrides[a.listing.id] = { ...newOverrides[a.listing.id], delisted: true };
+          }
+        }
+        for (const v of updatedVault) {
+          if (v.token && ownedMap.has(v.token.tokenId)) {
+            const o = ownedMap.get(v.token.tokenId)!;
+            if (o.isListed) {
+              newOverrides[v.listingId] = { ...newOverrides[v.listingId], price: o.listedPrice, delisted: false };
+            } else if (v.status !== "Listed") {
+              newOverrides[v.listingId] = { ...newOverrides[v.listingId], delisted: true };
+            }
+          }
+        }
+
         return {
           ...prev,
           negotiations,
           slabs: [...added.map((a) => a.listing), ...prev.slabs.filter((l) => !addIds.has(l.id))],
-          vault: [...added.map((a) => a.item), ...prev.vault.filter((v) => !goneIds.has(v.listingId) && !addIds.has(v.listingId))],
-          overrides: {
-            ...prev.overrides,
-            ...Object.fromEntries([...goneIds, ...addIds].map((id) => [id, { ...prev.overrides[id], delisted: true }])),
-          },
+          vault: [...added.map((a) => a.item), ...updatedVault],
+          overrides: newOverrides,
         };
       });
       for (const a of added) pushToast({ title: `Token #${a.item.token!.tokenId} arrived`, body: `${a.listing.shortName} is now in your Vault.`, tone: "success" });
       for (const v of gone) pushToast({ title: `Token #${v.token!.tokenId} left your wallet`, body: "Another collector owns it now." });
     },
     [pushToast],
+  );
+
+  const syncMarketListings = useCallback(
+    (activeListings: { listing: Listing; price: number; seller: string }[]) => {
+      setState((prev) => {
+        for (const a of activeListings) {
+          registerListing(a.listing);
+        }
+
+        const newOverrides = { ...prev.overrides };
+        for (const a of activeListings) {
+          newOverrides[a.listing.id] = {
+            ...newOverrides[a.listing.id],
+            price: a.price,
+            owner: a.seller || newOverrides[a.listing.id]?.owner,
+            delisted: false,
+          };
+        }
+
+        const newSlabsMap = new Map(prev.slabs.map((s) => [s.id, s]));
+        for (const a of activeListings) {
+          if (!newSlabsMap.has(a.listing.id)) {
+            newSlabsMap.set(a.listing.id, a.listing);
+          }
+        }
+
+        return {
+          ...prev,
+          slabs: Array.from(newSlabsMap.values()),
+          overrides: newOverrides,
+        };
+      });
+    },
+    [],
   );
 
   const handOver = useCallback(
@@ -1152,6 +1241,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     recordChainCash,
     attachToken,
     syncChainSlabs,
+    syncMarketListings,
     handOver,
     withdrawSlab,
     updateWithdrawal,

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChainConsole } from "../chain/ChainConsole";
 import { ChainDownBanner } from "../chain/ChainDownBanner";
+import { ChainMarketSync } from "../chain/ChainMarketSync";
 import { ChainSessionSync } from "../chain/ChainSessionSync";
 import { ChainVaultSync } from "../chain/ChainVaultSync";
 import { AuthModal } from "../modals/AuthModal";
@@ -28,6 +29,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <AuthModal />
       <ChainSessionSync />
       <ChainVaultSync />
+      <ChainMarketSync />
       <ChainConsole />
       <Toasts />
     </div>
