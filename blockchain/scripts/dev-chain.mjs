@@ -15,6 +15,16 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RPC = "http://127.0.0.1:8545";
+// On Windows, npm and npx are .cmd scripts that only start through a shell.
+const shell = process.platform === "win32";
+
+// Hardhat 3 refuses to run on older Node; say so up front instead of failing halfway.
+const [major, minor] = process.versions.node.split(".").map(Number);
+if (major < 22 || (major === 22 && minor < 13)) {
+  console.error(`\nPokechain's local chain needs Node.js 22.13 or newer (Hardhat 3); this is ${process.versions.node}.`);
+  console.error("Install Node 22 LTS or newer (https://nodejs.org or nvm install 22), then run npm run chain again.\n");
+  process.exit(1);
+}
 
 async function alive() {
   try {
@@ -34,7 +44,7 @@ if (await alive()) {
   process.exit(1);
 }
 
-const node = spawn("npx", ["hardhat", "node"], { cwd: root, stdio: ["ignore", "pipe", "inherit"] });
+const node = spawn("npx", ["hardhat", "node"], { cwd: root, stdio: ["ignore", "pipe", "inherit"], shell });
 node.stdout.on("data", (d) => process.stdout.write(d));
 process.on("SIGINT", () => node.kill("SIGINT"));
 node.on("exit", (code) => process.exit(code ?? 0));
@@ -46,7 +56,7 @@ for (let i = 0; i < 60 && !(await alive()); i++) await new Promise((r) => setTim
 rmSync(join(root, "ignition", "deployments", "chain-31337"), { recursive: true, force: true });
 rmSync(join(root, "..", ".data", "collector-crypt.json"), { force: true });
 rmSync(join(root, "..", ".data", "evidence"), { recursive: true, force: true });
-const deploy = spawnSync("npm", ["run", "deploy:local"], { cwd: root, stdio: "inherit" });
+const deploy = spawnSync("npm", ["run", "deploy:local"], { cwd: root, stdio: "inherit", shell });
 if (deploy.status !== 0) {
   console.error("Deploy failed; the node is still running.");
 } else {

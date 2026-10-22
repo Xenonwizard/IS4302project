@@ -385,7 +385,7 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
 
 ## 8. Recreate it from scratch
 
-Requirements: Node 20+ (`./dev.sh` pins Homebrew Node), and optionally MetaMask.
+Requirements: Node.js 22.13+ (Hardhat 3 needs it), and optionally MetaMask. Works on macOS, Windows and Linux; see the README's *Can't sign up or log in?* table if something fails.
 
 ```bash
 npm run setup          # installs the app and blockchain/ dependencies

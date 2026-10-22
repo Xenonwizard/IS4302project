@@ -23,17 +23,33 @@ The name lives in one file, [`src/lib/brand.ts`](src/lib/brand.ts).
 
 ## Running it
 
+**Requires Node.js 22.13 or newer** (Hardhat 3 needs it; check with `node -v`). Works on macOS,
+Windows and Linux.
+
 ```bash
-npm run setup     # app + blockchain/ dependencies
-npm run chain     # terminal 1: local Hardhat chain, deploys the contracts (leave running)
+npm run setup     # once, and again after pulling: installs the app and blockchain/ dependencies
+npm run chain     # terminal 1: local blockchain + deploys the contracts. Leave it running.
 npm run dev       # terminal 2: the app
 ```
 
-Then open http://localhost:3000 and sign up with **Hardhat test collector #1** (or MetaMask).
+Then open http://localhost:3000, click **Sign up**, **Connect wallet**, pick **Hardhat test
+collector #1** (no MetaMask needed), choose a handle and **Open account**.
 `npm run contracts:test` runs the Solidity tests. `docs/postman/` has the Postman collection that
-plays Pokechain's warehouse, Collector Crypt and the carrier. Node 20+ is required (Next 16). `./dev.sh` pins the Homebrew
-Node build if `npm run dev` complains about the version. The dev server needs internet access to
-fetch card images.
+plays Pokechain's warehouse, Collector Crypt and the carrier. The dev server needs internet access to
+fetch card images. (`./dev.sh` is a macOS helper that pins Homebrew's Node; you don't need it.)
+
+### Can't sign up or log in?
+
+| What you see | Cause | Fix |
+| --- | --- | --- |
+| Page loads but **nothing responds**: *Log in* / *Sign up* do nothing, no banner, and the address bar shows an IP like `192.168.x.x:3000` | The dev server only serves its JavaScript to `localhost`; and the blockchain is looked up on *your own* computer at `127.0.0.1:8545` | Run `npm run chain` and `npm run dev` on your own computer and open **http://localhost:3000** (not someone else's IP) |
+| Yellow banner: *"The local blockchain isn't running"*; Open account is greyed out | `npm run chain` isn't running, or it exited | Start it in a second terminal and leave it open. If it exits, read its error (usually the Node version) |
+| `npm run chain` says *needs Node.js 22.13 or newer* | Node 20 or older | Install Node 22 LTS (`nvm install 22`), then `npm run setup` again |
+| `npm run chain` says *Cannot find module* / *hardhat: not found* | `blockchain/` dependencies not installed | `npm run setup` |
+| *Something is already listening on 8545* | An old chain is still running | Close the other terminal (or the process on port 8545) and run `npm run chain` again |
+| Signed in on an old session, odd balances, or slabs that don't exist | Browser data from an earlier chain | Chain log panel → **Reset chain + demo data**, or use a private window |
+| MetaMask: wrong network, or transactions stuck | MetaMask isn't on the local chain, or remembers an old one | Use **Hardhat test collector #1**; or in MetaMask approve *Add network* (127.0.0.1:8545, chain 31337) and Settings → Advanced → **Clear activity tab data** |
+| Account page shows nothing after `git pull` | The contracts changed | Stop `npm run chain`, run `npm run setup`, start `npm run chain` again, then reset demo data |
 
 ```bash
 npm run build && npm start   # production build
