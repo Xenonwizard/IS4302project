@@ -136,6 +136,7 @@ interface StoreValue extends PersistShape {
   submitSlab: (input: SlabSubmission, token?: SlabToken) => Listing | null;
   listFromVault: (id: string, price: number) => void;
   delist: (id: string) => void;
+  buyNow: (listingId: string, txHash?: string) => boolean;
   requestShipping: (id: string) => void;
   /* blockchain: account and slab onboarding / offboarding */
   /** mirrors an on-chain USDC deposit (+) or withdrawal (−) into the wallet history */
@@ -671,6 +672,90 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
+  const buyNow = useCallback(
+    (listingId: string, txHash?: string): boolean => {
+      const snapshot = latest.current;
+      const user = snapshot.user;
+      if (!user) {
+        pushToast({ title: "Please sign in", body: "Sign in to buy slabs.", tone: "error" });
+        return false;
+      }
+      const listing = current(snapshot, listingId);
+      if (!listing) return false;
+      if (listing.owner === user.username) {
+        pushToast({ title: "Cannot purchase your own slab", tone: "error" });
+        return false;
+      }
+      const price = listing.price;
+      const me = user.username;
+      const now = new Date().toISOString();
+
+      if (!user.address && price > ledgerBalance(snapshot.ledger)) {
+        pushToast({ title: "Insufficient funds", body: "Top up your wallet balance first.", tone: "error" });
+        return false;
+      }
+
+      setState((prev) => {
+        const vault = prev.vault;
+        let ledger = prev.ledger;
+
+        if (!user.address) {
+          ledger = [
+            ledgerEntry(-price, `Bought ${listing.shortName} from @${listing.owner}`, listing.id),
+            ...ledger,
+          ];
+        }
+
+        const newVaultItem: VaultItem = {
+          listingId: listing.id,
+          acquiredAt: now,
+          via: "Purchase",
+          status: "Vaulted",
+          token: listing.tokenId && listing.contract
+            ? {
+                chainId: 31337,
+                contract: listing.contract,
+                tokenId: listing.tokenId,
+                owner: user.address ?? user.username,
+                mintTx: txHash ?? "",
+                custodianRef: "",
+              }
+            : undefined,
+        };
+
+        const overrides = { ...prev.overrides };
+        overrides[listing.id] = {
+          ...overrides[listing.id],
+          owner: me,
+          soldTo: me,
+          delisted: true,
+        };
+
+        const negotiations = closeSellerChats(
+          { ...prev, negotiations: prev.negotiations },
+          listing.id,
+          `Sold to @${me} for ${usd(price)}.`,
+        );
+
+        return {
+          ...prev,
+          negotiations,
+          vault: [newVaultItem, ...vault.filter((v) => v.listingId !== listing.id)],
+          ledger,
+          overrides,
+        };
+      });
+
+      pushToast({
+        title: "Purchase successful!",
+        body: `${listing.shortName} is now in your Vault.`,
+        tone: "success",
+      });
+      return true;
+    },
+    [pushToast],
+  );
+
   const requestShipping = useCallback(
     (id: string) => {
       setState((prev) => ({
@@ -1062,6 +1147,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     submitSlab,
     listFromVault,
     delist,
+    buyNow,
     requestShipping,
     recordChainCash,
     attachToken,

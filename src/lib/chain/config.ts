@@ -8,7 +8,7 @@
  */
 import { defineChain, formatUnits, parseUnits, type Address, type Chain, type Hash } from "viem";
 import { hardhat, polygonAmoy } from "viem/chains";
-import { accountRegistryAbi, deployments, mockUSDCAbi, slabVaultAbi } from "./generated";
+import { accountRegistryAbi, deployments, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "./generated";
 
 export const CHAIN_KEY = process.env.NEXT_PUBLIC_CHAIN === "amoy" ? "amoy" : "local";
 export const IS_LOCAL = CHAIN_KEY === "local";
@@ -21,7 +21,7 @@ export const chain: Chain = defineChain({
   ...(rpcOverride ? { rpcUrls: { default: { http: [rpcOverride] } } } : {}),
 });
 
-type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; fromBlock: number };
+type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; SlabMarket?: Address; fromBlock: number };
 const deployment = (deployments as Record<string, Deployment>)[String(chain.id)];
 
 /** False until `npm run deploy:local` (or deploy:amoy) has exported addresses for this chain. */
@@ -29,11 +29,12 @@ export const IS_DEPLOYED = Boolean(deployment);
 
 const ZERO = "0x0000000000000000000000000000000000000000" as Address;
 
-/** The three contracts, as `{ address, abi }` pairs that viem and wagmi take directly. */
+/** The contracts, as `{ address, abi }` pairs that viem and wagmi take directly. */
 export const contracts = {
   usdc: { address: deployment?.MockUSDC ?? ZERO, abi: mockUSDCAbi },
   accounts: { address: deployment?.AccountRegistry ?? ZERO, abi: accountRegistryAbi },
   slabVault: { address: deployment?.SlabVault ?? ZERO, abi: slabVaultAbi },
+  slabMarket: { address: deployment?.SlabMarket ?? ZERO, abi: slabMarketAbi },
 } as const;
 
 export type ContractName = keyof typeof contracts;
@@ -42,6 +43,7 @@ export const CONTRACT_LABEL: Record<ContractName, string> = {
   usdc: "MockUSDC",
   accounts: "AccountRegistry",
   slabVault: "SlabVault",
+  slabMarket: "SlabMarket",
 };
 
 /** Block the contracts were deployed at: event queries start here instead of at genesis. */

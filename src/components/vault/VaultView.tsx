@@ -10,6 +10,7 @@ import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useStore } from "@/lib/store";
+import { useMarketChain } from "@/lib/chain/useMarketChain";
 import type { Listing, VaultItem } from "@/lib/types";
 import { PendingSubmissions } from "../chain/PendingSubmissions";
 import { RedeemModal } from "../chain/RedeemModal";
@@ -39,7 +40,25 @@ export function VaultView() {
     resolve,
     negotiations,
     balance,
+    pushToast,
   } = useStore();
+  const { cancelListing } = useMarketChain();
+  const [delistingId, setDelistingId] = useState<string | null>(null);
+
+  const handleDelist = async (listingId: string, tokenId?: string) => {
+    setDelistingId(listingId);
+    try {
+      if (user?.address && tokenId) {
+        await cancelListing(tokenId);
+      }
+      delist(listingId);
+    } catch (err) {
+      pushToast({ title: "Could not cancel listing", body: (err as Error).message, tone: "error" });
+    } finally {
+      setDelistingId(null);
+    }
+  };
+
   const [tab, setTab] = useState<Tab>(
     () => TABS.find((t) => t.value === params.get("tab"))?.value ?? "all",
   );
@@ -205,8 +224,13 @@ export function VaultView() {
                           Negotiation rooms{chats.length ? ` (${chats.length})` : ""}
                         </Button>
                       </Link>
-                      <Button size="sm" variant="secondary" onClick={() => delist(listing.id)}>
-                        Remove
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={delistingId === listing.id}
+                        onClick={() => handleDelist(listing.id, entry.token?.tokenId ?? listing.tokenId)}
+                      >
+                        {delistingId === listing.id ? "Delisting..." : "Delist"}
                       </Button>
                     </div>
                   </li>

@@ -15,7 +15,10 @@ export default buildModule("PokechainModule", (m) => {
   const usdc = m.contract("MockUSDC");
   const accounts = m.contract("AccountRegistry", [usdc]);
   const slabVault = m.contract("SlabVault", [accounts, operator]);
-  m.call(accounts, "setSlabVault", [slabVault]);
+  const slabMarket = m.contract("SlabMarket", [slabVault, usdc, accounts]);
 
-  return { usdc, accounts, slabVault };
+  m.call(accounts, "setSlabVault", [slabVault]);
+  m.call(slabVault, "setMarketplace", [slabMarket]);
+
+  return { usdc, accounts, slabVault, slabMarket };
 });

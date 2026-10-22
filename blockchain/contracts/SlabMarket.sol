@@ -1,0 +1,200 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {SlabVault, IAccountStatus} from "./SlabVault.sol";
+
+/**
+ * @title SlabMarket
+ * @notice Fixed-price marketplace for vaulted Pokéchain card slabs (ERC-721 SlabVault tokens).
+ *
+ * Implements Section 3.2.3 (Marketplace and Payment) business rules:
+ *   Rule 1: Only the holder of a vaulted Pokéchain NFT may list it for sale, provided it is
+ *           not locked or frozen and its vault custody is still confirmed.
+ *   Rule 2: Listings use Pokéchain's supported stablecoin (USDC). Pokéchain charges 0% platform fee.
+ *   Rule 3: Payment (USDC) and NFT transfer settle atomically. If either fails, the entire transaction reverts.
+ *   Rule 4: Successful settlement transfers the Pokéchain NFT to the buyer and distributes proceeds
+ *           to the seller. The physical card and backing NFT remain in custody.
+ *   Rule 5: A listed NFT cannot simultaneously be pledged, redeemed, or independently transferred.
+ *           Cancelling its listing releases the sale restriction.
+ *   Rule 6: Only successfully settled marketplace purchases are included in completed-sales data.
+ *           The record identifies the token, price, buyer, seller, fees (0), and settlement time.
+ *   Rule 7: Non-sale transfers, loans, or cancellations are excluded from completed-sales data.
+ */
+contract SlabMarket is Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
+    struct Listing {
+        address seller;
+        uint256 price;
+        uint64 listedAt;
+    }
+
+    struct SaleRecord {
+        uint256 tokenId;
+        address seller;
+        address buyer;
+        uint256 price;
+        uint256 fee; // Always 0 per Rule 2
+        uint64 settledAt;
+    }
+
+    SlabVault public immutable vault;
+    IERC20 public immutable usdc;
+    IAccountStatus public immutable accounts;
+
+    /// @notice tokenId => active listing
+    mapping(uint256 => Listing) public listings;
+
+    /// @notice Auditable record of successfully settled marketplace purchases (Rule 6).
+    SaleRecord[] public sales;
+    mapping(uint256 => uint256[]) private _tokenSaleIndices;
+
+    event CardListed(uint256 indexed tokenId, address indexed seller, uint256 price, uint64 listedAt);
+    event ListingCancelled(uint256 indexed tokenId, address indexed seller, uint64 cancelledAt);
+    event CardPurchased(
+        uint256 indexed tokenId,
+        address indexed seller,
+        address indexed buyer,
+        uint256 price,
+        uint256 fee,
+        uint64 settledAt
+    );
+
+    error AccountNotActive(address account);
+    error NotSlabOwner(uint256 tokenId);
+    error NotSeller(uint256 tokenId);
+    error NotListed(uint256 tokenId);
+    error AlreadyListed(uint256 tokenId);
+    error InvalidPrice();
+    error NotVaulted(uint256 tokenId, SlabVault.Custody custody);
+    error TokenRestricted(uint256 tokenId);
+    error SelfPurchase(uint256 tokenId);
+
+    constructor(SlabVault vault_, IERC20 usdc_, IAccountStatus accounts_) Ownable(msg.sender) {
+        vault = vault_;
+        usdc = usdc_;
+        accounts = accounts_;
+    }
+
+    /* ----------------------------- listing actions ---------------------------- */
+
+    /**
+     * @notice Lists a vaulted slab for sale at a fixed price in USDC.
+     * @dev Enforces Rule 1 (only owner of vaulted slab, no active restriction).
+     *      Applies the Rule 5 sale restriction to the token in SlabVault.
+     */
+    function list(uint256 tokenId, uint256 price) external {
+        if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
+        if (vault.ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
+        if (price == 0) revert InvalidPrice();
+        if (listings[tokenId].seller != address(0)) revert AlreadyListed(tokenId);
+
+        SlabVault.Slab memory s = vault.slabOf(tokenId);
+        if (s.custody != SlabVault.Custody.Vaulted) revert NotVaulted(tokenId, s.custody);
+        if (vault.isRestricted(tokenId)) revert TokenRestricted(tokenId);
+
+        listings[tokenId] = Listing({
+            seller: msg.sender,
+            price: price,
+            listedAt: uint64(block.timestamp)
+        });
+
+        // Lock the token from ordinary transfer and redemption while listed (Rule 5).
+        vault.setListingRestriction(tokenId, true);
+
+        emit CardListed(tokenId, msg.sender, price, uint64(block.timestamp));
+    }
+
+    /**
+     * @notice Cancels an active listing, releasing the Rule 5 sale restriction.
+     */
+    function cancelListing(uint256 tokenId) external {
+        Listing memory l = listings[tokenId];
+        if (l.seller == address(0)) revert NotListed(tokenId);
+        if (l.seller != msg.sender) revert NotSeller(tokenId);
+
+        delete listings[tokenId];
+        vault.setListingRestriction(tokenId, false);
+
+        emit ListingCancelled(tokenId, msg.sender, uint64(block.timestamp));
+    }
+
+    /* ----------------------------- buying actions ----------------------------- */
+
+    /**
+     * @notice Purchases a listed slab atomically.
+     * @dev Transfers USDC directly from buyer to seller (0% platform fee, Rule 2),
+     *      releases the listing lock, and transfers the NFT to the buyer (Rules 3, 4).
+     *      Records the completed purchase into the sales history (Rule 6).
+     */
+    function buy(uint256 tokenId) external nonReentrant {
+        Listing memory l = listings[tokenId];
+        if (l.seller == address(0)) revert NotListed(tokenId);
+        if (msg.sender == l.seller) revert SelfPurchase(tokenId);
+        if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
+
+        // Verify vault custody is still confirmed (Rule 1)
+        SlabVault.Slab memory s = vault.slabOf(tokenId);
+        if (s.custody != SlabVault.Custody.Vaulted) revert NotVaulted(tokenId, s.custody);
+
+        // 1. Effects: remove listing and clear listing restriction
+        delete listings[tokenId];
+        vault.setListingRestriction(tokenId, false);
+
+        // Record completed sale for auditable comparable sales history (Rule 6)
+        uint256 saleIdx = sales.length;
+        sales.push(
+            SaleRecord({
+                tokenId: tokenId,
+                seller: l.seller,
+                buyer: msg.sender,
+                price: l.price,
+                fee: 0,
+                settledAt: uint64(block.timestamp)
+            })
+        );
+        _tokenSaleIndices[tokenId].push(saleIdx);
+
+        // 2. Interactions: Atomic payment & token transfer
+        // Buyer pays seller full price in USDC (0 platform fee per Rule 2)
+        usdc.safeTransferFrom(msg.sender, l.seller, l.price);
+
+        // SlabVault executes transfer from seller to buyer
+        vault.settleMarketTransfer(l.seller, msg.sender, tokenId);
+
+        emit CardPurchased(tokenId, l.seller, msg.sender, l.price, 0, uint64(block.timestamp));
+    }
+
+    /* --------------------------------- views --------------------------------- */
+
+    function isListed(uint256 tokenId) external view returns (bool) {
+        return listings[tokenId].seller != address(0);
+    }
+
+    function getListing(uint256 tokenId) external view returns (Listing memory) {
+        return listings[tokenId];
+    }
+
+    function totalSales() external view returns (uint256) {
+        return sales.length;
+    }
+
+    function getSalesForToken(uint256 tokenId) external view returns (SaleRecord[] memory) {
+        uint256[] storage indices = _tokenSaleIndices[tokenId];
+        uint256 len = indices.length;
+        SaleRecord[] memory tokenSales = new SaleRecord[](len);
+        for (uint256 i = 0; i < len; ++i) {
+            tokenSales[i] = sales[indices[i]];
+        }
+        return tokenSales;
+    }
+
+    function getAllSales() external view returns (SaleRecord[] memory) {
+        return sales;
+    }
+}
+

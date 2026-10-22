@@ -25,13 +25,19 @@ The name lives in one file, [`src/lib/brand.ts`](src/lib/brand.ts).
 
 ```bash
 npm run setup     # app + blockchain/ dependencies
+npm run dev:all   # local Hardhat chain + Next.js app together in one terminal
+```
+
+Or run them in separate terminals:
+
+```bash
 npm run chain     # terminal 1: local Hardhat chain, deploys the contracts (leave running)
 npm run dev       # terminal 2: the app
 ```
 
 Then open http://localhost:3000 and sign up with **Hardhat test collector #1** (or MetaMask).
 `npm run contracts:test` runs the Solidity tests. `docs/postman/` has the Postman collection that
-plays Pokechain's warehouse, Collector Crypt and the carrier. Node 20+ is required (Next 16). `./dev.sh` pins the Homebrew
+plays Pokechain's warehouse, Collector Crypt and the carrier. Node 20+ is required (Next 16). `./dev.sh` (or `./dev-all.sh`) pins the Homebrew
 Node build if `npm run dev` complains about the version. The dev server needs internet access to
 fetch card images.
 

@@ -12,6 +12,7 @@ import {
   Play,
   Share2,
   ShieldCheck,
+  ShoppingCart,
   Tag,
   Truck,
 } from "lucide-react";
@@ -22,6 +23,8 @@ import { GRADERS, GRADE_STEPS } from "@/lib/pools";
 import { population, salesFor } from "@/lib/catalog";
 import { shortDate, truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
+import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import type { Grader, Listing } from "@/lib/types";
 import { OfferModal } from "../modals/OfferModal";
 import { CardBack } from "../slab/CardBack";
@@ -39,6 +42,8 @@ import {
 
 export function AssetDetail({ listing: base }: { listing: Listing }) {
   const {
+    user,
+    balance,
     resolve,
     isOwned,
     isWatched,
@@ -48,6 +53,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     addComment,
     pushToast,
     isListed,
+    delist,
+    buyNow,
     negotiations,
   } = useStore();
 
@@ -55,10 +62,54 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const owned = isOwned(listing.id);
   const listed = isListed(listing.id);
 
+  const { buyCard, cancelListing } = useMarketChain();
+  const acct = useOnchainAccount();
+
+  const [buyOpen, setBuyOpen] = useState(false);
+  const [buyBusy, setBuyBusy] = useState(false);
+  const [delisting, setDelisting] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
   const [view, setView] = useState<"slab" | "front" | "back">("slab");
   const [spin, setSpin] = useState(false);
   const [draft, setDraft] = useState("");
+
+  const handleBuy = async () => {
+    setBuyBusy(true);
+    try {
+      let txHash = "";
+      if (user?.address && listing.tokenId) {
+        txHash = await buyCard(listing.tokenId, listing.price);
+      }
+      buyNow(listing.id, txHash);
+      setBuyOpen(false);
+    } catch (err) {
+      pushToast({
+        title: "Purchase failed",
+        body: (err as Error).message,
+        tone: "error",
+      });
+    } finally {
+      setBuyBusy(false);
+    }
+  };
+
+  const handleDelist = async () => {
+    setDelisting(true);
+    try {
+      if (user?.address && listing.tokenId) {
+        await cancelListing(listing.tokenId);
+      }
+      delist(listing.id);
+    } catch (err) {
+      pushToast({
+        title: "Delist failed",
+        body: (err as Error).message,
+        tone: "error",
+      });
+    } finally {
+      setDelisting(false);
+    }
+  };
 
   const localComments = comments[listing.id] ?? [];
   const allComments = [...localComments, ...listing.comments];
@@ -302,33 +353,60 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               {owned ? (
                 <div className="mt-4 grid gap-2">
                   {listed ? (
-                    <Link href={`/trades?listing=${listing.id}`}>
-                      <Button size="lg" className="w-full">
-                        <MessagesSquare size={16} />
-                        Offers on this slab{openChats ? ` (${openChats})` : ""}
+                    <>
+                      <Link href={`/trades?listing=${listing.id}`}>
+                        <Button size="lg" className="w-full">
+                          <MessagesSquare size={16} />
+                          Offers on this slab{openChats ? ` (${openChats})` : ""}
+                        </Button>
+                      </Link>
+                      <Button
+                        size="lg"
+                        variant="secondary"
+                        className="w-full"
+                        disabled={delisting}
+                        onClick={handleDelist}
+                      >
+                        {delisting ? "Delisting..." : "Delist from Marketplace"}
                       </Button>
-                    </Link>
+                    </>
                   ) : (
-                    <p className="text-[12px] text-muted">
-                      List this slab from your Vault to put it on the marketplace and receive offers.
-                    </p>
+                    <>
+                      <p className="text-[12px] text-muted">
+                        List this slab from your Vault to put it on the marketplace and receive offers.
+                      </p>
+                      <Link href="/vault">
+                        <Button size="lg" className="w-full">
+                          <Tag size={16} />
+                          List it from your Vault
+                        </Button>
+                      </Link>
+                    </>
                   )}
-                  <Link href={listed ? "/vault?tab=listed" : "/vault"}>
-                    <Button size="lg" variant={listed ? "secondary" : "primary"} className="w-full">
-                      {listed ? null : <Tag size={16} />}
-                      {listed ? "Manage listing" : "List it from your Vault"}
-                    </Button>
-                  </Link>
                 </div>
               ) : listed ? (
-                <Button
-                  size="lg"
-                  className="mt-4 w-full"
-                  onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
-                >
-                  <Gavel size={16} />
-                  Make an offer
-                </Button>
+                <div className="mt-4 grid gap-2">
+                  <Button
+                    size="lg"
+                    className="w-full"
+                    onClick={() => requireAuth(() => setBuyOpen(true)) && setBuyOpen(true)}
+                  >
+                    <ShoppingCart size={16} />
+                    Buy now for {usd(listing.price)}
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
+                  >
+                    <Gavel size={16} />
+                    Make an offer
+                  </Button>
+                  <p className="text-center text-[11px] text-dim">
+                    0% platform fee · Atomic on-chain settlement
+                  </p>
+                </div>
               ) : (
                 <p className="mt-4 text-[12px] text-muted">This slab is not for sale right now.</p>
               )}
@@ -383,6 +461,79 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <Details listing={listing} />
         </div>
       </div>
+
+      {/* Buy Confirmation Modal */}
+      <Modal open={buyOpen} onClose={() => !buyBusy && setBuyOpen(false)} title="Confirm Purchase">
+        <div className="p-5">
+          <div className="flex gap-4">
+            <div className="w-20 shrink-0">
+              <Slab listing={listing} flat />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[14px] font-bold leading-snug">{listing.title}</p>
+              <p className="mt-1 text-[12px] text-muted">
+                {listing.grader} Cert #{listing.certNumber}
+              </p>
+              <p className="mt-1 text-[12px] text-muted">Seller: @{listing.owner}</p>
+            </div>
+          </div>
+
+          <dl className="mt-5 space-y-2.5 rounded-2xl bg-surface-2 p-4 text-[13px]">
+            <div className="flex justify-between">
+              <dt className="text-muted">Item price</dt>
+              <dd className="font-semibold">{usd(listing.price, { cents: true })}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-muted">Pokéchain fee (Rule 2)</dt>
+              <dd className="font-semibold text-good">0% ($0.00)</dd>
+            </div>
+            <div className="h-px bg-hairline" />
+            <div className="flex justify-between">
+              <dt className="text-muted">Total payment</dt>
+              <dd className="text-base font-bold text-accent">{usd(listing.price, { cents: true })} USDC</dd>
+            </div>
+          </dl>
+
+          <div className="mt-4 flex items-center justify-between rounded-xl border border-hairline p-3 text-[12px]">
+            <span className="text-muted">Your available balance:</span>
+            <span className="font-bold">
+              {user?.address ? `${usd(acct.walletUsdc, { cents: true })} USDC` : usd(balance, { cents: true })}
+            </span>
+          </div>
+
+          {user?.address && acct.walletUsdc < listing.price ? (
+            <p className="mt-3 text-[12px] text-bad">
+              You need {usd(listing.price - acct.walletUsdc, { cents: true })} more USDC. Top up or mint test USDC in your wallet.
+            </p>
+          ) : !user?.address && balance < listing.price ? (
+            <p className="mt-3 text-[12px] text-bad">
+              Your demo balance is insufficient. Top up in your account menu.
+            </p>
+          ) : null}
+
+          <div className="mt-5 flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              disabled={buyBusy}
+              onClick={() => setBuyOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              className="flex-1"
+              disabled={
+                buyBusy ||
+                (user?.address ? acct.walletUsdc < listing.price : balance < listing.price)
+              }
+              onClick={handleBuy}
+            >
+              {buyBusy ? "Settling atomically..." : `Pay ${usd(listing.price, { cents: true })}`}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <OfferModal listing={listing} open={offerOpen} onClose={() => setOfferOpen(false)} />
     </div>

@@ -7,6 +7,6 @@ export const BRAND = {
   tagline: "Graded Pokémon slabs, vaulted, tokenised and negotiated live.",
   chain: "Polygon",
   vaultCity: "Delaware",
-  /** taken from the cash a seller receives; slabs in a trade are not charged */
-  sellerFee: 0.02,
+  /** Pokéchain does not charge platform fees (Rule 2) */
+  sellerFee: 0,
 };
