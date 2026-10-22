@@ -42,9 +42,10 @@ node.on("exit", (code) => process.exit(code ?? 0));
 for (let i = 0; i < 60 && !(await alive()); i++) await new Promise((r) => setTimeout(r, 500));
 
 // A fresh node has none of the old deployment, so Ignition's journal for it is stale, and so are
-// the mock Collector Crypt records (they point at NFTs and submissions from the old chain).
+// the mock Collector Crypt records and intake evidence (they belong to the old chain).
 rmSync(join(root, "ignition", "deployments", "chain-31337"), { recursive: true, force: true });
 rmSync(join(root, "..", ".data", "collector-crypt.json"), { force: true });
+rmSync(join(root, "..", ".data", "evidence"), { recursive: true, force: true });
 const deploy = spawnSync("npm", ["run", "deploy:local"], { cwd: root, stdio: "inherit" });
 if (deploy.status !== 0) {
   console.error("Deploy failed; the node is still running.");

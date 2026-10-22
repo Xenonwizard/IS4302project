@@ -17,6 +17,7 @@ contract PokechainTest is Test {
     address bob = makeAddr("bob");
 
     uint256 constant USD = 1e6;
+    bytes32 constant EVIDENCE = keccak256("manifest: front.jpg, back.jpg, label.jpg");
 
     function setUp() public {
         usdc = new MockUSDC();
@@ -45,7 +46,7 @@ contract PokechainTest is Test {
     /// Submit, then walk the inbound trail: Pokechain receives it and forwards it to Collector Crypt.
     function _submitAndForward(address who, string memory cert) internal returns (uint256 sid) {
         vm.prank(who);
-        sid = vault.requestSubmission("PSA", cert);
+        sid = vault.requestSubmission("PSA", cert, 250_000, EVIDENCE, "SingPost", "RR1SG");
         vm.startPrank(operator);
         vault.markReceived(sid);
         vault.markForwarded(sid, "SingPost", "SP123");
@@ -217,7 +218,7 @@ contract PokechainTest is Test {
     function test_SubmissionNeedsAnAccount() public {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(SlabVault.AccountNotActive.selector, alice));
-        vault.requestSubmission("PSA", "12345678");
+        vault.requestSubmission("PSA", "12345678", 250_000, EVIDENCE, "SingPost", "RR1SG");
     }
 
     function test_OnlyOperatorMints() public {
@@ -228,10 +229,29 @@ contract PokechainTest is Test {
         vault.mintSlab(sid, "x", "y", "z");
     }
 
+    function test_SubmissionNeedsEvidenceAndValue() public {
+        _register(alice, "alice");
+        vm.startPrank(alice);
+        vm.expectRevert(SlabVault.MissingEvidence.selector);
+        vault.requestSubmission("PSA", "12345678", 250_000, bytes32(0), "", "");
+        vm.expectRevert(SlabVault.EmptyField.selector);
+        vault.requestSubmission("PSA", "12345678", 0, EVIDENCE, "", "");
+        vm.stopPrank();
+    }
+
+    function test_EvidenceCarriesOntoToken() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+        SlabVault.Slab memory slab = vault.slabOf(tokenId);
+        assertEq(slab.evidenceHash, EVIDENCE);
+        assertEq(slab.declaredValueCents, 250_000);
+        assertEq(vault.submissionOf(1).inboundTracking, "RR1SG");
+    }
+
     function test_InboundTrailIsRecorded() public {
         _register(alice, "alice");
         vm.prank(alice);
-        uint256 sid = vault.requestSubmission("PSA", "12345678");
+        uint256 sid = vault.requestSubmission("PSA", "12345678", 250_000, EVIDENCE, "SingPost", "RR1SG");
 
         vm.expectEmit(true, true, false, false);
         emit SlabVault.SubmissionReceived(sid, alice);
@@ -251,7 +271,7 @@ contract PokechainTest is Test {
     function test_CannotMintBeforeCollectorCryptHasIt() public {
         _register(alice, "alice");
         vm.prank(alice);
-        uint256 sid = vault.requestSubmission("PSA", "12345678");
+        uint256 sid = vault.requestSubmission("PSA", "12345678", 250_000, EVIDENCE, "SingPost", "RR1SG");
         vm.prank(operator);
         vault.markReceived(sid);
         // Still at Pokechain's warehouse, not yet forwarded to Collector Crypt.
@@ -267,7 +287,7 @@ contract PokechainTest is Test {
     function test_InboundStepsMustBeInOrder() public {
         _register(alice, "alice");
         vm.prank(alice);
-        uint256 sid = vault.requestSubmission("PSA", "12345678");
+        uint256 sid = vault.requestSubmission("PSA", "12345678", 250_000, EVIDENCE, "SingPost", "RR1SG");
         vm.prank(operator);
         vm.expectRevert(
             abi.encodeWithSelector(SlabVault.WrongSubmissionStatus.selector, sid, SlabVault.SubmissionStatus.Pending)
@@ -283,7 +303,7 @@ contract PokechainTest is Test {
         assertEq(uint8(vault.submissionOf(sid).status), uint8(SlabVault.SubmissionStatus.Rejected));
         // The cert is free to be submitted again.
         vm.prank(alice);
-        vault.requestSubmission("PSA", "12345678");
+        vault.requestSubmission("PSA", "12345678", 250_000, EVIDENCE, "SingPost", "RR1SG");
     }
 
     function test_MintNeedsCustodianRecord() public {
@@ -300,7 +320,7 @@ contract PokechainTest is Test {
         uint256 tokenId = _mint(alice, "12345678");
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(SlabVault.CertAlreadyTokenised.selector, tokenId));
-        vault.requestSubmission("PSA", "12345678");
+        vault.requestSubmission("PSA", "12345678", 250_000, EVIDENCE, "SingPost", "RR1SG");
     }
 
     function test_TransfersOnlyToActiveAccounts() public {
@@ -417,5 +437,66 @@ contract PokechainTest is Test {
         uint256 tokenId = _mint(alice, "12345678");
         string memory uri = vault.tokenURI(tokenId);
         assertEq(bytes(uri)[0], bytes1("d")); // data:application/json;base64,...
+    }
+
+    /// What the collector declared in the form is part of the NFT's own metadata.
+    function test_TokenURICarriesDeclaredValueAndEvidence() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+        string memory uri = vault.tokenURI(tokenId);
+        string memory decoded = string(_base64Decode(_after(uri, "data:application/json;base64,")));
+        assertTrue(_contains(decoded, '"Declared value (USD cents)","display_type":"number","value":250000'));
+        assertTrue(_contains(decoded, vm.toString(EVIDENCE)));
+    }
+
+    function _after(string memory s, string memory prefix) private pure returns (string memory) {
+        bytes memory b = bytes(s);
+        bytes memory p = bytes(prefix);
+        bytes memory out = new bytes(b.length - p.length);
+        for (uint256 i; i < out.length; ++i) out[i] = b[i + p.length];
+        return string(out);
+    }
+
+    function _contains(string memory hay, string memory needle) private pure returns (bool) {
+        bytes memory h = bytes(hay);
+        bytes memory n = bytes(needle);
+        if (n.length > h.length) return false;
+        for (uint256 i; i <= h.length - n.length; ++i) {
+            bool ok = true;
+            for (uint256 j; j < n.length; ++j) {
+                if (h[i + j] != n[j]) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) return true;
+        }
+        return false;
+    }
+
+    function _base64Decode(string memory data) private pure returns (bytes memory) {
+        bytes memory table = bytes("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/");
+        bytes memory d = bytes(data);
+        uint256 pad = d.length > 0 && d[d.length - 1] == "=" ? (d.length > 1 && d[d.length - 2] == "=" ? 2 : 1) : 0;
+        bytes memory out = new bytes((d.length / 4) * 3 - pad);
+        uint256 o;
+        for (uint256 i; i < d.length; i += 4) {
+            uint256 n;
+            for (uint256 j; j < 4; ++j) {
+                uint256 v;
+                bytes1 c = d[i + j];
+                if (c != "=") {
+                    for (uint256 k; k < 64; ++k) {
+                        if (table[k] == c) {
+                            v = k;
+                            break;
+                        }
+                    }
+                }
+                n = (n << 6) | v;
+            }
+            for (uint256 j; j < 3 && o < out.length; ++j) out[o++] = bytes1(uint8(n >> (16 - 8 * j)));
+        }
+        return out;
     }
 }

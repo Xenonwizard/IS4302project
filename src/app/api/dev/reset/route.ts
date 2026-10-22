@@ -6,7 +6,8 @@
  * `npm run chain` takes an EVM snapshot right after deploying. This reverts the Hardhat node to
  * it (evm_revert: every account, deposit, slab and transfer since is gone; contract addresses stay
  * the same), takes a fresh snapshot for next time (a snapshot is used up by reverting to it), and
- * clears the mock Collector Crypt records, which describe the rolled-back chain.
+ * clears the mock Collector Crypt records and stored intake evidence, which describe the
+ * rolled-back chain.
  */
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,6 +49,7 @@ export async function POST() {
     const next = await rpc<string>("evm_snapshot");
     writeFileSync(SNAPSHOT_FILE, JSON.stringify({ snapshotId: next }));
     rmSync(join(DATA, "collector-crypt.json"), { force: true });
+    rmSync(join(DATA, "evidence"), { recursive: true, force: true });
     const block = await rpc<string>("eth_blockNumber");
     return Response.json({ reset: true, block: Number(block), snapshotId: next });
   } catch (e) {

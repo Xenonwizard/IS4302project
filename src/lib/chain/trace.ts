@@ -54,7 +54,11 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   const push = (event: string, detail: string, log: { blockNumber: bigint; transactionHash: string; logIndex: number }) =>
     rows.push({ event, detail, block: log.blockNumber, tx: log.transactionHash, logIndex: log.logIndex });
 
-  for (const l of requested) push("SubmissionRequested", `#${l.args.submissionId} by ${short(l.args.owner!)}: ${l.args.grader} ${l.args.certNumber}, shipping to Pokechain`, l);
+  for (const l of requested) {
+    const value = (Number(l.args.declaredValueCents) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+    const parcel = l.args.inboundTracking ? `, parcel ${l.args.inboundTracking}` : "";
+    push("SubmissionRequested", `#${l.args.submissionId} by ${short(l.args.owner!)}: ${l.args.grader} ${l.args.certNumber}, declared ${value}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
+  }
   for (const l of received) push("SubmissionReceived", `Pokechain's warehouse received submission #${l.args.submissionId}`, l);
   for (const l of forwarded) push("SubmissionForwarded", `Forwarded to Collector Crypt: ${l.args.carrier} ${l.args.trackingNumber}`, l);
   if (minted) push("SlabMinted", `Token #${tokenId} to ${short(minted.args.owner!)}; CC NFT ${minted.args.custodianRef}`, minted);
@@ -104,8 +108,16 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     trackingNumber: slab.trackingNumber,
     shippingHash: slab.shippingHash,
     submission: submission
-      ? { id: submissionId!.toString(), status: SUBMISSION_STATUS[submission.status], forwardTracking: submission.forwardTracking }
+      ? {
+          id: submissionId!.toString(),
+          status: SUBMISSION_STATUS[submission.status],
+          forwardTracking: submission.forwardTracking,
+          inboundCarrier: submission.inboundCarrier,
+          inboundTracking: submission.inboundTracking,
+        }
       : null,
+    evidenceHash: slab.evidenceHash,
+    declaredValueCents: Number(slab.declaredValueCents),
     polygon,
     custodian: await custodianTrace(origin, slab.custodianRef, slab.redemptionRef || undefined),
   };

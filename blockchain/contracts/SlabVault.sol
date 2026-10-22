@@ -19,8 +19,9 @@ interface IAccountStatus {
  *         while CC's NFT stays locked in the escrow.
  *
  *  Onboarding a slab (inbound trail, no token yet)
- *   1. `requestSubmission`  the collector declares grader + cert and ships the slab to
- *                           Pokechain. Submission: Pending.
+ *   1. `requestSubmission`  the collector declares grader + cert, a declared value, the hash
+ *                           of their intake evidence (photos + condition report) and the
+ *                           tracking number of the parcel they ship to Pokechain. Pending.
  *   2. `markReceived`       Pokechain's warehouse has it. Submission: ReceivedByPokechain.
  *   3. `markForwarded`      Pokechain ships it on to CC (carrier + tracking recorded).
  *                           Submission: AtCustodian.
@@ -78,6 +79,10 @@ contract SlabVault is ERC721, AccessControl {
         bytes32 shippingHash;
         /// Collector Crypt's redemption id for the outbound shipment.
         string redemptionRef;
+        /// Carried over from the submission: the owner's declared value (USD cents) and the
+        /// keccak256 of their intake evidence manifest (photos + condition report).
+        uint64 declaredValueCents;
+        bytes32 evidenceHash;
         string carrier;
         string trackingNumber;
         uint64 custodyUpdatedAt;
@@ -90,6 +95,14 @@ contract SlabVault is ERC721, AccessControl {
         SubmissionStatus status;
         uint256 tokenId;
         uint64 requestedAt;
+        /// Declared value for insurance, in USD cents.
+        uint64 declaredValueCents;
+        /// keccak256 of the evidence manifest: the intake photos' hashes, condition notes and
+        /// declarations. The photos stay off-chain; this proves later exactly what was declared.
+        bytes32 evidenceHash;
+        /// Collector → Pokechain leg
+        string inboundCarrier;
+        string inboundTracking;
         /// Pokechain → Collector Crypt leg
         string forwardCarrier;
         string forwardTracking;
@@ -109,7 +122,15 @@ contract SlabVault is ERC721, AccessControl {
     /// @notice Slabs each address holds that are still physically in the vault.
     mapping(address => uint256) public vaultedCount;
 
-    event SubmissionRequested(uint256 indexed submissionId, address indexed owner, string grader, string certNumber);
+    event SubmissionRequested(
+        uint256 indexed submissionId,
+        address indexed owner,
+        string grader,
+        string certNumber,
+        uint64 declaredValueCents,
+        bytes32 evidenceHash,
+        string inboundTracking
+    );
     event SubmissionReceived(uint256 indexed submissionId, address indexed owner);
     event SubmissionForwarded(uint256 indexed submissionId, address indexed owner, string carrier, string trackingNumber);
     event SubmissionRejected(uint256 indexed submissionId, address indexed owner, string reason);
@@ -134,6 +155,7 @@ contract SlabVault is ERC721, AccessControl {
     error SlabLocked(uint256 tokenId, Custody current);
     error SelfTransfer(uint256 tokenId);
     error EmptyField();
+    error MissingEvidence();
 
     constructor(IAccountStatus accounts_, address operator) ERC721("Pokechain Slab", "SLAB") {
         accounts = accounts_;
@@ -143,28 +165,44 @@ contract SlabVault is ERC721, AccessControl {
 
     /* ---------------------------- slab onboarding ---------------------------- */
 
-    /// @notice Step 1: the collector declares a slab they are sending to Pokechain.
-    function requestSubmission(string calldata grader, string calldata certNumber) external returns (uint256 submissionId) {
+    /**
+     * @notice Step 1: the collector declares a slab they are sending to Pokechain.
+     * @param declaredValueCents value declared for insurance, in USD cents
+     * @param evidenceHash keccak256 of the intake evidence manifest (photo hashes, condition, declarations)
+     * @param inboundCarrier carrier of the parcel to Pokechain (may be empty if dropped off)
+     * @param inboundTracking its tracking number (may be empty if dropped off)
+     */
+    function requestSubmission(
+        string calldata grader,
+        string calldata certNumber,
+        uint64 declaredValueCents,
+        bytes32 evidenceHash,
+        string calldata inboundCarrier,
+        string calldata inboundTracking
+    ) external returns (uint256 submissionId) {
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
-        if (bytes(grader).length == 0 || bytes(certNumber).length == 0) revert EmptyField();
+        if (bytes(grader).length == 0 || bytes(certNumber).length == 0 || declaredValueCents == 0) revert EmptyField();
+        if (evidenceHash == bytes32(0)) revert MissingEvidence();
         bytes32 key = certKey(grader, certNumber);
         if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
         if (pendingSubmissionOfCert[key] != 0) revert CertAlreadyPending(pendingSubmissionOfCert[key]);
 
         submissionId = nextSubmissionId++;
-        _submissions[submissionId] = Submission({
-            owner: msg.sender,
-            grader: grader,
-            certNumber: certNumber,
-            status: SubmissionStatus.Pending,
-            tokenId: 0,
-            requestedAt: uint64(block.timestamp),
-            forwardCarrier: "",
-            forwardTracking: "",
-            updatedAt: uint64(block.timestamp)
-        });
+        Submission storage s = _submissions[submissionId];
+        s.owner = msg.sender;
+        s.grader = grader;
+        s.certNumber = certNumber;
+        s.status = SubmissionStatus.Pending;
+        s.requestedAt = uint64(block.timestamp);
+        s.declaredValueCents = declaredValueCents;
+        s.evidenceHash = evidenceHash;
+        s.inboundCarrier = inboundCarrier;
+        s.inboundTracking = inboundTracking;
+        s.updatedAt = uint64(block.timestamp);
         pendingSubmissionOfCert[key] = submissionId;
-        emit SubmissionRequested(submissionId, msg.sender, grader, certNumber);
+        emit SubmissionRequested(
+            submissionId, msg.sender, grader, certNumber, declaredValueCents, evidenceHash, inboundTracking
+        );
     }
 
     /// @notice Step 2: Pokechain's warehouse has received the slab from the collector.
@@ -214,6 +252,8 @@ contract SlabVault is ERC721, AccessControl {
         slab.title = title;
         slab.image = image;
         slab.custodianRef = custodianRef;
+        slab.declaredValueCents = s.declaredValueCents;
+        slab.evidenceHash = s.evidenceHash;
         slab.mintedAt = uint64(block.timestamp);
         slab.custody = Custody.Vaulted;
         slab.custodyUpdatedAt = uint64(block.timestamp);
@@ -314,17 +354,23 @@ contract SlabVault is ERC721, AccessControl {
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         _requireOwned(tokenId);
         Slab storage s = _slabs[tokenId];
-        bytes memory json = abi.encodePacked(
+        // Built in two halves: one abi.encodePacked with every field runs out of stack slots.
+        bytes memory head = abi.encodePacked(
             '{"name":"', s.title,
             '","description":"Graded slab held by the Pokechain vault. The token is never burned, so the custody trail stays on-chain.",',
             '"image":"', s.image,
             '","attributes":[{"trait_type":"Grader","value":"', s.grader,
-            '"},{"trait_type":"Cert number","value":"', s.certNumber,
+            '"},{"trait_type":"Cert number","value":"', s.certNumber
+        );
+        bytes memory tail = abi.encodePacked(
             '"},{"trait_type":"Collector Crypt NFT (Solana)","value":"', s.custodianRef,
             '"},{"trait_type":"Custody","value":"', _custodyName(s.custody),
+            '"},{"trait_type":"Declared value (USD cents)","display_type":"number","value":',
+            uint256(s.declaredValueCents).toString(),
+            '},{"trait_type":"Evidence hash","value":"', uint256(s.evidenceHash).toHexString(32),
             '"}]}'
         );
-        return string.concat("data:application/json;base64,", Base64.encode(json));
+        return string.concat("data:application/json;base64,", Base64.encode(bytes.concat(head, tail)));
     }
 
     function supportsInterface(bytes4 interfaceId) public view override(ERC721, AccessControl) returns (bool) {

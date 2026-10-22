@@ -17,12 +17,14 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useMemo, useState } from "react";
+import { contracts } from "@/lib/chain/config";
 import { BRAND } from "@/lib/brand";
 import { GRADERS, GRADE_STEPS } from "@/lib/pools";
 import { population, salesFor } from "@/lib/catalog";
 import { shortDate, truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
+import { TokenRecord } from "../chain/TokenRecord";
 import { OfferModal } from "../modals/OfferModal";
 import { CardBack } from "../slab/CardBack";
 import { Slab, SlabStage } from "../slab/Slab";
@@ -52,6 +54,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   } = useStore();
 
   const listing = resolve(base);
+  // A slab minted through SlabVault: its facts come from the chain, not the catalogue.
+  const onChainTokenId =
+    listing.contract.toLowerCase() === contracts.slabVault.address.toLowerCase() ? listing.tokenId : null;
   const owned = isOwned(listing.id);
   const listed = isListed(listing.id);
 
@@ -291,10 +296,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="flex items-end justify-between gap-3">
                 <div>
                   <p className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                    {listed ? "Asking" : owned ? "Market value" : "Last asked"}
+                    {listed ? "Asking" : owned ? (onChainTokenId ? "Declared value (on-chain)" : "Market value") : "Last asked"}
                   </p>
                   <p className="mt-1 text-[30px] font-bold leading-none">
-                    {usd(listed || !owned ? listing.price : listing.fmv)}
+                    {usd(listed || !owned ? listing.price : listing.fmv, { cents: Boolean(onChainTokenId) })}
                   </p>
                 </div>
               </div>
@@ -349,8 +354,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </h2>
             <div className="space-y-3 p-4">
               <div className="flex items-center justify-between">
-                <span className="text-[13px] text-muted">Market value</span>
-                <span className="text-lg font-bold">{usd(listing.fmv)}</span>
+                <span className="text-[13px] text-muted">{onChainTokenId ? "Declared value (on-chain)" : "Market value"}</span>
+                <span className="text-lg font-bold">{usd(listing.fmv, { cents: Boolean(onChainTokenId) })}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-[13px] text-muted">Confidence</span>
@@ -379,6 +384,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </div>
           </section>
 
+          {onChainTokenId ? <TokenRecord tokenId={onChainTokenId} /> : null}
           <PriceHistory listing={listing} />
           <Details listing={listing} />
         </div>

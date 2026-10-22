@@ -101,10 +101,10 @@ operator can resolve Lost back to `Delivered` or `Vaulted`).
 
 | Function | Who | What it changes | Event / errors |
 | --- | --- | --- | --- |
-| `requestSubmission(grader, cert)` | wallet | New **Pending** submission (no token yet). One physical cert can only be tokenised once | `SubmissionRequested` · `AccountNotActive`, `CertAlreadyTokenised`, `CertAlreadyPending` |
+| `requestSubmission(grader, cert, declaredValueCents, evidenceHash, inboundCarrier, inboundTracking)` | wallet | New **Pending** submission (no token yet), with the declared value, the fingerprint of the intake photos and declarations, and the parcel's tracking number. One physical cert can only be tokenised once | `SubmissionRequested` · `AccountNotActive`, `CertAlreadyTokenised`, `CertAlreadyPending`, `MissingEvidence` |
 | `markReceived(submissionId)` | operator | Pending → **ReceivedByPokechain** | `SubmissionReceived` · `WrongSubmissionStatus` |
 | `markForwarded(submissionId, carrier, tracking)` | operator | → **AtCustodian**; records the Pokechain → Collector Crypt parcel | `SubmissionForwarded` |
-| `mintSlab(submissionId, title, image, custodianRef)` | operator | Only from AtCustodian. Mints the token to the submitter, custody **Vaulted**, stores **CC's Solana asset id** | `SlabMinted` |
+| `mintSlab(submissionId, title, image, custodianRef)` | operator | Only from AtCustodian. Mints the token to the submitter, custody **Vaulted**, stores **CC's Solana asset id** and carries over the declared value and `evidenceHash` | `SlabMinted` |
 | `rejectSubmission(id, reason)` | operator | Any open stage → Rejected (e.g. no such cert, damaged slab) | `SubmissionRejected` |
 | `safeTransferFrom(from, to, tokenId)` | owner | **A → B**: the title changes hands. CC's NFT doesn't move | `Transfer` · `SlabLocked`, `AccountNotActive` |
 | `requestRedemption(tokenId, shippingHash)` | owner | Custody → **RedemptionRequested**, token **locked**, `vaultedCount--`. Only `keccak256(address)` goes on-chain | `RedemptionRequested` |
@@ -112,7 +112,7 @@ operator can resolve Lost back to `Delivered` or `Vaulted`).
 | `confirmDelivery(tokenId)` | owner | Custody → **Delivered** | `SlabDelivered` |
 | `reportLost(tokenId, details)` | owner | Custody → **Lost** (from RedemptionRequested or Shipped) | `SlabReportedLost` (carries the tracking number) |
 | `resolveLostReport(tokenId, outcome)` | operator | Lost → Delivered, or back to Vaulted | `LostReportResolved` |
-| `tokenURI(tokenId)` | view | **Fully on-chain metadata**: a base64 JSON document with grader, cert, Solana ref and live custody | |
+| `tokenURI(tokenId)` | view | **Fully on-chain metadata**: a base64 JSON document with grader, cert, Collector Crypt's Solana id, live custody, and what the owner declared at intake (declared value in cents, evidence hash) | |
 | `_update` (internal hook) | every transfer | Transfers only while **Vaulted**, only **to an Active account other than the owner**, and keeps `vaultedCount` right | `SlabLocked`, `AccountNotActive`, `SelfTransfer` |
 
 ### MockUSDC (`blockchain/contracts/MockUSDC.sol`)
@@ -176,6 +176,37 @@ sequenceDiagram
   AR-->>U: Deposited(amount, newBalance)
 ```
 
+### The intake form and its evidence hash
+
+The Submit page is a realistic intake form for wallet accounts:
+
+1. **The slab:** grader and cert number, looked up in the grader's registry, with an estimated value.
+2. **Photos:** front, back and a close-up of the grading label (required), plus an optional extra.
+3. **Condition and value:** a declared value for insurance, damage checkboxes and notes.
+4. **Getting it to Pokechain:** courier (carrier + tracking number) or drop-off.
+5. **Declarations:** ownership, authenticity, and the vault and storage terms.
+
+Only a fingerprint of that goes on-chain:
+
+```
+each photo     →  keccak256(file bytes)                      listed in a manifest
+the manifest   →  keccak256(manifest JSON) = evidenceHash    SlabVault.requestSubmission(…, evidenceHash, …)
+```
+
+The photos stay off-chain (`POST /api/evidence`, stored in `.data/evidence/`; in production, IPFS
+or an object-locked bucket). Change one pixel, the declared value or a note and the hash no longer
+matches. When the slab reaches Pokechain, `markReceived` only goes ahead if the stored evidence
+still hashes to the on-chain value; otherwise the operator calls `rejectSubmission`. The token
+keeps the `evidenceHash` and declared value forever, in `slabOf` and in its own `tokenURI` metadata.
+The Trace page re-hashes the photos on every view, so a lost or damage claim can prove exactly what
+was declared at intake.
+
+**Does the token tally with the form?** On a tokenised slab's page, *Your submission vs the token*
+puts each field you entered (grader, cert, declared value, shipping, photos and notes) beside what
+`slabOf` / `submissionOf` hold. It then decodes the NFT's own `tokenURI` and checks each attribute
+too, with a tick or cross per field. The Vault and the asset page show the declared value, not the
+catalogue's market estimate.
+
 ### Slab onboarding: you → Pokechain → Collector Crypt → token
 
 The slab's physical journey is recorded step by step, so the inbound leg is as traceable as the
@@ -189,9 +220,10 @@ sequenceDiagram
   participant O as Pokechain operator
   participant CC as Collector Crypt (Postman)
   participant S as Solana RPC (DAS)
-  A->>SV: requestSubmission("PSA", "72862688")
+  A->>A: POST /api/evidence (photos + declarations) → evidenceHash
+  A->>SV: requestSubmission("PSA", "72862688", 263400, evidenceHash, "SingPost", "RR…SG")
   Note over A: ships the slab to Pokechain
-  O->>SV: markReceived(1)        (cert checked; else rejectSubmission)
+  O->>SV: markReceived(1)        (cert + evidence hash checked; else rejectSubmission)
   O->>SV: markForwarded(1, "SingPost", "RR…SG")
   CC->>CC: POST /intake → vaults it, mints NFT to Pokechain escrow
   Note over A: page polls CC's card lookup
@@ -306,7 +338,9 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
    Open the Chain log: `AccountRegistry.register`.
 3. **Wallet** → *Mint 1,000 test USDC* → deposit 250 with the permit box ticked. The Chain log shows
    the off-chain **Signature**, then a single `depositWithPermit` tx.
-4. **Submit** (`/submit`) → PSA `72862688` → *Submit and ship to Pokechain*. A tracker appears.
+4. **Submit** (`/submit`): PSA `72862688`, *Use sample photos (demo)* (or real photos), *Use estimate*,
+   a tracking number, the three declarations, then *Upload evidence and submit on-chain*. The Chain log
+   shows `POST /api/evidence` (3 photos hashed) and then `requestSubmission(…, evidenceHash, …)`. A tracker appears.
 5. In **Postman**, send *1 · receive*, *2 · forward*, *3 · Collector Crypt vaults it*. The tracker
    moves at each step; after 3 the page mints. The Chain log shows `markReceived`, `markForwarded`,
    `Collector Crypt GET /cards`, `Solana getAsset`, then `SlabVault.mintSlab`. Send *4 · getAsset* to
@@ -355,7 +389,7 @@ Requirements: Node 20+ (`./dev.sh` pins Homebrew Node), and optionally MetaMask.
 
 ```bash
 npm run setup          # installs the app and blockchain/ dependencies
-npm run contracts:test # 28 Solidity unit + fuzz tests
+npm run contracts:test # 31 Solidity unit + fuzz tests
 npm run chain          # terminal 1: local chain + deploy + ABI export (leave running)
 npm run dev            # terminal 2: the app on http://localhost:3000
 ```
@@ -403,7 +437,7 @@ blockchain/
   contracts/AccountRegistry.sol   account onboarding / offboarding, USDC custody
   contracts/SlabVault.sol         ERC-721 slab tokens, custody state machine
   contracts/MockUSDC.sol          test USDC with EIP-2612 permit
-  test/Pokechain.t.sol            28 unit + fuzz tests
+  test/Pokechain.t.sol            31 unit + fuzz tests
   ignition/modules/Pokechain.ts   deployment + wiring
   scripts/dev-chain.mjs           npm run chain
   scripts/export-frontend.mjs     ABIs + addresses → src/lib/chain/generated.ts
@@ -415,16 +449,20 @@ src/lib/chain/
   useSlabChain.ts    submit / receive / forward / verify+mint / transfer / redeem / confirm / report lost
   operator.ts        server-side operator key: markReceived, markForwarded, mintSlab, markShipped, gas faucet
   trace.ts           one slab's journey across Polygon, Solana and Collector Crypt
+src/lib/evidence/
+  store.ts           intake photos + manifest; evidenceHash = keccak256(manifest); re-verification
 src/lib/collectorCrypt/
   store.ts           mock Collector Crypt: vault intake, redemptions, carrier events, DAS asset shape
   client.ts          how the operator calls CC and Solana: custody check, shipment, trace
 src/app/api/
+  evidence, evidence/[hash], evidence/[hash]/[slot]   intake evidence upload, verification, photos
   chain/{receive,forward,mint,ship,faucet}   operator routes
   collector-crypt/{intake,cards,redemptions} mock Collector Crypt REST
   mock-solana                mock Solana DAS JSON-RPC
   trace/[tokenId]            cross-chain trace
 src/app/trace/[tokenId]      the Trace page
-src/components/chain/        AccountView, OnChainFunds, PendingSubmissions, TransferModal, RedeemModal,
+src/components/submit/SlabIntakeForm.tsx   the intake form
+src/components/chain/        AccountView, OnChainFunds, PendingSubmissions, EvidencePanel, TokenRecord, TransferModal, RedeemModal,
                              WithdrawnList, TraceView, ChainHistory, ChainConsole, ChainSessionSync,
                              ChainVaultSync, ChainDownBanner
 ```

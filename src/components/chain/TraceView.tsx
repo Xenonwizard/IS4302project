@@ -10,6 +10,7 @@ import { shortHash } from "@/lib/chain/config";
 import type { SlabTrace } from "@/lib/chain/trace";
 import { Badge, Button, inputClass } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
+import { EvidencePanel } from "./EvidencePanel";
 import { Fn, OnChainNote } from "./ui";
 
 type Source = "Polygon" | "Solana" | "Collector Crypt";
@@ -167,6 +168,15 @@ export function TraceView({ tokenId }: { tokenId: string }) {
               )}
             </RefCard>
           </div>
+
+          <section className="rounded-card border border-hairline bg-surface p-4">
+            <h2 className="text-[14px] font-bold">Intake evidence</h2>
+            <p className="mb-3 mt-0.5 text-[11px] text-dim">
+              Photos and declarations the owner submitted, re-hashed now and compared with the <Fn>evidenceHash</Fn> stored
+              in the token.
+            </p>
+            <EvidencePanel hash={data.evidenceHash} />
+          </section>
 
           {data.custody === "Lost" || data.custodian.redemption?.status === "lost" ? (
             <div className="flex gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-[12.5px] text-warn">

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Pokechain · Collector Crypt custody flow",
-    "description": "Plays the parties outside the app: Pokechain's warehouse (operator), Collector Crypt (the vault) and the carrier. It also shows the Solana and trace calls the operator relies on. Nothing here talks to the real Collector Crypt; the app serves mocks with the real request shapes.\n\nInbound demo:\n1. In the app, submit a slab. SlabVault.requestSubmission creates submission #N, Pending.\n2. Set `submissionId`, `grader` and `certNumber`, then send **1**, **2** and **3** in order. The app's tracker moves at each step and mints the token after 3.\n3. Send **4** to show the Solana record the operator checked.\n\nOutbound demo:\n4. In the app, the token's current owner clicks Ship to me. Pokechain asks Collector Crypt to ship (redemption CCR-…).\n5. Set `redemptionId` (or send **6**, which stores it), then send **7** (in transit) and **8** (lost) or **9** (delivered).\n6. Send **10** for the full cross-chain trace.\n\nbaseUrl defaults to http://localhost:3000.",
+    "description": "Plays the parties outside the app: Pokechain's warehouse (operator), Collector Crypt (the vault) and the carrier. It also shows the Solana and trace calls the operator relies on. Nothing here talks to the real Collector Crypt; the app serves mocks with the real request shapes.\n\nInbound demo:\n1. In the app, fill in the Submit form (photos, declared value, shipping, declarations). Its evidence is hashed and SlabVault.requestSubmission creates submission #N, Pending.\n2. Set `submissionId`, `grader` and `certNumber`, then send **1**, **2** and **3** in order. The app's tracker moves at each step and mints the token after 3.\n3. Send **4** to show the Solana record the operator checked.\n\nOutbound demo:\n4. In the app, the token's current owner clicks Ship to me. Pokechain asks Collector Crypt to ship (redemption CCR-…).\n5. Set `redemptionId` (or send **6**, which stores it), then send **7** (in transit) and **8** (lost) or **9** (delivered).\n6. Send **10** for the full cross-chain trace.\n\nbaseUrl defaults to http://localhost:3000.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -40,12 +40,70 @@
     {
       "key": "rpcUrl",
       "value": "http://127.0.0.1:8545"
+    },
+    {
+      "key": "evidenceHash",
+      "value": ""
     }
   ],
   "item": [
     {
       "name": "Inbound: collector → Pokechain → Collector Crypt → token",
       "item": [
+        {
+          "name": "0 · Upload intake evidence (photos → evidenceHash)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "meta",
+                  "type": "text",
+                  "value": "{\"grader\": \"{{grader}}\", \"certNumber\": \"{{certNumber}}\", \"declaredValueCents\": 263400, \"condition\": {\"caseCracked\": false, \"caseScratched\": false, \"labelDamaged\": false, \"notes\": \"\"}, \"shipping\": {\"method\": \"courier\", \"carrier\": \"SingPost\", \"tracking\": \"RR123456789SG\"}, \"declarations\": {\"owner\": true, \"authentic\": true, \"terms\": true}, \"submittedBy\": \"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\", \"source\": \"new\"}"
+                },
+                {
+                  "key": "front",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "back",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "label",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/evidence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "evidence"
+              ]
+            },
+            "description": "What the app's Submit form does first. Pick three image files for front, back and label. Returns evidenceHash = keccak256 of the manifest (each photo's keccak256 + declarations); the app then passes it to SlabVault.requestSubmission. The in-app form is the easier way to do this step."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('evidenceHash', pm.response.json().evidenceHash);"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "1 · Pokechain warehouse receives the slab (markReceived)",
           "request": {
@@ -67,7 +125,7 @@
                 "receive"
               ]
             },
-            "description": "Operator tx: SlabVault.markReceived. If the cert doesn't exist, it sends rejectSubmission instead.",
+            "description": "Operator tx: SlabVault.markReceived, after checking the stored intake evidence still hashes to the evidenceHash on-chain and describes this cert. Otherwise it sends rejectSubmission.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",
@@ -77,6 +135,25 @@
                 }
               }
             }
+          }
+        },
+        {
+          "name": "Evidence: re-verify against the on-chain hash",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/evidence/{{evidenceHash}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "evidence",
+                "{{evidenceHash}}"
+              ]
+            },
+            "description": "Re-hashes the stored manifest and photos. verified.all is true only if nothing changed since submission."
           }
         },
         {

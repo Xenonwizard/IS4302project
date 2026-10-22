@@ -60,6 +60,8 @@ export function ChainVaultSync() {
           owner: address!,
           mintTx: "",
           custodianRef: slabs[i].custodianRef,
+          declaredValueCents: Number(slabs[i].declaredValueCents),
+          evidenceHash: slabs[i].evidenceHash,
         },
         grader: slabs[i].grader as Grader,
         certNumber: slabs[i].certNumber,

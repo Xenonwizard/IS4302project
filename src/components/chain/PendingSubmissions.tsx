@@ -13,6 +13,8 @@ import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
 import { Button } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
+import { usd } from "@/lib/format";
+import { EvidencePanel } from "./EvidencePanel";
 import { Fn, OnChainNote } from "./ui";
 
 interface Pending {
@@ -23,6 +25,10 @@ interface Pending {
   status: number;
   forwardCarrier: string;
   forwardTracking: string;
+  declaredValueCents: number;
+  evidenceHash: string;
+  inboundCarrier: string;
+  inboundTracking: string;
 }
 
 /**
@@ -58,6 +64,10 @@ export function PendingSubmissions({ onMinted }: { onMinted?: (listing: Listing 
           status: s.status,
           forwardCarrier: s.forwardCarrier,
           forwardTracking: s.forwardTracking,
+          declaredValueCents: Number(s.declaredValueCents),
+          evidenceHash: s.evidenceHash,
+          inboundCarrier: s.inboundCarrier,
+          inboundTracking: s.inboundTracking,
         }));
     },
   });
@@ -106,6 +116,8 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
         owner: out.owner,
         mintTx: out.tx.hash,
         custodianRef: out.custodianRef,
+        declaredValueCents: sub.declaredValueCents,
+        evidenceHash: sub.evidenceHash,
       };
       let listing: Listing | null = null;
       if (existingId) attachToken(existingId, token);
@@ -113,7 +125,7 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
       pushToast({ title: `Token #${out.tokenId} minted`, body: "Collector Crypt's NFT is in Pokechain's escrow.", tone: "success" });
       onDone(listing);
     },
-    [existingId, attachToken, submitSlab, pushToast, onDone, sub.grader, sub.certNumber],
+    [existingId, attachToken, submitSlab, pushToast, onDone, sub.grader, sub.certNumber, sub.declaredValueCents, sub.evidenceHash],
   );
 
   const mint = useCallback(async () => {
@@ -173,8 +185,10 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
           curl: `curl -X POST ${origin}/api/chain/receive -H 'content-type: application/json' -d '{"submissionId":"${id}"}'`,
           note: (
             <>
-              Ship the slab to Pokechain. When it arrives, staff check the cert and the operator calls{" "}
-              <Fn>SlabVault.markReceived({id})</Fn> (or <Fn>rejectSubmission</Fn> if the cert doesn&apos;t exist).
+              Ship the slab to Pokechain. When it arrives, staff compare it with your photos, and the server checks the
+              stored evidence still hashes to the <Fn>evidenceHash</Fn> on-chain. Then the operator calls{" "}
+              <Fn>SlabVault.markReceived({id})</Fn>, or <Fn>rejectSubmission</Fn> if the cert or evidence doesn&apos;t
+              check out.
             </>
           ),
         }
@@ -219,7 +233,9 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
             Submission #{id}: {SUBMISSION_STATUS[sub.status]}
           </p>
           <p className="mt-1 text-[12.5px] text-muted">
-            {sub.grader} cert <span className="font-mono text-white">{sub.certNumber}</span>
+            {sub.grader} cert <span className="font-mono text-white">{sub.certNumber}</span> · declared{" "}
+            {usd(sub.declaredValueCents / 100)}
+            {sub.inboundTracking ? ` · to Pokechain by ${sub.inboundCarrier} ${sub.inboundTracking}` : ""}
             {sub.forwardTracking ? ` · to Collector Crypt by ${sub.forwardCarrier} ${sub.forwardTracking}` : ""}
           </p>
         </div>
@@ -252,6 +268,11 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
           );
         })}
       </ol>
+
+      <div className="mt-3 rounded-xl bg-[#101014] p-3">
+        <p className="mb-2 text-[12px] font-semibold text-white">Intake evidence</p>
+        <EvidencePanel hash={sub.evidenceHash} compact />
+      </div>
 
       <div className="mt-3 rounded-xl bg-[#101014] p-3 text-[12px] text-muted">
         <p className="mb-1.5 font-semibold text-white">Or run this step from Postman (or a terminal):</p>

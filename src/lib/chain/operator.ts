@@ -24,7 +24,8 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { certPreview, getListing } from "../catalog";
-import { requestShipment, verifyCustody } from "../collectorCrypt/client";
+import { requestShipment, verifyCustody, type CheckStep } from "../collectorCrypt/client";
+import { loadEvidence } from "../evidence/store";
 import type { Grader } from "../types";
 import { CUSTODY, IS_LOCAL, SUBMISSION_STATUS, chain, contracts } from "./config";
 
@@ -83,20 +84,41 @@ async function submissionAt(submissionId: bigint, expected: number) {
 
 /**
  * Slab onboarding, step 2: the parcel has reached Pokechain's warehouse. Staff check the slab
- * against the grader's registry; a cert that doesn't exist is rejected on-chain right here.
+ * against the grader's registry and against the intake evidence whose hash is on-chain (the
+ * stored manifest and photos must still hash to it, and describe the same cert). A slab that
+ * fails is rejected on-chain right here.
  */
 export async function receiveSubmission(submissionId: bigint) {
   const sub = await submissionAt(submissionId, 1);
   const wallet = walletClient();
-  if (!certPreview(sub.grader as Grader, sub.certNumber)) {
-    const reason = `${sub.grader} has no record of cert ${sub.certNumber}`;
+  const evidence = loadEvidence(sub.evidenceHash);
+  const checks: CheckStep[] = [
+    {
+      call: `Evidence ${sub.evidenceHash.slice(0, 10)}…`,
+      ok: Boolean(evidence?.verified.all),
+      detail: !evidence
+        ? "No intake evidence stored for this hash"
+        : evidence.verified.all
+          ? `Manifest and ${evidence.manifest.photos.length} photos match the on-chain hash`
+          : "Stored evidence no longer matches the on-chain hash",
+    },
+  ];
+  const problem = !certPreview(sub.grader as Grader, sub.certNumber)
+    ? `${sub.grader} has no record of cert ${sub.certNumber}`
+    : !evidence?.verified.all
+      ? checks[0].detail
+      : evidence.manifest.certNumber !== sub.certNumber || evidence.manifest.grader !== sub.grader
+        ? "Intake evidence describes a different slab"
+        : null;
+  if (problem) {
+    const reason = problem;
     const hash = await wallet.writeContract({ ...contracts.slabVault, functionName: "rejectSubmission", args: [submissionId, reason] });
     const tx = await receiptOf("SlabVault.rejectSubmission", [submissionId.toString(), reason], hash, wallet.account.address);
-    return { result: "rejected" as const, reason, tx };
+    return { result: "rejected" as const, reason, checks, tx };
   }
   const hash = await wallet.writeContract({ ...contracts.slabVault, functionName: "markReceived", args: [submissionId] });
   const tx = await receiptOf("SlabVault.markReceived", [submissionId.toString()], hash, wallet.account.address);
-  return { result: "received" as const, tx };
+  return { result: "received" as const, checks, tx };
 }
 
 /** Slab onboarding, step 3: Pokechain ships the slab on to Collector Crypt and records the tracking number. */
