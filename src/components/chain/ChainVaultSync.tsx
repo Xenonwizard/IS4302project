@@ -1,9 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { zeroAddress } from "viem";
-import { usePublicClient } from "wagmi";
+import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { CUSTODY, DEPLOY_BLOCK, chain, contracts } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useStore, type ChainSlab } from "@/lib/store";
@@ -14,12 +14,19 @@ import type { Grader } from "@/lib/types";
  * this wallet (eth_getLogs, filtered on the indexed `to` topic), keeps the tokens `ownerOf` still
  * says are ours, and reads each one's `slabOf`. A slab another collector sent you appears in your
  * Vault; one you sent away disappears from it. No server involved: ownership is whatever SlabVault says.
+ *
+ * It also subscribes to SlabVault's `Transfer` events to and from this wallet (useWatchContractEvent,
+ * which polls eth_getFilterChanges), so a slab someone sends you shows up within seconds.
  */
 export function ChainVaultSync() {
   const { user, ready, vault, syncChainSlabs } = useStore();
   const { address } = useOnchainAccount();
   const client = usePublicClient();
   const enabled = Boolean(ready && client && address && user?.address === address);
+  const queryClient = useQueryClient();
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", address] });
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, enabled, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, enabled, onLogs: refresh });
   // Tokens the Vault already lists: each gets an explicit ownerOf check.
   const knownIds = vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])).sort().join(",");
 

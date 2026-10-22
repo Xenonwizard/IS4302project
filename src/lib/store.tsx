@@ -147,6 +147,8 @@ interface StoreValue extends PersistShape {
    * (e.g. a transfer from another collector) and drops tokens it no longer owns.
    */
   syncChainSlabs: (owned: ChainSlab[], ownedByOthers: string[]) => void;
+  /** the transfer to another collector confirmed: the slab leaves this vault and its chats close */
+  handOver: (listingId: string, toHandle: string) => void;
   /** the slab has left the vault: unlisted, its chats closed, moved to the Withdrawn tab */
   withdrawSlab: (listingId: string, withdrawal: Withdrawal) => void;
   updateWithdrawal: (listingId: string, patch: Partial<Withdrawal>) => void;
@@ -198,6 +200,27 @@ function ledgerEntry(amount: number, label: string, listingId?: string): LedgerE
     label,
     listingId,
   };
+}
+
+/**
+ * Closes every open chat where the signed-in user is selling this slab (pending offers are
+ * declined), for when the slab can no longer be sold by them: withdrawn or handed to someone else.
+ */
+function closeSellerChats(prev: PersistShape, listingId: string, note: string): Record<string, Negotiation> {
+  const me = prev.user?.username;
+  const negotiations = { ...prev.negotiations };
+  for (const n of Object.values(prev.negotiations)) {
+    if (n.listingId !== listingId || n.seller !== me || n.status !== "open") continue;
+    negotiations[n.id] = {
+      ...n,
+      status: "closed",
+      messages: [
+        ...n.messages.map((m) => (m.kind === "offer" && m.status === "pending" ? { ...m, status: "declined" as const } : m)),
+        systemMessage(note),
+      ],
+    };
+  }
+  return negotiations;
 }
 
 /** The listing as it stands in this state: price and owner after any changes. */
@@ -724,8 +747,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setState((prev) => {
         const goneIds = new Set(gone.map((v) => v.listingId));
         const addIds = new Set(added.map((a) => a.listing.id));
+        let negotiations = prev.negotiations;
+        for (const id of goneIds) {
+          negotiations = closeSellerChats({ ...prev, negotiations }, id, "The seller no longer owns this slab.");
+        }
         return {
           ...prev,
+          negotiations,
           slabs: [...added.map((a) => a.listing), ...prev.slabs.filter((l) => !addIds.has(l.id))],
           vault: [...added.map((a) => a.item), ...prev.vault.filter((v) => !goneIds.has(v.listingId) && !addIds.has(v.listingId))],
           overrides: {
@@ -740,25 +768,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
+  const handOver = useCallback(
+    (listingId: string, toHandle: string) => {
+      setState((prev) => ({
+        ...prev,
+        negotiations: closeSellerChats(prev, listingId, `The slab was transferred to @${toHandle}.`),
+        overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
+        vault: prev.vault.filter((v) => v.listingId !== listingId),
+      }));
+    },
+    [],
+  );
+
   const withdrawSlab = useCallback(
     (listingId: string, withdrawal: Withdrawal) => {
       setState((prev) => {
-        const me = prev.user?.username;
         // Same as delisting: every open chat about the slab closes and pending offers are declined.
-        const negotiations = { ...prev.negotiations };
-        for (const n of Object.values(prev.negotiations)) {
-          if (n.listingId !== listingId || n.seller !== me || n.status !== "open") continue;
-          negotiations[n.id] = {
-            ...n,
-            status: "closed",
-            messages: [
-              ...n.messages.map((m) =>
-                m.kind === "offer" && m.status === "pending" ? { ...m, status: "declined" as const } : m,
-              ),
-              systemMessage("The seller withdrew this slab from the vault."),
-            ],
-          };
-        }
+        const negotiations = closeSellerChats(prev, listingId, "The seller withdrew this slab from the vault.");
         return {
           ...prev,
           negotiations,
@@ -1040,6 +1066,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     recordChainCash,
     attachToken,
     syncChainSlabs,
+    handOver,
     withdrawSlab,
     updateWithdrawal,
     offboard,

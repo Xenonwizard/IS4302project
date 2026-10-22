@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { useState } from "react";
 import { keccak256, toBytes, zeroAddress, type Address } from "viem";
@@ -28,7 +29,8 @@ export function TransferModal({ target, onClose }: { target: { entry: VaultItem;
 function Transfer({ entry, listing, onClose }: { entry: VaultItem; listing: Listing; onClose: () => void }) {
   const client = usePublicClient();
   const { transfer } = useSlabChain();
-  const { user, pushToast } = useStore();
+  const { user, pushToast, handOver } = useStore();
+  const queryClient = useQueryClient();
   const [handle, setHandle] = useState("");
   const [to, setTo] = useState<{ address: Address; handle: string } | null>(null);
   const [error, setError] = useState("");
@@ -54,7 +56,11 @@ function Transfer({ entry, listing, onClose }: { entry: VaultItem; listing: List
     setBusy(true);
     try {
       await transfer(tokenId, to.address, to.handle);
-      pushToast({ title: `Sent to @${to.handle}`, body: `Token #${tokenId} is theirs now.`, tone: "success" });
+      // The receipt is in, so the chain already says they own it: take it out of this vault now
+      // rather than waiting for the next ownership poll, and re-read ownership straight away.
+      handOver(listing.id, to.handle);
+      void queryClient.invalidateQueries({ queryKey: ["owned-slabs"] });
+      pushToast({ title: `Sent to @${to.handle}`, body: `Token #${tokenId} is in their Vault now.`, tone: "success" });
       onClose();
     } catch (e) {
       setError((e as Error).message);
