@@ -5,9 +5,16 @@ a study of [courtyard.io](https://courtyard.io)'s marketplace: physical slabs he
 ownership mirrored as an ERC-721 token, and **live trade rooms** where collectors bid in chat.
 
 Card data and images are real (from the [Pokémon TCG API](https://pokemontcg.io)); everything
-else — owners, grades, asks, bids, sales — is generated dummy data. There is no backend, no API
-key and no wallet: all state (login, cart, vault, orders, offers, trade rooms, lost-item reports)
-lives in React context and is persisted to `localStorage`.
+else — owners, grades, asks, bids, sales — is generated dummy data.
+
+**Account and slab onboarding / offboarding run on-chain.** Users sign up with a wallet
+(RainbowKit + MetaMask), and their handle is registered in a Solidity `AccountRegistry`. They
+deposit and withdraw test USDC (EIP-2612 permit) and can close the account. Slabs are minted as
+ERC-721s in `SlabVault` once Collector Crypt (simulated) has vaulted them and its Solana NFT is in
+Pokechain's escrow. They can be transferred between collectors. Withdrawn slabs keep their token,
+locked, so a lost parcel can be reported and traced across Polygon, Solana and Collector Crypt. See
+**[docs/blockchain-onboarding.md](docs/blockchain-onboarding.md)** for the full explanation. Trading
+(offers, negotiation rooms) still lives in React context and `localStorage`.
 
 The name lives in one file, [`src/lib/brand.ts`](src/lib/brand.ts).
 
@@ -17,11 +24,14 @@ The name lives in one file, [`src/lib/brand.ts`](src/lib/brand.ts).
 ## Running it
 
 ```bash
-npm install
-npm run dev
+npm run setup     # app + blockchain/ dependencies
+npm run chain     # terminal 1: local Hardhat chain, deploys the contracts (leave running)
+npm run dev       # terminal 2: the app
 ```
 
-Then open http://localhost:3000. Node 20+ is required (Next 16). `./dev.sh` pins the Homebrew
+Then open http://localhost:3000 and sign up with **Hardhat test collector #1** (or MetaMask).
+`npm run contracts:test` runs the Solidity tests. `docs/postman/` has the Postman collection that
+plays Pokechain's warehouse, Collector Crypt and the carrier. Node 20+ is required (Next 16). `./dev.sh` pins the Homebrew
 Node build if `npm run dev` complains about the version. The dev server needs internet access to
 fetch card images.
 
@@ -43,7 +53,9 @@ npm run lint                 # eslint
 | `/vault` | Collection, my listings, offers made, orders, watchlist; list for sale, delist, open trade room, request shipping |
 | `/checkout`, `/checkout/success` | Cart review, payment method, order receipt with tx hash |
 | `/profile/[username]` | Any seller's public collection and activity |
-| `/submit` | Slab submission intake with a three-step explainer |
+| `/submit` | Slab submission: `requestSubmission` on-chain, then tracked through Pokechain → Collector Crypt → Solana check → mint |
+| `/trace/[tokenId]` | One slab's journey across Polygon, Solana and Collector Crypt |
+| `/account` | On-chain account record, event history (`eth_getLogs`), close account |
 
 ## User flows that work
 
@@ -96,6 +108,10 @@ is rendered client-side only.
 
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · lucide-react · `next/image`.
 
-## Next step: putting it on a chain
+Blockchain: Solidity 0.8.28 · OpenZeppelin 5 · Hardhat 3 + Ignition · viem · wagmi 2 · RainbowKit ·
+MetaMask · Polygon (local Hardhat or Amoy) · Solana DAS API (simulated Collector Crypt vault NFTs).
 
-See [`docs/blockchain-stack.md`](docs/blockchain-stack.md).
+## On-chain
+
+What is on-chain now, and how to demo it: [`docs/blockchain-onboarding.md`](docs/blockchain-onboarding.md).
+The wider plan (escrowed trades, indexing, IPFS, attestations): [`docs/blockchain-stack.md`](docs/blockchain-stack.md).

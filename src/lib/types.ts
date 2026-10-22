@@ -81,12 +81,40 @@ export interface Listing {
   hue: number;
 }
 
+/** The slab's ERC-721 in SlabVault, once it has been tokenised on-chain. */
+export interface SlabToken {
+  chainId: number;
+  contract: string;
+  tokenId: string;
+  owner: string;
+  mintTx: string;
+  /** Collector Crypt's Solana NFT (asset id) for the slab, held by Pokechain's escrow */
+  custodianRef: string;
+}
+
+/** A slab that has left the vault. The token stays; SlabVault holds the live custody state. */
+export interface Withdrawal {
+  requestedAt: string;
+  requestTx: string;
+  /** keccak256 of the shipping address, as sent on-chain */
+  shippingHash: string;
+  /** the address itself, kept only in this browser */
+  shipTo: string;
+  /** Collector Crypt's redemption id */
+  redemptionRef?: string;
+  carrier?: string;
+  trackingNumber?: string;
+  shipTx?: string;
+}
+
 export interface VaultItem {
   listingId: string;
   acquiredAt: string;
-  via: "Purchase" | "Trade" | "Submission";
-  status: "Vaulted" | "Shipping requested" | "Listed";
+  via: "Purchase" | "Trade" | "Submission" | "Transfer";
+  status: "Vaulted" | "Shipping requested" | "Listed" | "Withdrawn";
   listedPrice?: number;
+  token?: SlabToken;
+  withdrawal?: Withdrawal;
 }
 
 /* ---------------- negotiations ---------------- */

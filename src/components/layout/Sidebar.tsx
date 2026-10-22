@@ -11,6 +11,7 @@ import {
   MessagesSquare,
   ShieldCheck,
   Store,
+  UserRound,
   Wallet,
 } from "lucide-react";
 
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/vault", label: "Vault", short: "Vault", icon: ShieldCheck },
   { href: "/watchlist", label: "Watchlist", short: "Watchlist", icon: Heart },
   { href: "/wallet", label: "Wallet", short: "Wallet", icon: Wallet },
+  { href: "/account", label: "Account", short: "Account", icon: UserRound, desktopOnly: true },
 ];
 
 export function Sidebar({
@@ -78,7 +80,7 @@ export function MobileNav() {
   const pathname = usePathname();
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-hairline bg-black/95 backdrop-blur lg:hidden">
-      {NAV.map(({ href, short, icon: Icon }) => {
+      {NAV.filter((n) => !n.desktopOnly).map(({ href, short, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         return (
           <Link

@@ -33,8 +33,10 @@ import type {
   LostItem,
   LostReport,
   Negotiation,
+  SlabToken,
   TradeBid,
   VaultItem,
+  Withdrawal,
 } from "./types";
 
 const STORAGE_KEY = "pokechain.state.v3";
@@ -50,6 +52,8 @@ export interface SessionUser {
   email: string;
   hue: number;
   joinedAt: string;
+  /** set when the account was opened on-chain (AccountRegistry) by this wallet */
+  address?: string;
 }
 
 export interface Toast {
@@ -69,6 +73,8 @@ export interface ListingOverride {
 
 interface PersistShape {
   user: SessionUser | null;
+  /** whose data this is: kept after sign-out so a different user gets their own state */
+  owner?: string;
   watchlist: string[];
   vault: VaultItem[];
   /** slabs the user submitted, which are not part of the catalog */
@@ -93,6 +99,20 @@ const EMPTY: PersistShape = {
   lostReports: [],
 };
 
+/** A slab token the connected wallet owns, as SlabVault reports it. */
+export interface ChainSlab {
+  token: SlabToken;
+  grader: Grader;
+  certNumber: string;
+  /** SlabVault custody, e.g. "Vaulted", "Shipped" */
+  custody: string;
+  /** minted to this wallet, or received from another collector */
+  via: "Submission" | "Transfer";
+  carrier?: string;
+  trackingNumber?: string;
+  redemptionRef?: string;
+}
+
 export interface SlabSubmission {
   grader: Grader;
   certNumber: string;
@@ -103,7 +123,8 @@ interface StoreValue extends PersistShape {
   /** wallet balance, derived from the ledger */
   balance: number;
   /* auth */
-  login: (username: string, email?: string) => void;
+  /** `address` marks a wallet account opened on-chain: no demo credit, funds come from USDC deposits */
+  login: (username: string, email?: string, address?: string) => void;
   logout: () => void;
   requireAuth: (then?: () => void) => boolean;
   authOpen: boolean;
@@ -112,10 +133,27 @@ interface StoreValue extends PersistShape {
   toggleWatch: (id: string) => void;
   isWatched: (id: string) => boolean;
   /* slabs */
-  submitSlab: (input: SlabSubmission) => Listing | null;
+  submitSlab: (input: SlabSubmission, token?: SlabToken) => Listing | null;
   listFromVault: (id: string, price: number) => void;
   delist: (id: string) => void;
   requestShipping: (id: string) => void;
+  /* blockchain: account and slab onboarding / offboarding */
+  /** mirrors an on-chain USDC deposit (+) or withdrawal (−) into the wallet history */
+  recordChainCash: (amount: number, label: string, txHash: string) => void;
+  /** a slab already in the vault has been minted on-chain */
+  attachToken: (listingId: string, token: SlabToken) => void;
+  /**
+   * For tokenised slabs the chain is the source of truth: adds tokens this wallet received
+   * (e.g. a transfer from another collector) and drops tokens it no longer owns.
+   */
+  syncChainSlabs: (owned: ChainSlab[], ownedByOthers: string[]) => void;
+  /** the transfer to another collector confirmed: the slab leaves this vault and its chats close */
+  handOver: (listingId: string, toHandle: string) => void;
+  /** the slab has left the vault: unlisted, its chats closed, moved to the Withdrawn tab */
+  withdrawSlab: (listingId: string, withdrawal: Withdrawal) => void;
+  updateWithdrawal: (listingId: string, patch: Partial<Withdrawal>) => void;
+  /** the account was closed on-chain: sign out, keep the record */
+  offboard: () => void;
   /* negotiations */
   /** sends an offer in the buyer's chat with the seller; returns the chat id */
   makeOffer: (listingId: string, bid: TradeBid) => string | null;
@@ -162,6 +200,27 @@ function ledgerEntry(amount: number, label: string, listingId?: string): LedgerE
     label,
     listingId,
   };
+}
+
+/**
+ * Closes every open chat where the signed-in user is selling this slab (pending offers are
+ * declined), for when the slab can no longer be sold by them: withdrawn or handed to someone else.
+ */
+function closeSellerChats(prev: PersistShape, listingId: string, note: string): Record<string, Negotiation> {
+  const me = prev.user?.username;
+  const negotiations = { ...prev.negotiations };
+  for (const n of Object.values(prev.negotiations)) {
+    if (n.listingId !== listingId || n.seller !== me || n.status !== "open") continue;
+    negotiations[n.id] = {
+      ...n,
+      status: "closed",
+      messages: [
+        ...n.messages.map((m) => (m.kind === "offer" && m.status === "pending" ? { ...m, status: "declined" as const } : m)),
+        systemMessage(note),
+      ],
+    };
+  }
+  return negotiations;
 }
 
 /** The listing as it stands in this state: price and owner after any changes. */
@@ -341,6 +400,27 @@ async function writeReply(chat: Negotiation, me: string, listing: Listing): Prom
   }
 }
 
+/** Each user's state is stashed under its own key when someone else signs in on this browser. */
+const userKey = (username: string) => `${STORAGE_KEY}:${username}`;
+
+function stashUser(state: PersistShape) {
+  if (!state.owner) return;
+  try {
+    window.localStorage.setItem(userKey(state.owner), JSON.stringify({ ...state, user: null }));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function loadUser(username: string): PersistShape {
+  try {
+    const raw = window.localStorage.getItem(userKey(username));
+    return raw ? { ...EMPTY, ...(JSON.parse(raw) as PersistShape) } : EMPTY;
+  } catch {
+    return EMPTY;
+  }
+}
+
 function loadState(): PersistShape {
   if (typeof window === "undefined") return EMPTY;
   try {
@@ -400,20 +480,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const balance = useMemo(() => ledgerBalance(state.ledger), [state.ledger]);
 
   const login = useCallback(
-    (username: string, email?: string) => {
-      setState((prev) => {
-        const fresh = !prev.ledger.length;
+    (username: string, email?: string, address?: string) => {
+      setState((current) => {
+        // A different user on this browser: put the last one's state aside and load theirs.
+        let prev = current;
+        if (current.owner && current.owner !== username) {
+          stashUser(current);
+          prev = loadUser(username);
+          prev.slabs.forEach(registerListing);
+        }
+        const fresh = !prev.ledger.length && !prev.vault.length;
         const starters = fresh && username === DEMO_USER ? makeStarterListings(username, Date.now()) : [];
         starters.forEach(registerListing);
         return {
           ...prev,
+          owner: username,
           user: {
             username,
             email: email ?? `${username}@example.com`,
             hue: hashString(username) % 360,
-            joinedAt: new Date().toISOString(),
+            joinedAt: prev.user?.username === username ? prev.user.joinedAt : new Date().toISOString(),
+            address,
           },
-          ledger: fresh ? [ledgerEntry(WELCOME_CREDIT, "Welcome credit (demo money)")] : prev.ledger,
+          ledger: fresh && !address ? [ledgerEntry(WELCOME_CREDIT, "Welcome credit (demo money)")] : prev.ledger,
           slabs: [...starters, ...prev.slabs],
           vault: [
             ...starters.map<VaultItem>((l) => ({
@@ -490,19 +579,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /* ---------------- slabs ---------------- */
 
   const submitSlab = useCallback(
-    (input: SlabSubmission): Listing | null => {
+    (input: SlabSubmission, token?: SlabToken): Listing | null => {
       const user = state.user;
       if (!user) return null;
       const cert = input.certNumber.trim();
-      const duplicate = state.vault.some((v) => {
+      const duplicate = state.vault.find((v) => {
         const l = getListing(v.listingId);
         return l?.grader === input.grader && l.certNumber === cert;
       });
+      // The chain sync may already have added this freshly minted token: that's the same slab, not an error.
+      if (duplicate && token && duplicate.token?.tokenId === token.tokenId) return getListing(duplicate.listingId) ?? null;
       if (duplicate) {
         pushToast({ title: "Already in your slabs", body: `${input.grader} cert ${cert} is already vaulted.`, tone: "error" });
         return null;
       }
-      const listing = makeSubmittedListing({ ...input, owner: user.username, nowMs: Date.now() });
+      const made = makeSubmittedListing({ ...input, owner: user.username, nowMs: Date.now() });
+      // A minted slab shows its real token id, contract, owner wallet and mint transaction.
+      const listing =
+        made && token
+          ? {
+              ...made,
+              tokenId: token.tokenId,
+              contract: token.contract,
+              ownerAddress: token.owner,
+              activity: made.activity.map((a) => (a.kind === "Mint" ? { ...a, txHash: token.mintTx } : a)),
+            }
+          : made;
       if (!listing) {
         pushToast({ title: "Cert not found", body: `${input.grader} has no record of cert ${cert}.`, tone: "error" });
         return null;
@@ -512,7 +614,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         slabs: [listing, ...prev.slabs],
         vault: [
-          { listingId: listing.id, acquiredAt: listing.listedAt, via: "Submission", status: "Vaulted" },
+          { listingId: listing.id, acquiredAt: listing.listedAt, via: "Submission", status: "Vaulted", token },
           ...prev.vault,
         ],
         overrides: { ...prev.overrides, [listing.id]: { delisted: true } },
@@ -585,6 +687,130 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     [pushToast],
   );
+
+  /* ---------------- blockchain: onboarding / offboarding ---------------- */
+
+  const recordChainCash = useCallback((amount: number, label: string, txHash: string) => {
+    setState((prev) => ({ ...prev, ledger: [ledgerEntry(amount, `${label} · tx ${txHash.slice(0, 10)}…`), ...prev.ledger] }));
+  }, []);
+
+  const attachToken = useCallback((listingId: string, token: SlabToken) => {
+    setState((prev) => ({
+      ...prev,
+      vault: prev.vault.map((v) => (v.listingId === listingId ? { ...v, token } : v)),
+    }));
+  }, []);
+
+  const syncChainSlabs = useCallback(
+    (owned: ChainSlab[], ownedByOthers: string[]) => {
+      const snapshot = latest.current;
+      const me = snapshot.user;
+      if (!me?.address) return;
+      // Only drop a token when ownerOf positively names someone else, so a read that started
+      // before a fresh mint can never make that slab vanish.
+      const others = new Set(ownedByOthers);
+      const known = new Set(snapshot.vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])));
+      const gone = snapshot.vault.filter((v) => v.token && others.has(v.token.tokenId));
+      const arrived = owned.filter((o) => !known.has(o.token.tokenId));
+      if (!gone.length && !arrived.length) return;
+
+      const added: { listing: Listing; item: VaultItem }[] = [];
+      for (const o of arrived) {
+        const made = makeSubmittedListing({ grader: o.grader, certNumber: o.certNumber, owner: me.username, nowMs: Date.now() });
+        if (!made) continue;
+        const listing = { ...made, tokenId: o.token.tokenId, contract: o.token.contract, ownerAddress: o.token.owner };
+        registerListing(listing);
+        const withdrawn = o.custody !== "Vaulted";
+        added.push({
+          listing,
+          item: {
+            listingId: listing.id,
+            acquiredAt: new Date().toISOString(),
+            via: o.via,
+            status: withdrawn ? "Withdrawn" : "Vaulted",
+            token: o.token,
+            withdrawal: withdrawn
+              ? {
+                  requestedAt: new Date().toISOString(),
+                  requestTx: "",
+                  shippingHash: "",
+                  shipTo: "",
+                  redemptionRef: o.redemptionRef,
+                  carrier: o.carrier,
+                  trackingNumber: o.trackingNumber,
+                }
+              : undefined,
+          },
+        });
+      }
+
+      setState((prev) => {
+        const goneIds = new Set(gone.map((v) => v.listingId));
+        const addIds = new Set(added.map((a) => a.listing.id));
+        let negotiations = prev.negotiations;
+        for (const id of goneIds) {
+          negotiations = closeSellerChats({ ...prev, negotiations }, id, "The seller no longer owns this slab.");
+        }
+        return {
+          ...prev,
+          negotiations,
+          slabs: [...added.map((a) => a.listing), ...prev.slabs.filter((l) => !addIds.has(l.id))],
+          vault: [...added.map((a) => a.item), ...prev.vault.filter((v) => !goneIds.has(v.listingId) && !addIds.has(v.listingId))],
+          overrides: {
+            ...prev.overrides,
+            ...Object.fromEntries([...goneIds, ...addIds].map((id) => [id, { ...prev.overrides[id], delisted: true }])),
+          },
+        };
+      });
+      for (const a of added) pushToast({ title: `Token #${a.item.token!.tokenId} arrived`, body: `${a.listing.shortName} is now in your Vault.`, tone: "success" });
+      for (const v of gone) pushToast({ title: `Token #${v.token!.tokenId} left your wallet`, body: "Another collector owns it now." });
+    },
+    [pushToast],
+  );
+
+  const handOver = useCallback(
+    (listingId: string, toHandle: string) => {
+      setState((prev) => ({
+        ...prev,
+        negotiations: closeSellerChats(prev, listingId, `The slab was transferred to @${toHandle}.`),
+        overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
+        vault: prev.vault.filter((v) => v.listingId !== listingId),
+      }));
+    },
+    [],
+  );
+
+  const withdrawSlab = useCallback(
+    (listingId: string, withdrawal: Withdrawal) => {
+      setState((prev) => {
+        // Same as delisting: every open chat about the slab closes and pending offers are declined.
+        const negotiations = closeSellerChats(prev, listingId, "The seller withdrew this slab from the vault.");
+        return {
+          ...prev,
+          negotiations,
+          overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
+          vault: prev.vault.map((v) =>
+            v.listingId === listingId ? { ...v, status: "Withdrawn", listedPrice: undefined, withdrawal } : v,
+          ),
+        };
+      });
+    },
+    [],
+  );
+
+  const updateWithdrawal = useCallback((listingId: string, patch: Partial<Withdrawal>) => {
+    setState((prev) => ({
+      ...prev,
+      vault: prev.vault.map((v) =>
+        v.listingId === listingId && v.withdrawal ? { ...v, withdrawal: { ...v.withdrawal, ...patch } } : v,
+      ),
+    }));
+  }, []);
+
+  const offboard = useCallback(() => {
+    setState((prev) => ({ ...prev, user: null }));
+    pushToast({ title: "Account closed", body: "Your record stays on-chain. Your slabs' tokens are still yours." });
+  }, [pushToast]);
 
   /* ---------------- negotiations ---------------- */
 
@@ -811,7 +1037,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const resetDemo = useCallback(() => {
     try {
-      window.localStorage.removeItem(STORAGE_KEY);
+      // The live state and every user's stashed state.
+      Object.keys(window.localStorage)
+        .filter((k) => k.startsWith(STORAGE_KEY))
+        .forEach((k) => window.localStorage.removeItem(k));
     } catch {
       /* ignore */
     }
@@ -834,6 +1063,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     listFromVault,
     delist,
     requestShipping,
+    recordChainCash,
+    attachToken,
+    syncChainSlabs,
+    handOver,
+    withdrawSlab,
+    updateWithdrawal,
+    offboard,
     makeOffer,
     sendMessage,
     respondToOffer,

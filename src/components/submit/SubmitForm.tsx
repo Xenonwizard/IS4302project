@@ -11,18 +11,23 @@ import { usd } from "@/lib/format";
 import { GRADERS } from "@/lib/pools";
 import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
+import { useSlabChain } from "@/lib/chain/useSlabChain";
+import { PendingSubmissions } from "../chain/PendingSubmissions";
+import { Fn, OnChainNote } from "../chain/ui";
 import { Slab } from "../slab/Slab";
 import { Button, Field, inputClass } from "../ui/primitives";
 import { ListForSaleForm } from "../vault/ListForSaleForm";
 
 export function SubmitForm() {
-  const { user, requireAuth, submitSlab, pushToast } = useStore();
+  const { user, requireAuth, submitSlab, pushToast, vault } = useStore();
+  const { submit: submitOnChain } = useSlabChain();
+  const [sending, setSending] = useState(false);
   const [vaulted, setVaulted] = useState<Listing | null>(null);
   const [choice, setChoice] = useState<"sell" | "keep" | "listed" | null>(null);
   const [form, setForm] = useState({ grader: "PSA" as Grader, cert: "" });
   const preview = certPreview(form.grader, form.cert);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!preview) {
       pushToast({ title: "Enter the 6 to 10 digit cert number", tone: "error" });
@@ -30,6 +35,19 @@ export function SubmitForm() {
     }
     // Signing in re-renders the form, so the user sends again rather than replaying a stale callback.
     if (!requireAuth()) return;
+    if (user?.address) {
+      // On-chain: record the submission; PendingSubmissions then tracks it to Pokechain, CC and the mint.
+      setSending(true);
+      try {
+        await submitOnChain(form.grader, form.cert.trim());
+        setForm((prev) => ({ ...prev, cert: "" }));
+      } catch (err) {
+        pushToast({ title: "Submission failed", body: (err as Error).message, tone: "error" });
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
     const listing = submitSlab({ grader: form.grader, certNumber: form.cert.trim() });
     if (listing) {
       setVaulted(listing);
@@ -55,8 +73,12 @@ export function SubmitForm() {
           </h1>
           <p className="mt-2 text-sm text-muted">
             {vaulted.grader} cert <span className="font-mono font-bold text-white">{vaulted.certNumber}</span>{" "}
-            checked out. The slab is in the {BRAND.vaultCity} vault and its token was minted to your
-            wallet on {BRAND.chain}.
+            checked out. Collector Crypt holds the slab, and its token was minted to your wallet on{" "}
+            {BRAND.chain}
+            {vault.find((v) => v.listingId === vaulted.id)?.token
+              ? ` as token #${vault.find((v) => v.listingId === vaulted.id)!.token!.tokenId}`
+              : ""}
+            .
           </p>
         </div>
 
@@ -122,10 +144,24 @@ export function SubmitForm() {
     <div className="mx-auto max-w-lg">
       <h1 className="text-[24px] font-bold">Vault a graded slab</h1>
       <p className="mt-1.5 text-[14px] text-muted">
-        Tell us the grader and the cert number on the label. We pull the card, grade and set from
-        the grader&apos;s registry, then the slab goes straight into the {BRAND.vaultCity} vault and
-        shows up in your Vault, insured and tokenised for free.
+        Tell us the grader and the cert number on the label, then ship the slab to Pokechain. We forward it
+        to Collector Crypt&apos;s vault, where it is recorded as a Solana NFT held by Pokechain&apos;s escrow. Once
+        we&apos;ve verified that NFT, your
+        Pokechain token is minted on {BRAND.chain} and the slab shows up in your Vault.
       </p>
+
+      {user?.address ? (
+        <div className="mt-5">
+          <PendingSubmissions
+            onMinted={(listing) => {
+              if (listing) {
+                setVaulted(listing);
+                setChoice(null);
+              }
+            }}
+          />
+        </div>
+      ) : null}
 
       <form onSubmit={submit} className="mt-6 space-y-4">
         <div className="grid grid-cols-[140px_1fr] gap-3">
@@ -170,13 +206,21 @@ export function SubmitForm() {
           <p className="text-[12px] text-dim">Keep typing: cert numbers are 6 to 10 digits.</p>
         ) : null}
 
-        <Button type="submit" size="lg" className="w-full" disabled={!preview}>
+        <Button type="submit" size="lg" className="w-full" disabled={!preview || sending}>
           <ShieldCheck size={17} />
-          {user ? "Send to the vault" : "Log in and send to the vault"}
+          {sending ? "Confirm in your wallet…" : user ? "Submit and ship to Pokechain" : "Log in and send to the vault"}
         </Button>
-        <p className="text-center text-[11px] leading-relaxed text-dim">
-          Demo: the registry lookup is simulated and the slab is vaulted the moment you submit.
-        </p>
+        {user?.address ? (
+          <OnChainNote>
+            Calls <Fn>SlabVault.requestSubmission(grader, certNumber)</Fn>. It checks your account is
+            Active and that the cert isn&apos;t already tokenised or pending. Then it stores a Pending
+            submission and emits <Fn>SubmissionRequested</Fn>. No token exists yet.
+          </OnChainNote>
+        ) : (
+          <p className="text-center text-[11px] leading-relaxed text-dim">
+            Off-chain demo account: the slab is vaulted the moment you submit. Open an on-chain account to mint a real token.
+          </p>
+        )}
       </form>
     </div>
   );

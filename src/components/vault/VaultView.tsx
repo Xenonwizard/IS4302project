@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { MessagesSquare, Package, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, MessagesSquare, Package, PackageOpen, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
@@ -11,17 +11,22 @@ import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
+import { PendingSubmissions } from "../chain/PendingSubmissions";
+import { RedeemModal } from "../chain/RedeemModal";
+import { TransferModal } from "../chain/TransferModal";
+import { WithdrawnList } from "../chain/WithdrawnList";
 import { Slab } from "../slab/Slab";
 import { Badge, Button, Modal, TimeAgo } from "../ui/primitives";
 import { ListForSaleForm } from "./ListForSaleForm";
 import { Empty, LoginPrompt } from "./shared";
 
-type Tab = "all" | "listed" | "unlisted";
+type Tab = "all" | "listed" | "unlisted" | "withdrawn";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "all", label: "All" },
   { value: "listed", label: "Listed" },
   { value: "unlisted", label: "Unlisted" },
+  { value: "withdrawn", label: "Withdrawn" },
 ];
 
 export function VaultView() {
@@ -39,8 +44,10 @@ export function VaultView() {
     () => TABS.find((t) => t.value === params.get("tab"))?.value ?? "all",
   );
   const [sellTarget, setSellTarget] = useState<Listing | null>(null);
+  const [redeemTarget, setRedeemTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  const [transferTarget, setTransferTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
 
-  const items = useMemo(
+  const allItems = useMemo(
     () =>
       vault
         .map((v) => {
@@ -50,11 +57,19 @@ export function VaultView() {
         .filter((x): x is { entry: VaultItem; listing: Listing } => Boolean(x)),
     [vault, resolve],
   );
+  // Withdrawn slabs have left the vault but keep their token, so they get their own tab.
+  const items = allItems.filter((i) => i.entry.status !== "Withdrawn");
+  const withdrawn = allItems.filter((i) => i.entry.status === "Withdrawn");
 
   const totalValue = items.reduce((sum, i) => sum + i.listing.fmv, 0);
   const listed = items.filter((i) => i.entry.status === "Listed");
   const unlisted = items.filter((i) => i.entry.status !== "Listed");
-  const counts: Record<Tab, number> = { all: items.length, listed: listed.length, unlisted: unlisted.length };
+  const counts: Record<Tab, number> = {
+    all: items.length,
+    listed: listed.length,
+    unlisted: unlisted.length,
+    withdrawn: withdrawn.length,
+  };
 
   if (!user) {
     return (
@@ -70,8 +85,16 @@ export function VaultView() {
     <div className="px-4 py-5 lg:px-6">
       <h1 className="text-[24px] font-bold">Vault</h1>
       <p className="mt-1 text-[13px] text-muted">
-        Held in the {BRAND.vaultCity} vault, insured at full market value.
+        {user.address
+          ? "Stored by Collector Crypt. Each slab's token is yours on Polygon, and its Collector Crypt NFT is held in Pokechain's escrow."
+          : `Held in the ${BRAND.vaultCity} vault, insured at full market value.`}
       </p>
+
+      {user.address ? (
+        <div className="mt-5">
+          <PendingSubmissions />
+        </div>
+      ) : null}
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Slabs owned" value={String(items.length)} />
@@ -100,7 +123,7 @@ export function VaultView() {
       </div>
 
       <div className="mt-5">
-        {tab !== "listed" ? (
+        {tab === "all" || tab === "unlisted" ? (
           (tab === "all" ? items : unlisted).length ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
               {(tab === "all" ? items : unlisted).map(({ entry, listing }) => (
@@ -110,7 +133,8 @@ export function VaultView() {
                   listing={listing}
                   onManage={() => setTab("listed")}
                   onSell={() => setSellTarget(listing)}
-                  onShip={() => requestShipping(listing.id)}
+                  onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
+                  onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
                 />
               ))}
             </div>
@@ -126,6 +150,18 @@ export function VaultView() {
               icon={<Package size={24} />}
               title="Everything is listed"
               body="Slabs you hold without listing them show up here."
+            />
+          )
+        ) : null}
+
+        {tab === "withdrawn" ? (
+          withdrawn.length ? (
+            <WithdrawnList items={withdrawn} />
+          ) : (
+            <Empty
+              icon={<PackageOpen size={24} />}
+              title="Nothing withdrawn"
+              body="Slabs you ship home move here. Their tokens stay in your wallet, so each one's custody trail can still be traced and a lost parcel reported."
             />
           )
         ) : null}
@@ -188,6 +224,9 @@ export function VaultView() {
 
       </div>
 
+      <RedeemModal target={redeemTarget} onClose={() => setRedeemTarget(null)} />
+      <TransferModal target={transferTarget} onClose={() => setTransferTarget(null)} />
+
       {/* list-for-sale modal */}
       <Modal
         open={Boolean(sellTarget)}
@@ -239,12 +278,15 @@ function SlabCard({
   onManage,
   onSell,
   onShip,
+  onTransfer,
 }: {
   entry: VaultItem;
   listing: Listing;
   onManage: () => void;
   onSell: () => void;
   onShip: () => void;
+  /** tokenised slabs on a wallet account only */
+  onTransfer?: () => void;
 }) {
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
@@ -267,6 +309,15 @@ function SlabCard({
         <p className="mt-1.5 text-[11px] text-dim">
           {entry.via} · <TimeAgo value={entry.acquiredAt} />
         </p>
+        {entry.token ? (
+          <Link
+            href={`/trace/${entry.token.tokenId}`}
+            className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
+            title="Trace this slab across Polygon, Solana and Collector Crypt"
+          >
+            <Blocks size={11} /> Token #{entry.token.tokenId} · <Route size={11} /> Trace
+          </Link>
+        ) : null}
         <div className="mt-3 grid gap-2">
           {entry.status === "Listed" ? (
             <Button size="sm" variant="secondary" onClick={onManage}>
@@ -282,6 +333,12 @@ function SlabCard({
             <Button size="sm" variant="outline" onClick={onShip}>
               <Truck size={13} />
               Ship to me
+            </Button>
+          ) : null}
+          {entry.status === "Vaulted" && onTransfer ? (
+            <Button size="sm" variant="outline" onClick={onTransfer}>
+              <Send size={13} />
+              Transfer
             </Button>
           ) : null}
         </div>

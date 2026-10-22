@@ -9,6 +9,15 @@
       ],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "pokechain-chain",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=/opt/homebrew/bin:$PATH && npm run chain"
+      ],
+      "port": 8545
     }
   ]
 }
