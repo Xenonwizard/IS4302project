@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Blocks, MessagesSquare, Package, PackageOpen, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, MessagesSquare, Package, PackageOpen, Plus, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
@@ -83,7 +83,14 @@ export function VaultView() {
 
   return (
     <div className="px-4 py-5 lg:px-6">
-      <h1 className="text-[24px] font-bold">Vault</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-[24px] font-bold">Vault</h1>
+        <Link href="/submit">
+          <Button size="sm">
+            <Plus size={14} /> Vault a slab
+          </Button>
+        </Link>
+      </div>
       <p className="mt-1 text-[13px] text-muted">
         {user.address
           ? "Stored by Collector Crypt. Each slab's token is yours on Polygon, and its Collector Crypt NFT is held in Pokechain's escrow."
@@ -98,7 +105,7 @@ export function VaultView() {
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Slabs owned" value={String(items.length)} />
-        <Stat label="Collection value" value={usd(totalValue)} />
+        <Stat label="Collection value" value={usd(totalValue, { cents: items.some((i) => i.entry.token) })} />
         <Stat label="Listed for sale" value={String(listed.length)} />
         <Stat label="Wallet balance" value={usd(balance, { cents: true })} href="/wallet" />
       </div>
@@ -301,7 +308,7 @@ function SlabCard({
           {listing.title}
         </Link>
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-[13px] font-bold">{usd(listing.fmv)}</span>
+          <span className="text-[13px] font-bold">{usd(listing.fmv, { cents: Boolean(entry.token) })}</span>
           <Badge tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" ? "warn" : "good"}>
             {entry.status}
           </Badge>

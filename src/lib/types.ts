@@ -90,6 +90,9 @@ export interface SlabToken {
   mintTx: string;
   /** Collector Crypt's Solana NFT (asset id) for the slab, held by Pokechain's escrow */
   custodianRef: string;
+  /** what the collector declared in the intake form, as recorded on-chain */
+  declaredValueCents?: number;
+  evidenceHash?: string;
 }
 
 /** A slab that has left the vault. The token stays; SlabVault holds the live custody state. */
