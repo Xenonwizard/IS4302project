@@ -169,7 +169,7 @@ interface StoreValue extends PersistShape {
   makeOffer: (listingId: string, bid: TradeBid, availableFunds?: number) => string | null;
   sendMessage: (negotiationId: string, text: string) => void;
   /** seller side: accept or decline the buyer's pending offer */
-  respondToOffer: (negotiationId: string, offerId: string, accept: boolean) => void;
+  respondToOffer: (negotiationId: string, offerId: string, accept: boolean, txHash?: string) => void;
   /** buyer side: take back a pending offer */
   withdrawOffer: (negotiationId: string, offerId: string) => void;
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
@@ -251,6 +251,7 @@ function settleDeal(
   negId: string,
   offerId: string,
   availableFunds?: number,
+  txHash?: string,
 ): { next: PersistShape; error?: string } {
   const me = prev.user?.username;
   const n = prev.negotiations[negId];
@@ -263,6 +264,20 @@ function settleDeal(
   const now = new Date().toISOString();
   let vault = prev.vault;
   let ledger = prev.ledger;
+
+  const sellerVaultItem = prev.vault.find((v) => v.listingId === listing.id);
+  const token: SlabToken | undefined =
+    sellerVaultItem?.token ||
+    (listing.tokenId && listing.contract
+      ? {
+          chainId: 31337,
+          contract: listing.contract,
+          tokenId: listing.tokenId,
+          owner: n.buyer,
+          mintTx: "",
+          custodianRef: "",
+        }
+      : undefined);
 
   if (n.buyer === me) {
     const effectiveFunds = prev.user?.address
@@ -277,10 +292,16 @@ function settleDeal(
     }
     vault = vault.filter((v) => !slabIds.includes(v.listingId));
     vault = [
-      { listingId: listing.id, acquiredAt: now, via: slabIds.length ? "Trade" : "Purchase", status: "Vaulted" },
+      {
+        listingId: listing.id,
+        acquiredAt: now,
+        via: slabIds.length ? "Trade" : "Purchase",
+        status: "Vaulted",
+        token,
+      },
       ...vault,
     ];
-    if (cash > 0) {
+    if (cash > 0 && !prev.user?.address) {
       ledger = [
         ledgerEntry(-cash, `Bought ${listing.shortName}${slabIds.length ? " (cash part of trade)" : ""}`, listing.id),
         ...ledger,
@@ -295,7 +316,7 @@ function settleDeal(
       ...slabIds.map<VaultItem>((id) => ({ listingId: id, acquiredAt: now, via: "Trade", status: "Vaulted" })),
       ...vault,
     ];
-    if (cash > 0) {
+    if (cash > 0 && !prev.user?.address) {
       ledger = [
         ledgerEntry(-sellerFee(cash), `Seller fee (${BRAND.sellerFee * 100}%) on ${listing.shortName}`, listing.id),
         ledgerEntry(cash, `Sold ${listing.shortName}${slabIds.length ? " (cash part of trade)" : ""}`, listing.id),
@@ -305,7 +326,22 @@ function settleDeal(
   }
 
   const overrides = { ...prev.overrides };
-  overrides[listing.id] = { ...overrides[listing.id], owner: n.buyer, soldTo: n.buyer, delisted: true };
+  const newActivity: ActivityEvent = {
+    kind: cash > 0 ? "Sale" : "Transfer",
+    from: n.seller,
+    to: n.buyer,
+    price: cash > 0 ? cash : undefined,
+    at: now,
+    txHash: txHash || `0x${hexId(hashString(now + n.id), 8)}`,
+  };
+  const existingActivity = overrides[listing.id]?.activity || listing.activity || [];
+  overrides[listing.id] = {
+    ...overrides[listing.id],
+    owner: n.buyer,
+    soldTo: n.buyer,
+    delisted: true,
+    activity: [newActivity, ...existingActivity],
+  };
   for (const id of slabIds) overrides[id] = { ...overrides[id], owner: n.seller, delisted: true };
 
   const negotiations = { ...prev.negotiations };
@@ -1201,18 +1237,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const respondToOffer = useCallback(
-    (negId: string, offerId: string, accept: boolean) => {
+    (negId: string, offerId: string, accept: boolean, txHash?: string) => {
       const snapshot = latest.current;
       const me = snapshot.user?.username;
       if (!me) return;
       if (accept) {
-        const { error } = settleDeal(snapshot, negId, offerId, balance);
+        const { error } = settleDeal(snapshot, negId, offerId, balance, txHash);
         if (error) {
           pushToast({ title: "Could not accept", body: error, tone: "error" });
           return;
         }
         setState((prev) => {
-          const res = settleDeal(prev, negId, offerId, balance).next;
+          const res = settleDeal(prev, negId, offerId, balance, txHash).next;
           const updated = res.negotiations[negId];
           if (updated) syncNegotiationToServer(updated);
           return res;
@@ -1283,16 +1319,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (prev.user && incoming.buyer === prev.user.username && incoming.status === "sold") {
-              if (!newVault.some((v) => v.listingId === incoming.listingId)) {
+              const existingItem = newVault.find((v) => v.listingId === incoming.listingId);
+              const baseListing = getListing(incoming.listingId);
+              const token: SlabToken | undefined =
+                baseListing?.tokenId && baseListing?.contract
+                  ? {
+                      chainId: 31337,
+                      contract: baseListing.contract,
+                      tokenId: baseListing.tokenId,
+                      owner: prev.user.address || "",
+                      mintTx: "",
+                      custodianRef: "",
+                    }
+                  : undefined;
+
+              if (!existingItem) {
                 newVault = [
                   {
                     listingId: incoming.listingId,
                     acquiredAt: incoming.messages.at(-1)?.at || new Date().toISOString(),
                     via: "Trade",
                     status: "Vaulted",
+                    token,
                   },
                   ...newVault,
                 ];
+                changed = true;
+              } else if (!existingItem.token && token) {
+                newVault = newVault.map((item) =>
+                  item.listingId === incoming.listingId ? { ...item, token } : item,
+                );
+                changed = true;
+              }
+            }
+
+            if (prev.user && incoming.seller === prev.user.username && incoming.status === "sold") {
+              if (newVault.some((v) => v.listingId === incoming.listingId)) {
+                newVault = newVault.filter((v) => v.listingId !== incoming.listingId);
                 changed = true;
               }
             }
