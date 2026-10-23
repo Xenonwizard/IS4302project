@@ -24,7 +24,7 @@ The name lives in one file, [`src/lib/brand.ts`](src/lib/brand.ts).
 ## Running it
 
 **Requires Node.js 22.13 or newer** (Hardhat 3 needs it; check with `node -v`). Works on macOS,
-Windows and Linux.
+Windows and Linux. With nvm, run `nvm use` in the project folder: `.nvmrc` picks Node 24.
 
 ```bash
 npm run setup     # once, and again after pulling: installs the app and blockchain/ dependencies
@@ -79,6 +79,7 @@ Hardhat test wallets that stand in for MetaMask locally.
 | Page loads but **nothing responds**: *Log in* / *Sign up* do nothing, no banner, and the address bar shows an IP like `192.168.x.x:3000` | The dev server only serves its JavaScript to `localhost`; and the blockchain is looked up on *your own* computer at `127.0.0.1:8545` | Run `npm run chain` and `npm run dev` on your own computer and open **http://localhost:3000** (not someone else's IP) |
 | Yellow banner: *"The local blockchain isn't running"*; Open account is greyed out | `npm run chain` isn't running, or it exited | Start it in a second terminal and leave it open. If it exits, read its error (usually the Node version) |
 | `npm run chain` says *needs Node.js 22.13 or newer* | Node 20 or older | Install Node 22 LTS (`nvm install 22`), then `npm run setup` again |
+| `SyntaxError: Unexpected token ?` (any npm script) | The terminal is on a very old Node (nvm's default) | `nvm use` in the project folder (or `nvm alias default 24` once) |
 | `npm run chain` says *Cannot find module* / *hardhat: not found* | `blockchain/` dependencies not installed | `npm run setup` |
 | *Something is already listening on 8545* | An old chain is still running | Close the other terminal (or the process on port 8545) and run `npm run chain` again |
 | Signed in on an old session, odd balances, or slabs that don't exist | Browser data from an earlier chain | Chain log panel → **Reset chain + demo data**, or use a private window |
