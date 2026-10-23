@@ -514,10 +514,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           // Preserve marketplace listings & overrides so cards listed by other users remain visible
           const mergedSlabsMap = new Map([...next.slabs, ...current.slabs].map((s) => [s.id, s]));
           const mergedOverrides = { ...next.overrides, ...current.overrides };
+          const mergedNegotiations = { ...next.negotiations, ...current.negotiations };
           prev = {
             ...next,
             slabs: Array.from(mergedSlabsMap.values()),
             overrides: mergedOverrides,
+            negotiations: mergedNegotiations,
           };
           prev.slabs.forEach(registerListing);
         }
@@ -1108,6 +1110,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   /* ---------------- negotiations ---------------- */
 
+  const syncNegotiationToServer = (n: Negotiation) => {
+    void fetch("/api/negotiations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ negotiation: n }),
+    }).catch(() => null);
+  };
+
   const makeOffer = useCallback(
     (listingId: string, bid: TradeBid, availableFunds?: number): string | null => {
       const user = state.user;
@@ -1122,6 +1132,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const id = negotiationId(listingId, me);
       const now = new Date().toISOString();
       const offer: ChatMessage = { id: messageId(), from: me, at: now, kind: "offer", offer: bid, status: "pending" };
+      let updatedNegotiation: Negotiation | null = null;
       setState((prev) => {
         const existing = prev.negotiations[id];
         const n: Negotiation =
@@ -1138,8 +1149,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ],
               }
             : { id, listingId, seller: listing.owner, buyer: me, status: "open", createdAt: now, messages: [offer] };
+        updatedNegotiation = n;
         return { ...prev, negotiations: { ...prev.negotiations, [id]: n } };
       });
+      if (updatedNegotiation) syncNegotiationToServer(updatedNegotiation);
       pushToast({ title: "Offer sent", body: `${listing.owner} will reply in your chat.`, tone: "success" });
       return id;
     },
@@ -1150,7 +1163,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => {
       const me = prev.user?.username;
       if (!me || prev.negotiations[negId]?.status !== "open") return prev;
-      return append(prev, negId, { id: messageId(), from: me, at: new Date().toISOString(), kind: "text", text });
+      const next = append(prev, negId, { id: messageId(), from: me, at: new Date().toISOString(), kind: "text", text });
+      const updated = next.negotiations[negId];
+      if (updated) syncNegotiationToServer(updated);
+      return next;
     });
   }, []);
 
@@ -1165,10 +1181,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           pushToast({ title: "Could not accept", body: error, tone: "error" });
           return;
         }
-        setState((prev) => settleDeal(prev, negId, offerId, balance).next);
+        setState((prev) => {
+          const res = settleDeal(prev, negId, offerId, balance).next;
+          const updated = res.negotiations[negId];
+          if (updated) syncNegotiationToServer(updated);
+          return res;
+        });
         pushToast({ title: "Offer accepted", body: "See your Vault and Wallet for the update.", tone: "success" });
       } else {
-        setState((prev) => markOffer(prev, negId, offerId, "declined", `${me} declined the offer.`, me));
+        setState((prev) => {
+          const res = markOffer(prev, negId, offerId, "declined", `${me} declined the offer.`, me);
+          const updated = res.negotiations[negId];
+          if (updated) syncNegotiationToServer(updated);
+          return res;
+        });
       }
     },
     [pushToast, balance],
@@ -1178,11 +1204,96 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => {
       const me = prev.user?.username;
       if (!me) return prev;
-      return markOffer(prev, negId, offerId, "withdrawn", `${me} cancelled the offer.`, me);
+      const res = markOffer(prev, negId, offerId, "withdrawn", `${me} cancelled the offer.`, me);
+      const updated = res.negotiations[negId];
+      if (updated) syncNegotiationToServer(updated);
+      return res;
     });
   }, []);
 
-  /* The simulated other party answers whatever the user last did in a chat. */
+  /* Periodic poll to sync negotiations across accounts/sessions */
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/negotiations");
+        if (!res.ok) return;
+        const data = (await res.json()) as { negotiations?: Record<string, Negotiation> };
+        if (!data?.negotiations || !active) return;
+
+        setState((prev) => {
+          let changed = false;
+          const merged = { ...prev.negotiations };
+          let newVault = prev.vault;
+
+          for (const [id, incoming] of Object.entries(data.negotiations!)) {
+            const existing = merged[id];
+            if (!existing) {
+              merged[id] = incoming;
+              changed = true;
+              if (prev.user && incoming.seller === prev.user.username && incoming.status === "open") {
+                const pending = incoming.messages.find((m) => m.kind === "offer" && m.status === "pending");
+                if (pending && pending.from !== prev.user.username) {
+                  pushToast({ title: `New offer from @${incoming.buyer}`, body: "Check Negotiation rooms." });
+                }
+              }
+            } else {
+              const existingMsgs = existing.messages?.length || 0;
+              const incomingMsgs = incoming.messages?.length || 0;
+              if (existing.status !== incoming.status || incomingMsgs > existingMsgs) {
+                const messageMap = new Map<string, ChatMessage>();
+                for (const m of existing.messages || []) messageMap.set(m.id, m);
+                for (const m of incoming.messages || []) messageMap.set(m.id, m);
+                merged[id] = {
+                  ...existing,
+                  ...incoming,
+                  messages: Array.from(messageMap.values()).sort(
+                    (a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0),
+                  ),
+                };
+                changed = true;
+              }
+            }
+
+            if (prev.user && incoming.buyer === prev.user.username && incoming.status === "sold") {
+              if (!newVault.some((v) => v.listingId === incoming.listingId)) {
+                newVault = [
+                  {
+                    listingId: incoming.listingId,
+                    acquiredAt: incoming.messages.at(-1)?.at || new Date().toISOString(),
+                    via: "Trade",
+                    status: "Vaulted",
+                  },
+                  ...newVault,
+                ];
+                changed = true;
+              }
+            }
+          }
+
+          if (!changed) return prev;
+          return {
+            ...prev,
+            negotiations: merged,
+            vault: newVault,
+          };
+        });
+      } catch {
+        /* ignore polling errors */
+      }
+    };
+
+    void poll();
+    const interval = setInterval(poll, 2500);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [ready, pushToast]);
+
+  /* The simulated other party answers whatever the user last did in a chat (dummy catalog handles only) */
   const answered = useRef(new Set<string>());
   useEffect(() => {
     const me = state.user?.username;
@@ -1191,6 +1302,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const last = n.messages.at(-1);
       if (n.status !== "open" || !last || answered.current.has(last.id)) continue;
       if (last.from !== me && last.by !== me) continue;
+
+      const other = n.buyer === me ? n.seller : n.buyer;
+      const isRealAccount =
+        other === "test1" ||
+        other === "test2" ||
+        other.toLowerCase().startsWith("test") ||
+        other === "ash" ||
+        other === "misty" ||
+        other === "brock";
+      if (isRealAccount) continue;
+
       answered.current.add(last.id);
       window.setTimeout(() => {
         const snapshot = latest.current;
