@@ -42,7 +42,7 @@ import type {
 const STORAGE_KEY = "pokechain.state.v3";
 
 /** Demo credit every new wallet starts with. */
-const WELCOME_CREDIT = 2500;
+const WELCOME_CREDIT = 50000;
 
 /** The demo account, which starts with a few slabs already vaulted. */
 const DEMO_USER = "demotester";
@@ -490,7 +490,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         let prev = current;
         if (current.owner && current.owner !== username) {
           stashUser(current);
-          prev = loadUser(username);
+          const next = loadUser(username);
+          // Preserve marketplace listings & overrides so cards listed by other users remain visible
+          const mergedSlabsMap = new Map([...next.slabs, ...current.slabs].map((s) => [s.id, s]));
+          const mergedOverrides = { ...next.overrides, ...current.overrides };
+          prev = {
+            ...next,
+            slabs: Array.from(mergedSlabsMap.values()),
+            overrides: mergedOverrides,
+          };
           prev.slabs.forEach(registerListing);
         }
         const fresh = !prev.ledger.length && !prev.vault.length;
@@ -916,6 +924,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
 
         const newOverrides = { ...prev.overrides };
+        const activeIds = new Set(activeListings.map((a) => a.listing.id));
+        const activeTokenIds = new Set(
+          activeListings.flatMap((a) => (a.listing.tokenId ? [a.listing.tokenId] : []))
+        );
+
         for (const a of activeListings) {
           newOverrides[a.listing.id] = {
             ...newOverrides[a.listing.id],
@@ -925,10 +938,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           };
         }
 
+        // Delist any on-chain tokens that were previously listed but are no longer active
+        for (const s of prev.slabs) {
+          if (s.tokenId && !activeTokenIds.has(s.tokenId) && !activeIds.has(s.id)) {
+            newOverrides[s.id] = {
+              ...newOverrides[s.id],
+              delisted: true,
+            };
+          }
+        }
+
         const newSlabsMap = new Map(prev.slabs.map((s) => [s.id, s]));
         for (const a of activeListings) {
           if (!newSlabsMap.has(a.listing.id)) {
             newSlabsMap.set(a.listing.id, a.listing);
+          } else {
+            const existing = newSlabsMap.get(a.listing.id)!;
+            newSlabsMap.set(a.listing.id, {
+              ...existing,
+              price: a.price,
+              owner: a.seller || existing.owner,
+              ownerAddress: a.listing.ownerAddress || existing.ownerAddress,
+              tokenId: a.listing.tokenId || existing.tokenId,
+              listedAt: a.listing.listedAt || existing.listedAt,
+            });
           }
         }
 

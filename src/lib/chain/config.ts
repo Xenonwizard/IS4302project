@@ -76,4 +76,5 @@ export function explorerAddress(address: Address): string | null {
   return IS_LOCAL ? null : `${polygonAmoy.blockExplorers.default.url}/address/${address}`;
 }
 
-export const shortHash = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`;
+export const shortHash = (h?: string | null) =>
+  h && typeof h === "string" && h.length >= 10 ? `${h.slice(0, 6)}…${h.slice(-4)}` : (h ?? "");

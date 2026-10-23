@@ -34,6 +34,9 @@ export function ChainVaultSync() {
     enabled,
     refetchInterval: 5000,
     queryFn: async (): Promise<{ owned: ChainSlab[]; ownedByOthers: string[] }> => {
+      const vaultCode = await client!.getBytecode({ address: contracts.slabVault.address }).catch(() => null);
+      if (!vaultCode || vaultCode === "0x") return { owned: [], ownedByOthers: [] };
+
       const incoming = await client!.getContractEvents({
         ...contracts.slabVault,
         eventName: "Transfer",

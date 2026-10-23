@@ -56,7 +56,7 @@ const ERROR_TEXT: Record<string, string> = {
   WrongCustody: "The slab isn't in the right custody state for that.",
   SlabLocked: "The slab is locked because it has left the vault.",
   SelfTransfer: "You can't transfer a slab to yourself.",
-  FaucetLimit: "The faucet mints at most 10,000 USDC at a time.",
+  FaucetLimit: "The faucet mints at most 100,000 USDC at a time.",
   ERC20InsufficientBalance: "Your wallet doesn't hold enough USDC.",
   SlabIsListed: "This slab is currently listed on the marketplace. Delist it first.",
   NotListed: "This slab is not listed on the marketplace.",
