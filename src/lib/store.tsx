@@ -236,6 +236,24 @@ function closeSellerChats(prev: PersistShape, listingId: string, note: string): 
   return negotiations;
 }
 
+/**
+ * A tokenised slab's listing takes its facts from the chain: token id, contract, owner wallet,
+ * mint tx, and the declared value (instead of the catalogue's estimate).
+ */
+function withToken(listing: Listing, token: SlabToken): Listing {
+  const declared = token.declaredValueCents ? token.declaredValueCents / 100 : undefined;
+  return {
+    ...listing,
+    tokenId: token.tokenId,
+    contract: token.contract,
+    ownerAddress: token.owner,
+    ...(declared ? { fmv: declared, price: declared } : {}),
+    activity: token.mintTx
+      ? listing.activity.map((a) => (a.kind === "Mint" ? { ...a, txHash: token.mintTx } : a))
+      : listing.activity,
+  };
+}
+
 /** The listing as it stands in this state: price and owner after any changes. */
 function current(prev: PersistShape, id: string): Listing | undefined {
   const base = getListing(id);
@@ -706,17 +724,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
       const made = makeSubmittedListing({ ...input, owner: user.username, nowMs: Date.now() });
-      // A minted slab shows its real token id, contract, owner wallet and mint transaction.
-      const listing =
-        made && token
-          ? {
-              ...made,
-              tokenId: token.tokenId,
-              contract: token.contract,
-              ownerAddress: token.owner,
-              activity: made.activity.map((a) => (a.kind === "Mint" ? { ...a, txHash: token.mintTx } : a)),
-            }
-          : made;
+      // A minted slab shows its real token id, contract, owner wallet, mint transaction and the
+      // value the owner declared on-chain.
+      const listing = made && token ? withToken(made, token) : made;
       if (!listing) {
         pushToast({ title: "Cert not found", body: `${input.grader} has no record of cert ${cert}.`, tone: "error" });
         return null;
@@ -966,14 +976,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const existingSlab = snapshot.slabs.find((s) => s.id === made.id || s.tokenId === o.token.tokenId);
         const existingOverrides = snapshot.overrides[made.id];
         const preservedActivity = existingOverrides?.activity ?? existingSlab?.activity;
+        const baseWithToken = withToken(made, o.token);
         const listing = {
-          ...made,
-          price: o.isListed && o.listedPrice ? o.listedPrice : (existingOverrides?.price ?? made.price),
-          tokenId: o.token.tokenId,
-          contract: o.token.contract,
-          ownerAddress: o.token.owner,
-          activity: preservedActivity ?? made.activity,
-          sales: existingOverrides?.sales ?? existingSlab?.sales ?? made.sales,
+          ...baseWithToken,
+          price: o.isListed && o.listedPrice ? o.listedPrice : (existingOverrides?.price ?? baseWithToken.price),
+          activity: preservedActivity ?? baseWithToken.activity,
+          sales: existingOverrides?.sales ?? existingSlab?.sales ?? baseWithToken.sales,
         };
         registerListing(listing);
         const withdrawn = o.custody !== "Vaulted";

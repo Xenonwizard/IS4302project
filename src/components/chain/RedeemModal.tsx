@@ -27,8 +27,8 @@ export function RedeemModal({ target, onClose }: { target: { entry: VaultItem; l
 }
 
 function Redeem({ listingId, listing, onClose }: { listingId: string; listing: Listing; onClose: () => void }) {
-  const { vault, withdrawSlab, pushToast } = useStore();
-  const { submit, redeem } = useSlabChain();
+  const { user, vault, withdrawSlab, pushToast } = useStore();
+  const { uploadEvidence, submit, redeem } = useSlabChain();
   const entry = vault.find((v) => v.listingId === listingId);
   const [shipTo, setShipTo] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,7 +38,31 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
   const tokenise = async () => {
     setBusy(true);
     try {
-      await submit(listing.grader, listing.certNumber);
+      // Pokechain already holds this slab, so there are no new photos: the evidence records that.
+      const valueCents = Math.round(listing.fmv * 100);
+      const form = new FormData();
+      form.set(
+        "meta",
+        JSON.stringify({
+          grader: listing.grader,
+          certNumber: listing.certNumber,
+          declaredValueCents: valueCents,
+          condition: { caseCracked: false, caseScratched: false, labelDamaged: false, notes: "Already held by Pokechain" },
+          shipping: { method: "dropoff", carrier: "", tracking: "" },
+          declarations: { owner: true, authentic: true, terms: true },
+          submittedBy: user?.address ?? "",
+          source: "already-vaulted",
+        }),
+      );
+      const evidenceHash = await uploadEvidence(form);
+      await submit({
+        grader: listing.grader,
+        certNumber: listing.certNumber,
+        declaredValueCents: valueCents,
+        evidenceHash,
+        inboundCarrier: "Already at Pokechain",
+        inboundTracking: "",
+      });
       setSubmitted(true);
     } catch (e) {
       pushToast({ title: "Could not submit", body: (e as Error).message, tone: "error" });

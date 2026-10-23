@@ -31,6 +31,7 @@ import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ActivityEvent, Grader, Listing } from "@/lib/types";
 import { CopyText } from "../chain/ChainConsole";
+import { TokenRecord } from "../chain/TokenRecord";
 import { OfferModal } from "../modals/OfferModal";
 import { CardBack } from "../slab/CardBack";
 import { Slab, SlabStage } from "../slab/Slab";
@@ -72,6 +73,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     () => ({ ...baseResolved, tokenId: resolvedTokenId || baseResolved.tokenId }),
     [baseResolved, resolvedTokenId],
   );
+  // A slab minted through SlabVault: its facts come from the chain, not the catalogue.
+  const onChainTokenId =
+    resolvedTokenId ||
+    (listing.contract?.toLowerCase() === contracts.slabVault.address.toLowerCase() ? listing.tokenId : null);
 
   const { buyCard, cancelListing } = useMarketChain();
   const acct = useOnchainAccount();
@@ -606,10 +611,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="flex items-end justify-between gap-3">
                 <div>
                   <p className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                    {listed ? "Asking" : owned ? "Market value" : "Last asked"}
+                    {listed ? "Asking" : owned ? (onChainTokenId ? "Declared value (on-chain)" : "Market value") : "Last asked"}
                   </p>
                   <p className="mt-1 text-[30px] font-bold leading-none">
-                    {usd(displayPrice)}
+                    {usd(displayPrice, { cents: Boolean(onChainTokenId) })}
                   </p>
                 </div>
               </div>
@@ -691,8 +696,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </h2>
             <div className="space-y-3 p-4">
               <div className="flex items-center justify-between">
-                <span className="text-[13px] text-muted">Market value</span>
-                <span className="text-lg font-bold">{usd(listing.fmv)}</span>
+                <span className="text-[13px] text-muted">{onChainTokenId ? "Declared value (on-chain)" : "Market value"}</span>
+                <span className="text-lg font-bold">{usd(listing.fmv, { cents: Boolean(onChainTokenId) })}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-[13px] text-muted">Confidence</span>
@@ -721,6 +726,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </div>
           </section>
 
+          {onChainTokenId ? <TokenRecord tokenId={onChainTokenId} /> : null}
           <PriceHistory listing={listing} />
           <Details listing={effectiveListing} />
         </div>

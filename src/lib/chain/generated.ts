@@ -1267,6 +1267,11 @@ export const slabVaultAbi = [
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "MissingEvidence",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1318,6 +1323,22 @@ export const slabVaultAbi = [
       }
     ],
     "name": "SlabLocked",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "length",
+        "type": "uint256"
+      }
+    ],
+    "name": "StringsInsufficientHexLength",
     "type": "error"
   },
   {
@@ -1794,6 +1815,24 @@ export const slabVaultAbi = [
         "indexed": false,
         "internalType": "string",
         "name": "certNumber",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "declaredValueCents",
+        "type": "uint64"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "evidenceHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "inboundTracking",
         "type": "string"
       }
     ],
@@ -2351,6 +2390,26 @@ export const slabVaultAbi = [
         "internalType": "string",
         "name": "certNumber",
         "type": "string"
+      },
+      {
+        "internalType": "uint64",
+        "name": "declaredValueCents",
+        "type": "uint64"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "evidenceHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string",
+        "name": "inboundCarrier",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "inboundTracking",
+        "type": "string"
       }
     ],
     "name": "requestSubmission",
@@ -2581,6 +2640,16 @@ export const slabVaultAbi = [
             "type": "string"
           },
           {
+            "internalType": "uint64",
+            "name": "declaredValueCents",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "evidenceHash",
+            "type": "bytes32"
+          },
+          {
             "internalType": "string",
             "name": "carrier",
             "type": "string"
@@ -2645,6 +2714,26 @@ export const slabVaultAbi = [
             "internalType": "uint64",
             "name": "requestedAt",
             "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
+            "name": "declaredValueCents",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "evidenceHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "string",
+            "name": "inboundCarrier",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "inboundTracking",
+            "type": "string"
           },
           {
             "internalType": "string",

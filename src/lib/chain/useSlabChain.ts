@@ -4,7 +4,8 @@
  * Every slab action, on SlabVault and through the operator routes around it.
  *
  *  Inbound (collector → Pokechain → Collector Crypt → token)
- *   submit()          SlabVault.requestSubmission                     collector's wallet
+ *   uploadEvidence()  POST /api/evidence: stores the photos, returns the manifest's keccak256
+ *   submit()          SlabVault.requestSubmission(…, evidenceHash, …)  collector's wallet
  *   receive()         SlabVault.markReceived                          operator (Pokechain warehouse)
  *   forward()         SlabVault.markForwarded                         operator (ships to CC)
  *   simulateVault()   Collector Crypt intake: mints CC's NFT to Pokechain's escrow (= the Postman call)
@@ -38,12 +39,42 @@ export function useSlabChain() {
   const log = useChainLog();
   const queryClient = useQueryClient();
 
+  /** Off-chain: store the intake photos and declarations; returns the hash that goes on-chain. */
+  const uploadEvidence = useCallback(
+    async (form: FormData) => {
+      const id = log.add({ kind: "check", label: "Upload intake evidence", call: "Pokechain POST /api/evidence", args: [], status: "pending" });
+      const res = await fetch("/api/evidence", { method: "POST", body: form });
+      const data = (await res.json()) as { evidenceHash?: `0x${string}`; manifest?: { photos: unknown[] }; error?: string };
+      if (!res.ok || !data.evidenceHash) {
+        log.update(id, { status: "failed", error: data.error });
+        throw new Error(data.error ?? "Upload failed");
+      }
+      log.update(id, { status: "success", args: [`${data.manifest!.photos.length} photos hashed · evidenceHash ${data.evidenceHash}`] });
+      return data.evidenceHash;
+    },
+    [log],
+  );
+
   const submit = useCallback(
-    async (grader: Grader, certNumber: string) => {
+    async (input: {
+      grader: Grader;
+      certNumber: string;
+      declaredValueCents: number;
+      evidenceHash: `0x${string}`;
+      inboundCarrier: string;
+      inboundTracking: string;
+    }) => {
       const receipt = await send({
         contract: "slabVault",
         functionName: "requestSubmission",
-        args: [grader, certNumber],
+        args: [
+          input.grader,
+          input.certNumber,
+          BigInt(input.declaredValueCents),
+          input.evidenceHash,
+          input.inboundCarrier,
+          input.inboundTracking,
+        ],
         label: "Submit slab",
       });
       const [event] = parseEventLogs({ abi: contracts.slabVault.abi, logs: receipt.logs, eventName: "SubmissionRequested" });
@@ -151,5 +182,5 @@ export function useSlabChain() {
     [send],
   );
 
-  return { submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost };
+  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost };
 }

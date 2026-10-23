@@ -52,7 +52,6 @@ export function ChainVaultSync() {
         const id = e.args.tokenId!;
         if (!firstSeen.has(id)) firstSeen.set(id, e.args.from === zeroAddress);
       }
-
       // Also check on-chain nextTokenId to discover all tokens in existence
       const nextTokenId = await client!
         .readContract({ ...contracts.slabVault, functionName: "nextTokenId" })
@@ -98,6 +97,8 @@ export function ChainVaultSync() {
             owner: address!,
             mintTx: "",
             custodianRef: slabs[i].custodianRef,
+            declaredValueCents: Number(slabs[i].declaredValueCents),
+            evidenceHash: slabs[i].evidenceHash,
           },
           grader: slabs[i].grader as Grader,
           certNumber: slabs[i].certNumber,
