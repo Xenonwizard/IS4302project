@@ -12,6 +12,11 @@ interface ISlabVaultCustody {
     function vaultedCount(address owner) external view returns (uint256);
 }
 
+/// @dev The slice of TradeEscrow this contract needs: an account with open offers holds escrowed assets.
+interface ITradeEscrowOffers {
+    function openOffers(address maker) external view returns (uint256);
+}
+
 /**
  * @title AccountRegistry
  * @notice Account onboarding and offboarding for Pokechain.
@@ -26,6 +31,11 @@ interface ISlabVaultCustody {
  *   4. `closeAccount()`       refunds the whole custody balance and marks the account Closed.
  *                             Refused while the account still has slabs Vaulted in SlabVault:
  *                             they must be redeemed (shipped out) or transferred first.
+ *                             Also refused while it has trade offers open (assets in escrow).
+ *
+ *  Trading
+ *      `moveBalance`         TradeEscrow (and only it) moves custody balances: it locks the cash
+ *                            in an offer and pays both sides when a trade settles.
  *
  *  Nothing is deleted. A closed account keeps its record and its handle stays reserved to that
  *  address, so the history of who owned what stays traceable on-chain.
@@ -48,6 +58,8 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
 
     IERC20 public immutable usdc;
     ISlabVaultCustody public slabVault;
+    /// @notice The TradeEscrow contract, the only caller allowed to move balances between accounts.
+    address public tradeEscrow;
 
     mapping(address => Account) private _accounts;
     /// @notice keccak256(handle) => the address that claimed it. Handles are never released.
@@ -62,6 +74,8 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed account, uint256 amount, uint256 newBalance);
     event AccountClosed(address indexed account, uint256 refunded, uint64 at);
     event SlabVaultSet(address slabVault);
+    event TradeEscrowSet(address tradeEscrow);
+    event BalanceMoved(address indexed from, address indexed to, uint256 amount);
 
     error InvalidHandle();
     error HandleTaken(string handle);
@@ -71,6 +85,9 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     error InsufficientBalance(uint256 requested, uint256 available);
     error SlabsStillVaulted(uint256 count);
     error SlabVaultAlreadySet();
+    error TradeEscrowAlreadySet();
+    error OnlyTradeEscrow();
+    error OffersStillOpen(uint256 count);
 
     constructor(IERC20 usdc_) Ownable(msg.sender) {
         usdc = usdc_;
@@ -81,6 +98,27 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         if (address(slabVault) != address(0)) revert SlabVaultAlreadySet();
         slabVault = vault;
         emit SlabVaultSet(address(vault));
+    }
+
+    /// @notice One-time wiring to TradeEscrow.
+    function setTradeEscrow(address escrow) external onlyOwner {
+        if (tradeEscrow != address(0)) revert TradeEscrowAlreadySet();
+        tradeEscrow = escrow;
+        emit TradeEscrowSet(escrow);
+    }
+
+    /**
+     * @notice Moves custody balance from one holder to another without any USDC leaving this
+     *         contract, so `totalCustody` is unchanged. Only TradeEscrow calls it, inside a
+     *         transaction the paying side signed (creating its offer, or accepting one).
+     */
+    function moveBalance(address from, address to, uint256 amount) external {
+        if (msg.sender != tradeEscrow || tradeEscrow == address(0)) revert OnlyTradeEscrow();
+        uint256 available = balanceOf[from];
+        if (amount > available) revert InsufficientBalance(amount, available);
+        balanceOf[from] = available - amount;
+        balanceOf[to] += amount;
+        emit BalanceMoved(from, to, amount);
     }
 
     /* ------------------------------ onboarding ------------------------------ */
@@ -141,6 +179,8 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         if (a.status != Status.Active) revert NotActive();
         uint256 vaulted = address(slabVault) == address(0) ? 0 : slabVault.vaultedCount(msg.sender);
         if (vaulted > 0) revert SlabsStillVaulted(vaulted);
+        uint256 open = tradeEscrow == address(0) ? 0 : ITradeEscrowOffers(tradeEscrow).openOffers(msg.sender);
+        if (open > 0) revert OffersStillOpen(open);
 
         a.status = Status.Closed;
         a.closedAt = uint64(block.timestamp);

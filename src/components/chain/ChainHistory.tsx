@@ -43,7 +43,7 @@ export function ChainHistory({ address }: { address: Address }) {
             "SubmissionReceived",
             "SubmissionForwarded",
             "SubmissionRejected",
-            "SlabMinted",
+            "SlabVaulted",
             "RedemptionRequested",
             "SlabShipped",
             "SlabDelivered",
@@ -53,7 +53,7 @@ export function ChainHistory({ address }: { address: Address }) {
             client!.getContractEvents({ ...contracts.slabVault, eventName, args: { owner: address }, ...from }),
           ),
         ),
-        // ERC-721 ownership changes between collectors (mints are covered by SlabMinted)
+        // ERC-721 ownership changes between collectors (mints are covered by SubmissionRequested)
         client!.getContractEvents({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, ...from }),
         client!.getContractEvents({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, ...from }),
       ]);
@@ -72,15 +72,15 @@ export function ChainHistory({ address }: { address: Address }) {
         const a = log.args as Record<string, unknown>;
         const detail =
           log.eventName === "SubmissionRequested"
-            ? `submission #${a.submissionId} · ${a.grader} ${a.certNumber} · declared ${usd(Number(a.declaredValueCents) / 100)}`
+            ? `NFT #${a.submissionId} minted, pending · ${a.grader} ${a.certNumber} · declared ${usd(Number(a.declaredValueCents) / 100)}`
             : log.eventName === "SubmissionReceived"
               ? `submission #${a.submissionId} · at Pokechain's warehouse`
               : log.eventName === "SubmissionForwarded"
                 ? `submission #${a.submissionId} · forwarded to Collector Crypt, parcel details encrypted for it`
                 : log.eventName === "SubmissionRejected"
                   ? `submission #${a.submissionId} · ${a.reason}`
-                  : log.eventName === "SlabMinted"
-                    ? `token #${a.tokenId} · cert ${a.certNumber} · CC NFT ${String(a.custodianRef).slice(0, 8)}…`
+                  : log.eventName === "SlabVaulted"
+                    ? `token #${a.tokenId} · cert ${a.certNumber} · vaulted, CC NFT ${String(a.custodianRef).slice(0, 8)}…`
                     : log.eventName === "SlabShipped"
                       ? `token #${a.tokenId} · Collector Crypt ${a.redemptionRef} · ${a.carrier} ${a.trackingNumber}`
                       : log.eventName === "SlabReportedLost"

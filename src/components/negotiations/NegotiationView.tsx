@@ -11,6 +11,7 @@ import { bidValue, offerMix, pendingOffer } from "@/lib/negotiation";
 import { sellerFee, useStore } from "@/lib/store";
 import type { ChatMessage, Listing, Negotiation, OfferStatus } from "@/lib/types";
 import { OfferModal } from "../modals/OfferModal";
+import { ChainTradeRoom } from "./ChainTradeRoom";
 import { Slab } from "../slab/Slab";
 import { Avatar, Badge, Button, TimeAgo, inputClass } from "../ui/primitives";
 import { INBOX_URL_KEY } from "./NegotiationsInbox";
@@ -21,8 +22,13 @@ const exact = (n: number) => usd(n, { cents: true });
 const BUYER_QUICK = ["Is this still available?", "Any flaws on the slab?", "Is the price negotiable?"];
 const SELLER_QUICK = ["Yes, it's available.", "Price is firm, sorry.", "Can you go a bit higher?"];
 
-/** A one-to-one chat between a buyer and the seller about one listing. */
+/** A one-to-one chat between a buyer and the seller about one listing, or an on-chain trade room. */
 export function NegotiationView({ id }: { id: string }) {
+  if (id.startsWith("chain-")) return <ChainTradeRoom other={id.slice("chain-".length)} />;
+  return <ListingChat id={id} />;
+}
+
+function ListingChat({ id }: { id: string }) {
   const { ready, user, negotiations, requireAuth } = useStore();
   const n = negotiations[id];
   const base = n ? getListing(n.listingId) : undefined;

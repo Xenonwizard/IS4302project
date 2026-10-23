@@ -62,7 +62,7 @@ export function operatorError(e: unknown, fallback: string): string {
 }
 
 export interface OperatorTx {
-  /** e.g. "SlabVault.mintSlab" */
+  /** e.g. "SlabVault.confirmVaulted" */
   call: string;
   args: string[];
   hash: Hash;
@@ -206,7 +206,8 @@ export async function disputeForward(submissionId: bigint) {
 /**
  * Slab onboarding, step 4. Once Collector Crypt has vaulted the slab, checks CC's API and the
  * Solana NFT (DAS getAsset: held by Pokechain's escrow, CC collection, same cert, Vaulted), then
- * mints the Polygon token with CC's asset id. If CC hasn't vaulted it yet, nothing happens.
+ * confirms the Polygon token (minted pending at submission) as Vaulted with CC's asset id, which
+ * unlocks it for trading. If CC hasn't vaulted it yet, nothing happens.
  * `listingId` is passed when tokenising a slab already in the user's vault, to keep its title and image.
  */
 export async function mintSubmission(origin: string, submissionId: bigint, listingId?: string) {
@@ -222,17 +223,17 @@ export async function mintSubmission(origin: string, submissionId: bigint, listi
   const wallet = walletClient();
   const hash = await wallet.writeContract({
     ...contracts.slabVault,
-    functionName: "mintSlab",
+    functionName: "confirmVaulted",
     args: [submissionId, card.title, card.image, custody.assetId],
   });
   const tx = await receiptOf(
-    "SlabVault.mintSlab",
+    "SlabVault.confirmVaulted",
     [submissionId.toString(), card.title, card.image, custody.assetId],
     hash,
     wallet.account.address,
   );
   const receipt = await publicClient.getTransactionReceipt({ hash });
-  const [minted] = parseEventLogs({ abi: contracts.slabVault.abi, logs: receipt.logs, eventName: "SlabMinted" });
+  const [minted] = parseEventLogs({ abi: contracts.slabVault.abi, logs: receipt.logs, eventName: "SlabVaulted" });
   return {
     result: "minted" as const,
     tokenId: minted.args.tokenId.toString(),
@@ -271,6 +272,32 @@ export async function shipSlab(origin: string, tokenId: bigint, shipTo: string) 
     wallet.account.address,
   );
   return { redemptionRef: r.id, carrier: r.carrier, trackingNumber: r.trackingNumber, checks: [check], tx };
+}
+
+/** What the operator found after a lost report, and the custody it records. */
+export const LOST_OUTCOMES = { "at-pokechain": 7, delivered: 4, vaulted: 1 } as const;
+export type LostOutcome = keyof typeof LOST_OUTCOMES;
+
+/**
+ * Closes a lost report (SlabVault.resolveLostReport). "at-pokechain": an inbound parcel turned up
+ * at the warehouse and onboarding carries on; "delivered": an outbound one reached the owner;
+ * "vaulted": it went back into Collector Crypt's vault.
+ */
+export async function resolveLost(tokenId: bigint, outcome: LostOutcome) {
+  const slab = await publicClient.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [tokenId] });
+  if (CUSTODY[slab.custody] !== "Lost") throw new Error(`Slab #${tokenId} is ${CUSTODY[slab.custody]}, not reported lost`);
+  const inbound = slab.custodianRef === "";
+  if (inbound !== (outcome === "at-pokechain")) {
+    throw new Error(inbound ? "This parcel was on its way in: it can only turn up at Pokechain" : "This slab had already been vaulted");
+  }
+  const wallet = walletClient();
+  const hash = await wallet.writeContract({
+    ...contracts.slabVault,
+    functionName: "resolveLostReport",
+    args: [tokenId, LOST_OUTCOMES[outcome]],
+  });
+  const tx = await receiptOf("SlabVault.resolveLostReport", [tokenId.toString(), CUSTODY[LOST_OUTCOMES[outcome]]], hash, wallet.account.address);
+  return { custody: CUSTODY[LOST_OUTCOMES[outcome]], tx };
 }
 
 /**

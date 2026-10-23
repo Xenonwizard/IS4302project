@@ -86,17 +86,14 @@ export function SlabIntakeForm() {
 
   /**
    * Demo helper: a random 8-digit cert that SlabVault hasn't seen, so the flow can be run again and
-   * again (each physical cert can only be tokenised once: tokenOfCert / pendingSubmissionOfCert).
+   * again (each physical cert has one live token: tokenOfCert).
    */
   const randomCert = async () => {
     for (let i = 0; i < 20; i++) {
       const candidate = String(10_000_000 + Math.floor(Math.random() * 90_000_000));
       const key = await client!.readContract({ ...contracts.slabVault, functionName: "certKey", args: [grader, candidate] });
-      const [token, pending] = await Promise.all([
-        client!.readContract({ ...contracts.slabVault, functionName: "tokenOfCert", args: [key] }),
-        client!.readContract({ ...contracts.slabVault, functionName: "pendingSubmissionOfCert", args: [key] }),
-      ]);
-      if (token === BigInt(0) && pending === BigInt(0)) {
+      const token = await client!.readContract({ ...contracts.slabVault, functionName: "tokenOfCert", args: [key] });
+      if (token === BigInt(0)) {
         setCert(candidate);
         setValue("");
         return;

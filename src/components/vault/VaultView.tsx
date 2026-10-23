@@ -3,12 +3,14 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Blocks, MessagesSquare, Package, PackageOpen, Plus, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, Lock, MessagesSquare, Package, PackageOpen, Plus, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
+import type { Address } from "viem";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
+import { useEscrowedByMe } from "@/lib/chain/trades";
 import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
 import { PendingSubmissions } from "../chain/PendingSubmissions";
@@ -46,6 +48,8 @@ export function VaultView() {
   const [sellTarget, setSellTarget] = useState<Listing | null>(null);
   const [redeemTarget, setRedeemTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [transferTarget, setTransferTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  // Slabs locked in one of my open trade offers (held by TradeEscrow): tokenId → offerId
+  const { data: escrowed = {} } = useEscrowedByMe(user?.address as Address | undefined);
 
   const allItems = useMemo(
     () =>
@@ -142,6 +146,7 @@ export function VaultView() {
                   onSell={() => setSellTarget(listing)}
                   onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                   onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
+                  inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
                 />
               ))}
             </div>
@@ -286,6 +291,7 @@ function SlabCard({
   onSell,
   onShip,
   onTransfer,
+  inOffer,
 }: {
   entry: VaultItem;
   listing: Listing;
@@ -294,7 +300,31 @@ function SlabCard({
   onShip: () => void;
   /** tokenised slabs on a wallet account only */
   onTransfer?: () => void;
+  /** the open trade offer that has this slab locked in escrow */
+  inOffer?: { offerId: string; taker: string };
 }) {
+  if (inOffer) {
+    return (
+      <div className="overflow-hidden rounded-card border border-accent/50 bg-surface ring-1 ring-accent/30">
+        <Link href={`/asset/${listing.id}`} className="block bg-[#101014] p-4 opacity-70">
+          <Slab listing={listing} />
+        </Link>
+        <div className="p-3.5">
+          <p className="line-clamp-2 text-[12px] font-semibold leading-snug">{listing.title}</p>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-[13px] font-bold">{usd(listing.fmv, { cents: true })}</span>
+            <Badge tone="accent"><Lock size={11} /> In offer #{inOffer.offerId}</Badge>
+          </div>
+          <p className="mt-1.5 text-[11px] text-dim">
+            Locked in TradeEscrow until the other collector answers, or you withdraw the offer.
+          </p>
+          <Link href={`/trades/chain-${inOffer.taker}`} className="mt-3 block">
+            <Button size="sm" variant="secondary" className="w-full">See offer</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
       <Link href={`/asset/${listing.id}`} className="block bg-[#101014] p-4">

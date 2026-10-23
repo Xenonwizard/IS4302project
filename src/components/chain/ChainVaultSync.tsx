@@ -15,6 +15,12 @@ import type { Grader } from "@/lib/types";
  * says are ours, and reads each one's `slabOf`. A slab another collector sent you appears in your
  * Vault; one you sent away disappears from it. No server involved: ownership is whatever SlabVault says.
  *
+ * Two kinds of token are left out or kept on purpose:
+ *   - a token minted at submission that Collector Crypt hasn't vaulted yet (no custodianRef): it
+ *     lives in the submission tracker until it is Vaulted;
+ *   - a slab of yours locked in one of your open trade offers is held by TradeEscrow, but it is
+ *     still yours until the other side accepts, so it stays in your Vault (marked "In offer").
+ *
  * It also subscribes to SlabVault's `Transfer` events to and from this wallet (useWatchContractEvent,
  * which polls eth_getFilterChanges), so a slab someone sends you shows up within seconds.
  */
@@ -49,9 +55,22 @@ export function ChainVaultSync() {
       const known = knownIds ? knownIds.split(",").map(BigInt) : [];
       const ids = [...new Set([...firstSeen.keys(), ...known])];
       const owners = await Promise.all(ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] })));
-      const mine = ids.filter((_, i) => owners[i] === address);
-      const ownedByOthers = ids.filter((_, i) => owners[i] !== address).map(String);
-      const slabs = await Promise.all(mine.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] })));
+      // Held by TradeEscrow: still ours if it's in an offer we made.
+      const escrowed = await Promise.all(
+        ids.map(async (id, i) => {
+          if (owners[i] !== contracts.tradeEscrow.address) return false;
+          const offerId = await client!.readContract({ ...contracts.tradeEscrow, functionName: "offerHolding", args: [id] });
+          const offer = await client!.readContract({ ...contracts.tradeEscrow, functionName: "offerOf", args: [offerId] });
+          return offer.maker === address;
+        }),
+      );
+      const isMine = (i: number) => owners[i] === address || escrowed[i];
+      const candidates = ids.filter((_, i) => isMine(i));
+      const ownedByOthers = ids.filter((_, i) => !isMine(i)).map(String);
+      const read = await Promise.all(candidates.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] })));
+      // Never vaulted yet: shown by the submission tracker instead.
+      const mine = candidates.filter((_, i) => read[i].custodianRef !== "");
+      const slabs = read.filter((s) => s.custodianRef !== "");
       const owned = mine.map((id, i) => ({
         token: {
           chainId: chain.id,

@@ -12,6 +12,37 @@ export async function resetDemo(request: APIRequestContext) {
   expect(res.ok(), await res.text()).toBeTruthy();
 }
 
+/** Opens @ash (test collector #1) and @misty (#2) with vaulted slabs and $1,000 each, on-chain. */
+export async function loadDemoTraders(request: APIRequestContext) {
+  const res = await request.post("/api/dev/demo-traders");
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** Logs in with a test wallet that already has an on-chain account (no handle to type). */
+export async function logIn(page: Page, wallet: 1 | 2, handle: string) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Log in" }).first().click();
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByText(`Hardhat test collector #${wallet}`).click();
+  await expect(page.locator("header")).toContainText(handle);
+}
+
+export const ASH: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+export const MISTY: Address = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+
+/** Who owns a token right now, straight from SlabVault. */
+export async function ownerOf(tokenId: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  return pub.readContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "ownerOf", args: [BigInt(tokenId)] });
+}
+
+/** Custody balance in AccountRegistry, in dollars. */
+export async function custodyDollars(who: Address) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const units = await pub.readContract({ address: local.AccountRegistry, abi: accountRegistryAbi, functionName: "balanceOf", args: [who] });
+  return Number(units) / 1e6;
+}
+
 /** Signs up in the UI with one of the built-in Hardhat test wallets. */
 export async function openAccount(page: Page, handle: string, wallet: 1 | 2 = 1) {
   await page.goto("/");

@@ -5,15 +5,16 @@ This branch moves the start and end of a collector's life on Pokechain onto a bl
 | | Onboarding | Offboarding |
 | --- | --- | --- |
 | **Account** | connect a wallet → `register(handle)` → deposit USDC | withdraw USDC → `closeAccount()` |
-| **Slab** | `requestSubmission` → Pokechain receives it (`markReceived`) → forwards it to **Collector Crypt** (`markForwarded`) → CC vaults it and mints its **Solana** NFT to Pokechain's escrow → operator verifies that NFT → `mintSlab` (ERC-721 on Polygon) | `requestRedemption` (token locked, **never burned**) → Pokechain asks CC to ship → `markShipped` (with CC's redemption id) → `confirmDelivery` or `reportLost` |
-| **Ownership** | | A → B: `safeTransferFrom` moves the Polygon token; CC's NFT never moves |
+| **Slab** | `requestSubmission` **mints the ERC-721 at once, pending and locked** → Pokechain receives it (`markReceived`) → forwards it to **Collector Crypt** (`markForwarded`) → CC vaults it and mints its **Solana** NFT to Pokechain's escrow → operator verifies that NFT → `confirmVaulted` (now tradeable). Lost in the post on the way in: `reportLost` | `requestRedemption` (token locked, **never burned**) → Pokechain asks CC to ship → `markShipped` (with CC's redemption id) → `confirmDelivery` or `reportLost` |
+| **Ownership** | | A → B: `safeTransferFrom`, or a **TradeEscrow** swap of several slabs + cash both ways, settled in one transaction. CC's NFTs never move |
 
 **The model in one line:** the physical slab sits in Collector Crypt's vault, CC's Solana NFT for it
 sits locked in Pokechain's escrow wallet, and Pokechain's Polygon token is the tradeable title.
 Trading moves only the Polygon token. Whoever holds it when they withdraw is who Collector Crypt ships to.
 
-Paid trading (offers, negotiation rooms) still settles off-chain; a `TradeEscrow` contract is the next step.
-This round adds a direct on-chain **Transfer to collector** so the A → B → withdraw path works end to end.
+Trades between collectors run on **TradeEscrow** (section 3 and "Multi-slab trades" in section 4):
+"3 Pikachus + $50 for your 2 Articunos" is one offer, locked in escrow, and settles all at once.
+The marketplace's simulated sellers (the 176 catalogue listings) still trade off-chain.
 
 ---
 
@@ -36,13 +37,16 @@ flowchart LR
     AR[AccountRegistry]
     SV[SlabVault ERC-721]
     USDC[MockUSDC ERC-20 + permit]
+    TE[TradeEscrow]
   end
-  MM -- signs txs --> AR & SV & USDC
-  W -- eth_call / eth_getLogs --> AR & SV & USDC
+  MM -- signs txs --> AR & SV & USDC & TE
+  W -- eth_call / eth_getLogs --> AR & SV & USDC & TE
+  TE -- moves slabs --> SV
+  TE -- moveBalance --> AR
   UI -- fetch --> OP
   OP -- cards / redemptions --> CC
   OP -- JSON-RPC getAsset --> SOL
-  OP -- markReceived / markForwarded / mintSlab / markShipped --> SV
+  OP -- markReceived / markForwarded / confirmVaulted / markShipped --> SV
   TR -- eth_getLogs --> SV
   TR -- getSignaturesForAsset --> SOL
   AR <-- vaultedCount / isActive --> SV
@@ -51,9 +55,10 @@ flowchart LR
 Two kinds of key sign transactions:
 
 * **The collector's wallet** (MetaMask, held in the browser): register, deposit, withdraw, close,
-  submit, redeem, confirm delivery, report lost.
-* **The Pokechain operator** (a server key, `OPERATOR_ROLE` in SlabVault): receive, forward, mint
-  and ship. Only Pokechain's warehouse can say "the parcel arrived" or "we sent it to Collector
+  submit, redeem, confirm delivery, report lost, and every trade action (offer, accept, decline,
+  withdraw, counter).
+* **The Pokechain operator** (a server key, `OPERATOR_ROLE` in SlabVault): receive, forward, confirm
+  vaulted, ship, and resolve lost reports. It has no power over trades. Only Pokechain's warehouse can say "the parcel arrived" or "we sent it to Collector
   Crypt", and only the holder of CC's NFT can ask CC to ship. In production this would be a Safe
   multisig or a KMS key, not an env var. (Multisig is deliberately left out of this round.)
 
@@ -96,26 +101,47 @@ Two kinds of key sign transactions:
 
 ### SlabVault (`blockchain/contracts/SlabVault.sol`), an ERC-721
 
-Custody states: `Vaulted → RedemptionRequested → Shipped → Delivered`, or `→ Lost` (and an
-operator can resolve Lost back to `Delivered` or `Vaulted`).
+Custody states. Inbound, from the moment of submission:
+`PostedToPokechain → AtPokechain → SentToCustodian → Vaulted` (or `Rejected`, token kept as the record).
+Outbound: `Vaulted → RedemptionRequested → Shipped → Delivered`. From any in-the-post state
+(`PostedToPokechain`, `SentToCustodian`, `RedemptionRequested`, `Shipped`) the owner can report it `Lost`,
+and the operator resolves it to `AtPokechain` (inbound parcel found), `Delivered` or `Vaulted`.
+The token can only move (transfer, trade) while **Vaulted**. Token id = submission id.
 
 | Function | Who | What it changes | Event / errors |
 | --- | --- | --- | --- |
-| `requestSubmission(grader, cert, declaredValueCents, evidenceHash, inboundCarrier, inboundTracking)` | wallet | New **Pending** submission (no token yet), with the declared value, the fingerprint of the intake photos and declarations, and the parcel's tracking number. One physical cert can only be tokenised once | `SubmissionRequested` · `AccountNotActive`, `CertAlreadyTokenised`, `CertAlreadyPending`, `MissingEvidence` |
-| `markReceived(submissionId)` | operator | Pending → **ReceivedByPokechain** | `SubmissionReceived` · `WrongSubmissionStatus` |
-| `markForwarded(submissionId, ciphertext, commitment)` | operator | → **AtCustodian**; the parcel details go on-chain only encrypted to the custodian's published key, plus a salted commitment | `SubmissionForwarded` · `NoEncryptionKey` |
+| `requestSubmission(grader, cert, declaredValueCents, evidenceHash, inboundCarrier, inboundTracking)` | wallet | **Mints the NFT to the submitter right away**, custody **PostedToPokechain**, locked and not counted as vaulted. Carries the declared value, the fingerprint of the intake photos and declarations, and the parcel's tracking number, so a parcel lost in the post is already a token that can be reported. One physical cert has one live token | `SubmissionRequested`, `Transfer(0 → you)` · `AccountNotActive`, `CertAlreadyTokenised`, `MissingEvidence` |
+| `markReceived(submissionId)` | operator | → **AtPokechain** (submission ReceivedByPokechain) | `SubmissionReceived` · `WrongSubmissionStatus` |
+| `markForwarded(submissionId, ciphertext, commitment)` | operator | → **SentToCustodian**; the parcel details go on-chain only encrypted to the custodian's published key, plus a salted commitment | `SubmissionForwarded` · `NoEncryptionKey` |
 | `setEncryptionKey(key)` / `setCustodian(address)` | anyone / admin | Publish your X25519 public key; name the custodian (Collector Crypt) | `EncryptionKeySet`, `CustodianSet` |
 | `verifyForwardCommitment(id, message, salt)` | view | Dispute check: true only for exactly what was committed at forwarding | |
-| `mintSlab(submissionId, title, image, custodianRef)` | operator | Only from AtCustodian. Mints the token to the submitter, custody **Vaulted**, stores **CC's Solana asset id** and carries over the declared value and `evidenceHash` | `SlabMinted` |
-| `rejectSubmission(id, reason)` | operator | Any open stage → Rejected (e.g. no such cert, damaged slab) | `SubmissionRejected` |
+| `confirmVaulted(tokenId, title, image, custodianRef)` | operator | Only from SentToCustodian, after the Solana check. Custody **Vaulted**, stores **CC's Solana asset id**, counts it as vaulted: the token can now be traded | `SlabVaulted` |
+| `rejectSubmission(id, reason)` | operator | Any open stage → **Rejected** (e.g. no such cert, damaged slab). The token stays as the record; the cert is freed | `SubmissionRejected` |
 | `safeTransferFrom(from, to, tokenId)` | owner | **A → B**: the title changes hands. CC's NFT doesn't move | `Transfer` · `SlabLocked`, `AccountNotActive` |
 | `requestRedemption(tokenId, shippingHash)` | owner | Custody → **RedemptionRequested**, token **locked**, `vaultedCount--`. Only `keccak256(address)` goes on-chain | `RedemptionRequested` |
 | `markShipped(tokenId, redemptionRef, carrier, tracking)` | operator | Custody → **Shipped**; stores **CC's redemption id** | `SlabShipped` |
 | `confirmDelivery(tokenId)` | owner | Custody → **Delivered** | `SlabDelivered` |
-| `reportLost(tokenId, details)` | owner | Custody → **Lost** (from RedemptionRequested or Shipped) | `SlabReportedLost` (carries the tracking number) |
-| `resolveLostReport(tokenId, outcome)` | operator | Lost → Delivered, or back to Vaulted | `LostReportResolved` |
+| `reportLost(tokenId, details)` | owner | Custody → **Lost**, from any in-the-post state, inbound or outbound | `SlabReportedLost` (carries the tracking number) |
+| `resolveLostReport(tokenId, outcome)` | operator | Lost → AtPokechain (inbound, found), Delivered, or back to Vaulted | `LostReportResolved` |
+| `setTradeEscrow(address)`, `isApprovedForAll` | admin / view | Names TradeEscrow, which may then move slabs without a per-token approval (it only does so inside a call signed by that slab's owner) | `TradeEscrowSet` |
 | `tokenURI(tokenId)` | view | **Fully on-chain metadata**: a base64 JSON document with grader, cert, Collector Crypt's Solana id, live custody, and what the owner declared at intake (declared value in cents, evidence hash) | |
 | `_update` (internal hook) | every transfer | Transfers only while **Vaulted**, only **to an Active account other than the owner**, and keeps `vaultedCount` right | `SlabLocked`, `AccountNotActive`, `SelfTransfer` |
+
+### TradeEscrow (`blockchain/contracts/TradeEscrow.sol`)
+
+Swaps between two collectors with **slabs and cash on both sides**, like a real-life trade:
+"3 Pikachus and $50 for 2 of your Articunos", or "2 Charizards + $300 for 2 of your Bulbasaurs + $20".
+
+| Function | Who | What it changes | Event / errors |
+| --- | --- | --- | --- |
+| `createOffer(taker, makerSlabs, makerCash, takerSlabs, takerCash, room)` | maker | Locks the maker's side: their slabs move into TradeEscrow, their cash moves to its custody balance (`AccountRegistry.moveBalance`). Checks both sides now: every slab owned by the right person and **Vaulted**, enough cash, no duplicates, ≤ 10 slabs a side, each side non-empty | `OfferCreated` · `SelfTrade`, `EmptySide`, `NotYourSlab`, `SlabNotVaulted`, `NotEnoughCash`, `DuplicateSlab`, `TooManySlabs` |
+| `accept(offerId)` | taker | **One transaction:** taker's slabs + cash → maker, escrowed slabs + cash → taker. If any piece can't move, everything reverts | `OfferAccepted` · `NotTaker`, `OfferNotOpen` |
+| `decline(offerId)` / `withdraw(offerId)` | taker / maker | Refunds the maker's escrowed side | `OfferDeclined` / `OfferWithdrawn` |
+| `counter(offerId, mySlabs, myCash, theirSlabs, theirCash)` | taker | Refunds the offer and makes the taker's own offer back, locking their side, in one transaction | `OfferCountered`, `OfferCreated` |
+| `offerOf`, `offerIdsOf`, `openOffers`, `offerHolding` | view | What the app reads to draw trade rooms and mark slabs "In offer" | |
+
+AccountRegistry gains `moveBalance(from, to, amount)` (TradeEscrow only; `totalCustody` never changes)
+and refuses `closeAccount` while the account has open offers (`OffersStillOpen`).
 
 ### MockUSDC (`blockchain/contracts/MockUSDC.sol`)
 
@@ -212,8 +238,9 @@ catalogue's market estimate.
 ### Slab onboarding: you → Pokechain → Collector Crypt → token
 
 The slab's physical journey is recorded step by step, so the inbound leg is as traceable as the
-outbound one. The token is only minted once Collector Crypt's NFT is provably in Pokechain's escrow.
-Until then there is nothing to sell.
+outbound one. **The NFT is minted at submission**, pending and locked, so a parcel lost in the post
+already has a token to report it against. It only becomes tradeable (`confirmVaulted`) once
+Collector Crypt's NFT is provably in Pokechain's escrow.
 
 ```mermaid
 sequenceDiagram
@@ -224,7 +251,8 @@ sequenceDiagram
   participant S as Solana RPC (DAS)
   A->>A: POST /api/evidence (photos + declarations) → evidenceHash
   A->>SV: requestSubmission("PSA", "72862688", 263400, evidenceHash, "SingPost", "RR…SG")
-  Note over A: ships the slab to Pokechain
+  SV-->>A: Transfer(0 → A, token #1), custody PostedToPokechain (locked)
+  Note over A: ships the slab to Pokechain (lost? A calls reportLost(1))
   O->>SV: markReceived(1)        (cert + evidence hash checked; else rejectSubmission)
   O->>SV: markForwarded(1, ciphertext, commitment)   (details encrypted to CC's on-chain key)
   CC->>CC: POST /intake → vaults it, mints NFT to Pokechain escrow
@@ -232,11 +260,11 @@ sequenceDiagram
   O->>CC: GET /cards/PSA/72862688 → assetId
   O->>S: getAsset(assetId)
   S-->>O: owner = Pokechain escrow, CC collection, cert, Vaulted, not burnt
-  O->>SV: mintSlab(1, title, image, assetId)
-  SV-->>A: SlabMinted(token #1, custodianRef = assetId)
+  O->>SV: confirmVaulted(1, title, image, assetId)
+  SV-->>A: SlabVaulted(token #1, custodianRef = assetId), now tradeable
 ```
 
-`src/lib/collectorCrypt/client.ts` (`verifyCustody`) refuses to mint unless every check passes.
+`src/lib/collectorCrypt/client.ts` (`verifyCustody`) refuses to confirm unless every check passes.
 Both URLs are env vars (`CC_API_URL`, `SOLANA_RPC_URL`), so pointing them at real services needs
 no code change: the Solana call is standard DAS `getAsset` JSON-RPC.
 
@@ -285,8 +313,31 @@ sequenceDiagram
 ```
 
 Collector Crypt's NFT doesn't move: it stays in Pokechain's escrow. **No separate contract is needed
-to keep it still.** It moves only when Pokechain, its holder, asks CC to ship. Paid sales will do the
-same transfer inside a `TradeEscrow` swap.
+to keep it still.** It moves only when Pokechain, its holder, asks CC to ship.
+
+### Multi-slab trades: slabs and cash both ways
+
+```mermaid
+sequenceDiagram
+  actor A as @ash
+  participant TE as TradeEscrow
+  participant SV as SlabVault
+  participant AR as AccountRegistry
+  actor M as @misty
+  A->>TE: createOffer(misty, [#1,#2,#3], $50, [#5,#6], $0, room)
+  TE->>SV: transferFrom(ash → TradeEscrow) ×3   (locked)
+  TE->>AR: moveBalance(ash → TradeEscrow, $50)
+  Note over M: sees "1 to answer" in Negotiation rooms
+  M->>TE: accept(1)
+  TE->>SV: transferFrom(misty → ash) ×2, transferFrom(TradeEscrow → misty) ×3
+  TE->>AR: moveBalance(TradeEscrow → misty, $50)
+  Note over TE: one transaction: all of it, or (on any revert) none of it
+```
+
+Both collectors see the same room from their own browsers because it is read from the chain
+(`offerIdsOf` + `offerOf`, refreshed on `OfferCreated/Accepted/Declined/Withdrawn` events). While an
+offer is open the maker's slabs show in their Vault as **In offer #N**, and can't be transferred,
+withdrawn or offered twice.
 
 ### Slab offboarding: B withdraws, Collector Crypt ships to B
 
@@ -370,8 +421,8 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
    a tracking number, the three declarations, then *Upload evidence and submit on-chain*. The Chain log
    shows `POST /api/evidence` (3 photos hashed) and then `requestSubmission(…, evidenceHash, …)`. A tracker appears.
 5. In **Postman**, send *1 · receive*, *2 · forward*, *3 · Collector Crypt vaults it*. The tracker
-   moves at each step; after 3 the page mints. The Chain log shows `markReceived`, `markForwarded`,
-   `Collector Crypt GET /cards`, `Solana getAsset`, then `SlabVault.mintSlab`. Send *4 · getAsset* to
+   moves at each step; after 3 the page confirms it. The Chain log shows `markReceived`, `markForwarded`,
+   `Collector Crypt GET /cards`, `Solana getAsset`, then `SlabVault.confirmVaulted`. Send *4 · getAsset* to
    show the escrow-held NFT the operator checked. (Each step also has a Simulate button.)
 6. Sign out, connect *Hardhat test collector #2*, open account `misty`. Sign back in as `ash`,
    then in the **Vault** → **Transfer** → `misty`. Ash's Vault empties; switch to misty, and token #1 is
@@ -381,6 +432,12 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
 8. In **Postman**, send *7 · in transit* and *8 · lost*. Then in the **Withdrawn** tab → **Report lost**.
 9. Open **Trace** for token #1: Polygon, Solana and Collector Crypt, side by side.
 10. **Account** → history, then **Close account** (allowed now that no slabs are vaulted).
+
+**Multi-slab trade demo (2 minutes).** Chain log → **Load demo traders** (@ash on test collector #1
+with 3 Pikachus + a Charizard, @misty on #2 with 2 Articunos + a Charizard-GX, $1,000 each). Log in as
+ash → **Negotiation rooms** → **@misty** → **Make an offer**: pick the 3 Pikachus, $50, and misty's 2
+Articunos → **Send offer** (Chain log: `TradeEscrow.createOffer`; ash's Vault shows **In offer #1**).
+Sign out, log in with #2 as misty → the room shows *1 to answer* → **Accept trade** (or **Counter**).
 
 ---
 
@@ -398,7 +455,12 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
   matches the `shippingHash` the owner put on-chain.
 * **CC's NFT never moves while trading**, so the same slab can't be sold on Pokechain and redeemed
   or sold elsewhere. CC refuses redemptions from anyone but the NFT's holder.
-* **One cert, one token** (`tokenOfCert`, `pendingSubmissionOfCert`): no double-tokenising.
+* **One cert, one live token** (`tokenOfCert`), from the moment of submission: no double-tokenising.
+* **Pending tokens are locked** (`_update` refuses anything but Vaulted), so a slab nobody has checked yet can't be sold.
+* **Atomic trades:** `accept` moves both sides in one transaction; a slab withdrawn or traded away in
+  the meantime makes it revert, so nobody ever gets half a trade (fuzz-tested: cash is conserved).
+* **No approvals to phish:** TradeEscrow is a built-in operator of SlabVault, but only moves a slab in
+  a call its owner signed (their own `createOffer` or `accept`).
 * **Locked, not burned** on redemption: no trading of a slab that's in transit, and a permanent trail.
 * **Only active accounts can receive slabs** (`_update`), the on-chain equivalent of a KYC gate.
 * **Privacy:** the shipping address never goes on-chain, only `keccak256(address)`, which the
@@ -464,8 +526,10 @@ Request 3 stores the returned `assetId` and escrow wallet; request 6 stores the 
 blockchain/
   contracts/AccountRegistry.sol   account onboarding / offboarding, USDC custody
   contracts/SlabVault.sol         ERC-721 slab tokens, custody state machine
+  contracts/TradeEscrow.sol       slabs + cash swaps between two collectors, atomic
   contracts/MockUSDC.sol          test USDC with EIP-2612 permit
-  test/Pokechain.t.sol            36 unit + fuzz tests
+  test/Pokechain.t.sol            accounts + slab lifecycle unit and fuzz tests
+  test/TradeEscrow.t.sol          trade unit tests + cash-conservation fuzz test
   ignition/modules/Pokechain.ts   deployment + wiring
   scripts/dev-chain.mjs           npm run chain
   scripts/export-frontend.mjs     ABIs + addresses → src/lib/chain/generated.ts
@@ -474,8 +538,9 @@ src/lib/chain/
   wagmi.ts           RainbowKit wallets, Hardhat test wallets, wagmi config
   useChainTx.ts      simulate → write → receipt, error decoding, Chain log
   useOnchainAccount.ts  multicall of the account's on-chain state
-  useSlabChain.ts    submit / receive / forward / verify+mint / transfer / redeem / confirm / report lost
-  operator.ts        server-side operator key: markReceived, markForwarded, mintSlab, markShipped, gas faucet
+  useSlabChain.ts    submit / receive / forward / verify+confirm / transfer / redeem / confirm / report lost / resolve
+  trades.ts          TradeEscrow reads (slabs, offers, In offer) and writes (create / accept / decline / withdraw / counter)
+  operator.ts        server-side operator key: markReceived, markForwarded, confirmVaulted, markShipped, resolveLostReport, gas faucet
   trace.ts           one slab's journey across Polygon, Solana and Collector Crypt
 src/lib/evidence/
   store.ts           intake photos + manifest; evidenceHash = keccak256(manifest); re-verification
@@ -484,12 +549,14 @@ src/lib/collectorCrypt/
   client.ts          how the operator calls CC and Solana: custody check, shipment, trace
 src/app/api/
   evidence, evidence/[hash], evidence/[hash]/[slot]   intake evidence upload, verification, photos
-  chain/{receive,forward,mint,ship,faucet}   operator routes
+  chain/{receive,forward,mint,ship,resolve-lost,faucet}   operator routes
+  dev/{reset,demo-traders}   local only: roll the chain back; seed @ash and @misty
   collector-crypt/{intake,cards,redemptions} mock Collector Crypt REST
   mock-solana                mock Solana DAS JSON-RPC
   trace/[tokenId]            cross-chain trace
 src/app/trace/[tokenId]      the Trace page
 src/components/submit/SlabIntakeForm.tsx   the intake form
+src/components/negotiations/ChainTradeRoom(s).tsx   on-chain trade rooms in Negotiation rooms
 src/components/chain/        AccountView, OnChainFunds, PendingSubmissions, EvidencePanel, TokenRecord, TransferModal, RedeemModal,
                              WithdrawnList, TraceView, ChainHistory, ChainConsole, ChainSessionSync,
                              ChainVaultSync, ChainDownBanner
@@ -505,8 +572,8 @@ src/components/chain/        AccountView, OnChainFunds, PendingSubmissions, Evid
 * The operator API routes are unauthenticated. They only act on state already on-chain (a pending
   submission or a requested redemption), but production would also authenticate the caller and
   run the operator as a multisig.
-* Offers and trades still use the off-chain wallet balance. Deposits and withdrawals are mirrored
-  into it with their tx hash. Moving trades into an escrow contract is the next step
-  (`docs/blockchain-stack.md`, section 1).
+* Trades between real accounts run on TradeEscrow. Offers on the simulated catalogue sellers'
+  listings still use the off-chain wallet balance, since those sellers have no wallets.
 * Slabs bought off-chain are tokenised on first withdrawal (the same submit → Pokechain → CC → mint path).
-* A → B is a direct transfer this round (no payment). Paid sales need `TradeEscrow`.
+* TradeEscrow charges no fee and offers don't expire; both would be a few lines (a fee recipient in
+  `accept`, a deadline checked there).

@@ -18,18 +18,20 @@ interface IAccountStatus {
  *         wallet. This token is the Pokechain-side title: trading moves this token only,
  *         while CC's NFT stays locked in the escrow.
  *
- *  Onboarding a slab (inbound trail, no token yet)
+ *  Onboarding a slab: the NFT exists from the moment it is posted
  *   1. `requestSubmission`  the collector declares grader + cert, a declared value, the hash
- *                           of their intake evidence (photos + condition report) and the
- *                           tracking number of the parcel they ship to Pokechain. Pending.
- *   2. `markReceived`       Pokechain's warehouse has it. Submission: ReceivedByPokechain.
+ *                           of their intake evidence and the inbound tracking number. The NFT
+ *                           is minted to them at once (token id = submission id), locked, with
+ *                           custody PostedToPokechain, so a parcel lost in the post is already
+ *                           a token that can be reported and traced.
+ *   2. `markReceived`       Pokechain's warehouse has it. Custody: AtPokechain.
  *   3. `markForwarded`      Pokechain ships it on to CC. The parcel details (carrier, tracking)
  *                           go on-chain only as ciphertext encrypted to CC's published key,
- *                           plus a salted commitment for disputes. Submission: AtCustodian.
- *   4. `mintSlab`           CC vaulted it and minted its Solana NFT to Pokechain's escrow; the
- *                           operator checked that NFT (DAS getAsset) and mints this token to the
- *                           collector, storing CC's asset id. Custody: Vaulted.
- *                           (`rejectSubmission` at any open stage.)
+ *                           plus a salted commitment for disputes. Custody: SentToCustodian.
+ *   4. `confirmVaulted`     CC vaulted it and minted its Solana NFT to Pokechain's escrow; the
+ *                           operator checked that NFT (DAS getAsset) and confirms it, storing CC's
+ *                           asset id. Custody: Vaulted: only now can the token be traded.
+ *                           (`rejectSubmission` at any open stage: Rejected, never burned.)
  *
  *  Offboarding a slab (the slab leaves the vault, the token stays)
  *   5. `requestRedemption`  the owner asks for the slab. The token is locked: it can no longer
@@ -37,8 +39,12 @@ interface IAccountStatus {
  *   6. `markShipped`        Pokechain, as holder of CC's NFT, asked CC to ship to the owner;
  *                           records CC's redemption id, carrier and tracking. Custody: Shipped.
  *   7. `confirmDelivery`    the owner confirms it arrived. Custody: Delivered.
- *      `reportLost`         or reports it lost. Custody: Lost.
- *   8. `resolveLostReport`  the operator closes a lost report: delivered, or back in the vault.
+ *      `reportLost`         or reports it lost, in either direction's post. Custody: Lost.
+ *   8. `resolveLostReport`  the operator closes a lost report: found at Pokechain, delivered,
+ *                           or back in the vault.
+ *
+ *  Trading: TradeEscrow (set with `setTradeEscrow`) may hold slabs that are in an open offer and
+ *  move Vaulted slabs on its own authority when both sides of a trade have agreed.
  *
  *  Nothing is burned. Every step is a state change plus an event, so the slab's path from the
  *  collector's hands, through Pokechain and CC, and back out to its final owner can be traced
@@ -49,13 +55,18 @@ contract SlabVault is ERC721, AccessControl {
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
+    /// @dev New states are appended so the numbers of the existing ones never change.
     enum Custody {
         None,
         Vaulted,
         RedemptionRequested,
         Shipped,
         Delivered,
-        Lost
+        Lost,
+        PostedToPokechain,
+        AtPokechain,
+        SentToCustodian,
+        Rejected
     }
 
     enum SubmissionStatus {
@@ -63,7 +74,7 @@ contract SlabVault is ERC721, AccessControl {
         Pending,
         ReceivedByPokechain,
         AtCustodian,
-        Minted,
+        Vaulted,
         Rejected
     }
 
@@ -112,14 +123,15 @@ contract SlabVault is ERC721, AccessControl {
 
     IAccountStatus public immutable accounts;
 
+    /// @notice Token ids and submission ids are the same number: each submission is its token.
     uint256 public nextTokenId = 1;
-    uint256 public nextSubmissionId = 1;
 
     mapping(uint256 => Slab) private _slabs;
     mapping(uint256 => Submission) private _submissions;
-    /// @notice keccak256(grader, cert) => token id (or pending submission id), so one physical slab is tokenised once.
+    /// @notice keccak256(grader, cert) => its token (pending or vaulted), so one physical slab has one live token.
     mapping(bytes32 => uint256) public tokenOfCert;
-    mapping(bytes32 => uint256) public pendingSubmissionOfCert;
+    /// @notice The TradeEscrow contract: may hold slabs in open offers and move Vaulted slabs for agreed trades.
+    address public tradeEscrow;
     /// @notice Slabs each address holds that are still physically in the vault.
     mapping(address => uint256) public vaultedCount;
 
@@ -156,9 +168,8 @@ contract SlabVault is ERC721, AccessControl {
     event EncryptionKeySet(address indexed account, bytes32 key);
     event CustodianSet(address indexed custodian);
     event SubmissionRejected(uint256 indexed submissionId, address indexed owner, string reason);
-    event SlabMinted(
-        uint256 indexed tokenId, uint256 indexed submissionId, address indexed owner, string certNumber, string custodianRef
-    );
+    event SlabVaulted(uint256 indexed tokenId, address indexed owner, string certNumber, string custodianRef);
+    event TradeEscrowSet(address indexed tradeEscrow);
     event RedemptionRequested(uint256 indexed tokenId, address indexed owner, bytes32 shippingHash);
     event SlabShipped(
         uint256 indexed tokenId, address indexed owner, string redemptionRef, string carrier, string trackingNumber
@@ -169,7 +180,6 @@ contract SlabVault is ERC721, AccessControl {
 
     error AccountNotActive(address account);
     error CertAlreadyTokenised(uint256 tokenId);
-    error CertAlreadyPending(uint256 submissionId);
     error SubmissionNotPending(uint256 submissionId);
     error WrongSubmissionStatus(uint256 submissionId, SubmissionStatus current);
     error NotSlabOwner(uint256 tokenId);
@@ -208,9 +218,9 @@ contract SlabVault is ERC721, AccessControl {
         if (evidenceHash == bytes32(0)) revert MissingEvidence();
         bytes32 key = certKey(grader, certNumber);
         if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
-        if (pendingSubmissionOfCert[key] != 0) revert CertAlreadyPending(pendingSubmissionOfCert[key]);
 
-        submissionId = nextSubmissionId++;
+        submissionId = nextTokenId++;
+        tokenOfCert[key] = submissionId;
         Submission storage s = _submissions[submissionId];
         s.owner = msg.sender;
         s.grader = grader;
@@ -222,7 +232,9 @@ contract SlabVault is ERC721, AccessControl {
         s.inboundCarrier = inboundCarrier;
         s.inboundTracking = inboundTracking;
         s.updatedAt = uint64(block.timestamp);
-        pendingSubmissionOfCert[key] = submissionId;
+        s.tokenId = submissionId;
+
+        _mintPending(submissionId);
         emit SubmissionRequested(
             submissionId, msg.sender, grader, certNumber, declaredValueCents, evidenceHash, inboundTracking
         );
@@ -231,6 +243,7 @@ contract SlabVault is ERC721, AccessControl {
     /// @notice Step 2: Pokechain's warehouse has received the slab from the collector.
     function markReceived(uint256 submissionId) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _moveSubmission(submissionId, SubmissionStatus.Pending, SubmissionStatus.ReceivedByPokechain);
+        _moveCustody(submissionId, Custody.PostedToPokechain, Custody.AtPokechain);
         emit SubmissionReceived(submissionId, s.owner);
     }
 
@@ -266,6 +279,7 @@ contract SlabVault is ERC721, AccessControl {
         if (ciphertext.length == 0 || commitment == bytes32(0)) revert EmptyField();
         Submission storage s =
             _moveSubmission(submissionId, SubmissionStatus.ReceivedByPokechain, SubmissionStatus.AtCustodian);
+        _moveCustody(submissionId, Custody.AtPokechain, Custody.SentToCustodian);
         s.forwardCommitment = commitment;
         emit SubmissionForwarded(submissionId, s.owner, custodian, key, commitment, ciphertext);
     }
@@ -285,49 +299,39 @@ contract SlabVault is ERC721, AccessControl {
 
     /**
      * @notice Step 4: Collector Crypt has vaulted the slab and its Solana NFT sits in Pokechain's
-     *         escrow (the operator checked this off-chain). Mints the token to the collector.
+     *         escrow (the operator checked this off-chain). The token, minted at submission,
+     *         becomes Vaulted: it now counts as held in the vault and can be traded.
      * @param title display name, e.g. "2021 Evolving Skies Umbreon VMAX #215 PSA 10"
      * @param image URL of the card image
      * @param custodianRef Collector Crypt's Solana asset id for this slab
      */
-    function mintSlab(uint256 submissionId, string calldata title, string calldata image, string calldata custodianRef)
+    function confirmVaulted(uint256 tokenId, string calldata title, string calldata image, string calldata custodianRef)
         external
         onlyRole(OPERATOR_ROLE)
-        returns (uint256 tokenId)
     {
-        Submission storage s = _moveSubmission(submissionId, SubmissionStatus.AtCustodian, SubmissionStatus.Minted);
-        if (!accounts.isActive(s.owner)) revert AccountNotActive(s.owner);
+        Submission storage s = _moveSubmission(tokenId, SubmissionStatus.AtCustodian, SubmissionStatus.Vaulted);
         if (bytes(custodianRef).length == 0) revert EmptyField();
-
-        bytes32 key = certKey(s.grader, s.certNumber);
-        tokenId = nextTokenId++;
-        s.tokenId = tokenId;
-        delete pendingSubmissionOfCert[key];
-        tokenOfCert[key] = tokenId;
-
+        _moveCustody(tokenId, Custody.SentToCustodian, Custody.Vaulted);
         Slab storage slab = _slabs[tokenId];
-        slab.grader = s.grader;
-        slab.certNumber = s.certNumber;
         slab.title = title;
         slab.image = image;
         slab.custodianRef = custodianRef;
-        slab.declaredValueCents = s.declaredValueCents;
-        slab.evidenceHash = s.evidenceHash;
-        slab.mintedAt = uint64(block.timestamp);
-        slab.custody = Custody.Vaulted;
-        slab.custodyUpdatedAt = uint64(block.timestamp);
-
-        // _update below counts it into vaultedCount.
-        _safeMint(s.owner, tokenId);
-        emit SlabMinted(tokenId, submissionId, s.owner, s.certNumber, custodianRef);
+        // The inbound carrier/tracking fields are reused for the outbound shipment later.
+        slab.carrier = "";
+        slab.trackingNumber = "";
+        address owner = ownerOf(tokenId);
+        vaultedCount[owner] += 1;
+        emit SlabVaulted(tokenId, owner, s.certNumber, custodianRef);
     }
 
+    /// @notice Refuses a submission at any open stage. The token stays (marked Rejected) as the record; the cert is freed.
     function rejectSubmission(uint256 submissionId, string calldata reason) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _submissions[submissionId];
         if (!_isOpen(s.status)) revert SubmissionNotPending(submissionId);
         s.status = SubmissionStatus.Rejected;
         s.updatedAt = uint64(block.timestamp);
-        delete pendingSubmissionOfCert[certKey(s.grader, s.certNumber)];
+        delete tokenOfCert[certKey(s.grader, s.certNumber)];
+        _setCustody(submissionId, Custody.Rejected);
         emit SubmissionRejected(submissionId, s.owner, reason);
     }
 
@@ -373,25 +377,44 @@ contract SlabVault is ERC721, AccessControl {
         emit SlabDelivered(tokenId, msg.sender);
     }
 
-    /// @notice Step 7b: the owner reports the slab lost, before or after it was handed to the carrier.
+    /**
+     * @notice The owner reports the slab lost while it is in the post: on its way to Pokechain or
+     *         to Collector Crypt (inbound), or on its way back to them (outbound).
+     */
     function reportLost(uint256 tokenId, string calldata details) external {
         if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         Custody c = _slabs[tokenId].custody;
-        if (c != Custody.RedemptionRequested && c != Custody.Shipped) revert WrongCustody(tokenId, c);
+        bool inPost = c == Custody.PostedToPokechain || c == Custody.SentToCustodian
+            || c == Custody.RedemptionRequested || c == Custody.Shipped;
+        if (!inPost) revert WrongCustody(tokenId, c);
         _setCustody(tokenId, Custody.Lost);
         emit SlabReportedLost(tokenId, msg.sender, _slabs[tokenId].trackingNumber, details);
     }
 
     /**
-     * @notice Step 8: the operator closes a lost report. `Delivered` if the carrier found it,
-     *         `Vaulted` if it came back to the vault (it can then be traded again).
+     * @notice Step 8: the operator closes a lost report. `AtPokechain` if an inbound parcel turned
+     *         up at Pokechain (onboarding carries on from there), `Delivered` if an outbound one
+     *         reached the owner, `Vaulted` if it came back to the vault (tradeable again).
      */
     function resolveLostReport(uint256 tokenId, Custody outcome) external onlyRole(OPERATOR_ROLE) {
-        if (outcome != Custody.Delivered && outcome != Custody.Vaulted) revert WrongCustody(tokenId, outcome);
+        if (outcome != Custody.Delivered && outcome != Custody.Vaulted && outcome != Custody.AtPokechain) {
+            revert WrongCustody(tokenId, outcome);
+        }
         _moveCustody(tokenId, Custody.Lost, outcome);
         address owner = ownerOf(tokenId);
         if (outcome == Custody.Vaulted) vaultedCount[owner] += 1;
+        if (outcome == Custody.AtPokechain) {
+            Submission storage s = _submissions[tokenId];
+            s.status = SubmissionStatus.ReceivedByPokechain;
+            s.updatedAt = uint64(block.timestamp);
+        }
         emit LostReportResolved(tokenId, owner, outcome);
+    }
+
+    /// @notice Names the TradeEscrow contract (see the contract notice).
+    function setTradeEscrow(address escrow) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        tradeEscrow = escrow;
+        emit TradeEscrowSet(escrow);
     }
 
     /* --------------------------------- views --------------------------------- */
@@ -409,13 +432,31 @@ contract SlabVault is ERC721, AccessControl {
         return _submissions[submissionId];
     }
 
+    /// @notice Just the custody state, for contracts (TradeEscrow) that only need that.
+    function custodyOf(uint256 tokenId) external view returns (Custody) {
+        return _slabs[tokenId].custody;
+    }
+
+    /**
+     * @dev TradeEscrow may move slabs without a separate approval. It only does so inside
+     *      createOffer (the maker's own slabs, called by the maker) and accept (the taker's own
+     *      slabs, called by the taker), so nobody's slab moves without its owner's transaction.
+     */
+    function isApprovedForAll(address owner, address operator) public view override returns (bool) {
+        return (operator == tradeEscrow && tradeEscrow != address(0)) || super.isApprovedForAll(owner, operator);
+    }
+
     /// @notice Fully on-chain ERC-721 metadata: a base64 JSON document, no server or IPFS needed.
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         _requireOwned(tokenId);
         Slab storage s = _slabs[tokenId];
         // Built in two halves: one abi.encodePacked with every field runs out of stack slots.
+        // Before Collector Crypt confirms it, the token has no verified title yet.
+        string memory name = bytes(s.title).length > 0
+            ? s.title
+            : string.concat(s.grader, " ", s.certNumber, " (pending verification)");
         bytes memory head = abi.encodePacked(
-            '{"name":"', s.title,
+            '{"name":"', name,
             '","description":"Graded slab held by the Pokechain vault. The token is never burned, so the custody trail stays on-chain.",',
             '"image":"', s.image,
             '","attributes":[{"trait_type":"Grader","value":"', s.grader,
@@ -440,20 +481,36 @@ contract SlabVault is ERC721, AccessControl {
 
     /**
      * @dev Every mint and transfer passes through here. A slab can only move while it is
-     *      Vaulted (once redemption starts the token is locked), only to an active account
-     *      other than its current owner, and the per-owner vaulted count follows it.
+     *      Vaulted (pending, withdrawn or rejected tokens are locked), only to an active account
+     *      (or TradeEscrow) other than its current owner, and the vaulted count follows it.
+     *      A freshly minted token is pending, so it isn't counted as vaulted until confirmVaulted.
      */
     function _update(address to, uint256 tokenId, address auth) internal override returns (address from) {
         from = _ownerOf(tokenId);
-        if (to != address(0) && !accounts.isActive(to)) revert AccountNotActive(to);
+        if (to != address(0) && to != tradeEscrow && !accounts.isActive(to)) revert AccountNotActive(to);
         if (from != address(0)) {
             if (to == from) revert SelfTransfer(tokenId);
             Custody c = _slabs[tokenId].custody;
             if (c != Custody.Vaulted) revert SlabLocked(tokenId, c);
             vaultedCount[from] -= 1;
+            if (to != address(0)) vaultedCount[to] += 1;
         }
-        if (to != address(0)) vaultedCount[to] += 1;
         return super._update(to, tokenId, auth);
+    }
+
+    /// @dev The NFT, minted at submission from what was declared: locked (custody isn't Vaulted), not counted as vaulted yet.
+    function _mintPending(uint256 tokenId) private {
+        Submission storage sub = _submissions[tokenId];
+        Slab storage slab = _slabs[tokenId];
+        slab.grader = sub.grader;
+        slab.certNumber = sub.certNumber;
+        slab.declaredValueCents = sub.declaredValueCents;
+        slab.evidenceHash = sub.evidenceHash;
+        slab.carrier = sub.inboundCarrier;
+        slab.trackingNumber = sub.inboundTracking;
+        slab.mintedAt = uint64(block.timestamp);
+        _setCustody(tokenId, Custody.PostedToPokechain);
+        _safeMint(sub.owner, tokenId);
     }
 
     function _isOpen(SubmissionStatus st) private pure returns (bool) {
@@ -488,6 +545,10 @@ contract SlabVault is ERC721, AccessControl {
         if (c == Custody.Shipped) return "Shipped";
         if (c == Custody.Delivered) return "Delivered";
         if (c == Custody.Lost) return "Lost";
+        if (c == Custody.PostedToPokechain) return "Posted to Pokechain";
+        if (c == Custody.AtPokechain) return "At Pokechain";
+        if (c == Custody.SentToCustodian) return "Sent to Collector Crypt";
+        if (c == Custody.Rejected) return "Rejected";
         return "None";
     }
 }

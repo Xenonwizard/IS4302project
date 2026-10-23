@@ -51,7 +51,6 @@ const ERROR_TEXT: Record<string, string> = {
   SlabsStillVaulted: "Withdraw or transfer every vaulted slab before closing the account.",
   AccountNotActive: "That wallet has no active Pokechain account.",
   CertAlreadyTokenised: "That cert is already tokenised.",
-  CertAlreadyPending: "That cert already has a pending submission.",
   NotSlabOwner: "Only the slab's owner can do that.",
   WrongCustody: "The slab isn't in the right custody state for that.",
   SlabLocked: "The slab is locked because it has left the vault.",
@@ -59,6 +58,17 @@ const ERROR_TEXT: Record<string, string> = {
   FaucetLimit: "The faucet mints at most 10,000 USDC at a time.",
   ERC20InsufficientBalance: "Your wallet doesn't hold enough USDC.",
   ERC20InsufficientAllowance: "The USDC allowance is too low.",
+  OffersStillOpen: "Withdraw your open trade offers before closing the account.",
+  SelfTrade: "You can't trade with yourself.",
+  EmptySide: "Each side of a trade needs at least one slab or some cash.",
+  TooManySlabs: "At most 10 slabs on each side of a trade.",
+  DuplicateSlab: "The same slab is in the offer twice.",
+  NotYourSlab: "One of those slabs isn't owned by that collector any more (it may be in another offer).",
+  SlabNotVaulted: "One of those slabs isn't in the vault (pending, withdrawn or lost), so it can't be traded.",
+  NotEnoughCash: "Not enough USDC in the Pokechain account for that offer.",
+  OfferNotOpen: "That offer is no longer open.",
+  NotTaker: "Only the collector the offer was made to can do that.",
+  NotMaker: "Only the collector who made the offer can withdraw it.",
 };
 
 export function describeError(e: unknown): string {

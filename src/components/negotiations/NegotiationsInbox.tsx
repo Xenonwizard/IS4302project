@@ -13,6 +13,7 @@ import type { Negotiation } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 import { Avatar, Badge, Button, TimeAgo } from "../ui/primitives";
 import { reportItemLabel } from "./ReportLostModal";
+import { ChainTradeRooms } from "./ChainTradeRooms";
 
 type Tab = "all" | "buying" | "selling";
 
@@ -79,6 +80,8 @@ export function NegotiationsInbox() {
           offers here.
         </p>
       </div>
+
+      {user?.address ? <ChainTradeRooms me={user.address} /> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {(["all", "buying", "selling"] as const).map((t) => (

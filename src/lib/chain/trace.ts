@@ -34,9 +34,10 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   const from = { fromBlock: DEPLOY_BLOCK };
   const byToken = { args: { tokenId }, ...from };
 
-  const [minted] = await publicClient.getContractEvents({ ...sv, eventName: "SlabMinted", ...byToken });
-  const submissionId = minted?.args.submissionId;
-  const bySub = submissionId !== undefined ? { args: { submissionId }, ...from } : null;
+  // The token was minted at submission, so its submission id is its token id.
+  const [vaulted] = await publicClient.getContractEvents({ ...sv, eventName: "SlabVaulted", ...byToken });
+  const submissionId = tokenId;
+  const bySub = { args: { submissionId }, ...from };
 
   const [transfers, redeem, shipped, delivered, lost, resolved, requested, received, forwarded] = await Promise.all([
     publicClient.getContractEvents({ ...sv, eventName: "Transfer", ...byToken }),
@@ -45,9 +46,9 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     publicClient.getContractEvents({ ...sv, eventName: "SlabDelivered", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "SlabReportedLost", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "LostReportResolved", ...byToken }),
-    bySub ? publicClient.getContractEvents({ ...sv, eventName: "SubmissionRequested", ...bySub }) : [],
-    bySub ? publicClient.getContractEvents({ ...sv, eventName: "SubmissionReceived", ...bySub }) : [],
-    bySub ? publicClient.getContractEvents({ ...sv, eventName: "SubmissionForwarded", ...bySub }) : [],
+    publicClient.getContractEvents({ ...sv, eventName: "SubmissionRequested", ...bySub }),
+    publicClient.getContractEvents({ ...sv, eventName: "SubmissionReceived", ...bySub }),
+    publicClient.getContractEvents({ ...sv, eventName: "SubmissionForwarded", ...bySub }),
   ]);
 
   const rows: { event: string; detail: string; block: bigint; tx: string; logIndex: number }[] = [];
@@ -57,14 +58,14 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   for (const l of requested) {
     const value = (Number(l.args.declaredValueCents) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
     const parcel = l.args.inboundTracking ? `, parcel ${l.args.inboundTracking}` : "";
-    push("SubmissionRequested", `#${l.args.submissionId} by ${short(l.args.owner!)}: ${l.args.grader} ${l.args.certNumber}, declared ${value}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
+    push("SubmissionRequested", `NFT #${l.args.submissionId} minted to ${short(l.args.owner!)}, pending and locked: ${l.args.grader} ${l.args.certNumber}, declared ${value}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
   }
   for (const l of received) push("SubmissionReceived", `Pokechain's warehouse received submission #${l.args.submissionId}`, l);
   for (const l of forwarded) {
     const bytes = (l.args.ciphertext!.length - 2) / 2;
     push("SubmissionForwarded", `Forwarded to Collector Crypt; parcel details encrypted to its key (${bytes} bytes of ciphertext, commitment ${short(l.args.commitment!)})`, l);
   }
-  if (minted) push("SlabMinted", `Token #${tokenId} to ${short(minted.args.owner!)}; CC NFT ${minted.args.custodianRef}`, minted);
+  if (vaulted) push("SlabVaulted", `Collector Crypt vaulted it (CC NFT ${vaulted.args.custodianRef}); token #${tokenId} can now be traded`, vaulted);
   for (const l of transfers) {
     if (l.args.from === zeroAddress) continue; // the mint, already listed
     push("Transfer", `Owner ${short(l.args.from!)} → ${short(l.args.to!)}`, l);
@@ -92,10 +93,7 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     tx: r.tx,
   }));
 
-  const submission =
-    submissionId !== undefined
-      ? await publicClient.readContract({ ...sv, functionName: "submissionOf", args: [submissionId] })
-      : null;
+  const submission = await publicClient.readContract({ ...sv, functionName: "submissionOf", args: [submissionId] });
 
   return {
     tokenId: tokenId.toString(),
@@ -110,9 +108,9 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     carrier: slab.carrier,
     trackingNumber: slab.trackingNumber,
     shippingHash: slab.shippingHash,
-    submission: submission
+    submission: submission.owner !== zeroAddress
       ? {
-          id: submissionId!.toString(),
+          id: submissionId.toString(),
           status: SUBMISSION_STATUS[submission.status],
           forwardCommitment: submission.forwardCommitment,
           inboundCarrier: submission.inboundCarrier,

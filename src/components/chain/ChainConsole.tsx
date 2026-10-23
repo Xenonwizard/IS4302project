@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Blocks, Check, ChevronDown, Copy, ExternalLink, Loader2, X } from "lucide-react";
 import { useState } from "react";
 import { decodeFunctionData, formatEther, formatGwei, parseEventLogs, type Abi, type Address, type Hash } from "viem";
@@ -9,6 +9,7 @@ import { usePublicClient } from "wagmi";
 import { IS_LOCAL, chain, contracts, explorerAddress, explorerTx, shortHash, CONTRACT_LABEL } from "@/lib/chain/config";
 import { useChainLog, type ChainLogEntry, type ChainLogKind } from "@/lib/chain/log";
 import { useResetDemo } from "@/lib/chain/useResetDemo";
+import { useStore } from "@/lib/store";
 import { Drawer, TimeAgo } from "../ui/primitives";
 
 const KIND: Record<ChainLogKind, { label: string; className: string }> = {
@@ -18,10 +19,44 @@ const KIND: Record<ChainLogKind, { label: string; className: string }> = {
   check: { label: "Off-chain step", className: "bg-good-bg text-good" },
 };
 
+/**
+ * Local demo seed: @ash (Hardhat #1) and @misty (#2), each with vaulted slabs and USDC, onboarded
+ * through the real contracts by POST /api/dev/demo-traders. Log in as either with that test wallet.
+ */
+function useDemoTraders() {
+  const { pushToast } = useStore();
+  const log = useChainLog();
+  const queryClient = useQueryClient();
+  const [loading, setLoading] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    const id = log.add({ kind: "operator", label: "Load demo traders", call: "POST /api/dev/demo-traders", args: ["@ash", "@misty"], status: "pending" });
+    try {
+      const res = await fetch("/api/dev/demo-traders", { method: "POST" });
+      const body = (await res.json()) as { done?: string[]; error?: string };
+      if (!res.ok) throw new Error(body.error);
+      log.update(id, { status: "success", args: body.done?.length ? body.done : ["Already loaded"] });
+      pushToast({
+        title: "Demo traders ready",
+        body: "Log in with Hardhat test collector #1 for @ash or #2 for @misty, then open Negotiation rooms.",
+        tone: "success",
+      });
+      void queryClient.invalidateQueries();
+    } catch (e) {
+      log.update(id, { status: "failed", error: (e as Error).message });
+      pushToast({ title: "Couldn't load demo traders", body: (e as Error).message, tone: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
+  return { load, loading };
+}
+
 /** Floating button + drawer listing every blockchain call the app has made. */
 export function ChainConsole() {
   const { entries, open, setOpen, clear } = useChainLog();
   const { request: requestReset, armed, resetting } = useResetDemo();
+  const { load: loadTraders, loading: loadingTraders } = useDemoTraders();
   const pending = entries.some((e) => e.status === "pending");
 
   return (
@@ -46,6 +81,16 @@ export function ChainConsole() {
               {chain.name} · chain id {chain.id}
             </span>
             <span className="flex gap-3">
+              {IS_LOCAL ? (
+                <button
+                  onClick={loadTraders}
+                  disabled={loadingTraders}
+                  title="Opens @ash (test collector #1) and @misty (#2) with vaulted slabs and $1,000 each, through the real contracts"
+                  className="font-semibold text-accent hover:underline"
+                >
+                  {loadingTraders ? "Loading traders…" : "Load demo traders"}
+                </button>
+              ) : null}
               {entries.length ? (
                 <button onClick={clear} className="font-semibold text-muted hover:text-white">
                   Clear log

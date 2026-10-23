@@ -721,7 +721,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const others = new Set(ownedByOthers);
       const known = new Set(snapshot.vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])));
       const gone = snapshot.vault.filter((v) => v.token && others.has(v.token.tokenId));
-      const arrived = owned.filter((o) => !known.has(o.token.tokenId));
+      // Saved from an earlier chain (restarted since): the token id now belongs to a different cert.
+      const onChain = new Map(owned.map((o) => [o.token.tokenId, o]));
+      const stale = snapshot.vault.filter((v) => {
+        const o = v.token && onChain.get(v.token.tokenId);
+        const l = o && getListing(v.listingId);
+        return Boolean(o) && (!l || l.grader !== o!.grader || l.certNumber !== o!.certNumber);
+      });
+      const staleTokens = new Set(stale.map((v) => v.token!.tokenId));
+      const arrived = owned.filter((o) => !known.has(o.token.tokenId) || staleTokens.has(o.token.tokenId));
       if (!gone.length && !arrived.length) return;
 
       const added: { listing: Listing; item: VaultItem }[] = [];
@@ -755,7 +763,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       setState((prev) => {
-        const goneIds = new Set(gone.map((v) => v.listingId));
+        const goneIds = new Set([...gone, ...stale].map((v) => v.listingId));
         const addIds = new Set(added.map((a) => a.listing.id));
         let negotiations = prev.negotiations;
         for (const id of goneIds) {
@@ -772,7 +780,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
         };
       });
-      for (const a of added) pushToast({ title: `Token #${a.item.token!.tokenId} arrived`, body: `${a.listing.shortName} is now in your Vault.`, tone: "success" });
+      for (const a of added) {
+        if (staleTokens.has(a.item.token!.tokenId)) continue; // just corrected, not new
+        pushToast({ title: `Token #${a.item.token!.tokenId} arrived`, body: `${a.listing.shortName} is now in your Vault.`, tone: "success" });
+      }
       for (const v of gone) pushToast({ title: `Token #${v.token!.tokenId} left your wallet`, body: "Another collector owns it now." });
     },
     [pushToast],
