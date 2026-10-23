@@ -76,20 +76,22 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
     }
   });
 
-  const last = n.messages.at(-1);
-  const typing = n.status === "open" && last && last.kind !== "system" && last.from === me;
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const count = n.messages.length;
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [count, typing]);
+  }, [count]);
 
+  const sendingRef = useRef(false);
   const send = (value: string) => {
-    if (!value.trim()) return;
+    if (!value.trim() || sendingRef.current) return;
+    sendingRef.current = true;
     sendMessage(n.id, value.trim());
     setText("");
+    setTimeout(() => {
+      sendingRef.current = false;
+    }, 400);
   };
 
   return (
@@ -142,16 +144,6 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
             {n.messages.map((m) => (
               <MessageRow key={m.id} message={m} me={me} />
             ))}
-            {typing ? (
-              <p className="flex items-center gap-2 pl-10 text-[12px] text-dim">
-                <span className="flex gap-0.5">
-                  <Dot delay="0ms" />
-                  <Dot delay="150ms" />
-                  <Dot delay="300ms" />
-                </span>
-                {other} is typing…
-              </p>
-            ) : null}
           </div>
 
           {n.status === "open" ? (

@@ -8,9 +8,40 @@ interface Db {
 
 const FILE = join(process.cwd(), ".data", "negotiations.json");
 
+function dedupeMessages(messages: Negotiation["messages"]): Negotiation["messages"] {
+  const sorted = [...(messages || [])].sort(
+    (a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0),
+  );
+  const result: Negotiation["messages"] = [];
+  const seenIds = new Set<string>();
+
+  for (const m of sorted) {
+    if (seenIds.has(m.id)) continue;
+    // Discard identical duplicate sent by same sender within 3 seconds
+    const isDup = result.some(
+      (r) =>
+        r.from === m.from &&
+        r.kind === m.kind &&
+        r.text === m.text &&
+        Math.abs((Date.parse(r.at) || 0) - (Date.parse(m.at) || 0)) < 3000,
+    );
+    if (isDup) continue;
+    seenIds.add(m.id);
+    result.push(m);
+  }
+  return result;
+}
+
 function loadDb(): Db {
   try {
-    return { negotiations: {}, ...(JSON.parse(readFileSync(FILE, "utf8")) as Partial<Db>) };
+    const raw = { negotiations: {}, ...(JSON.parse(readFileSync(FILE, "utf8")) as Partial<Db>) };
+    for (const [id, n] of Object.entries(raw.negotiations)) {
+      raw.negotiations[id] = {
+        ...n,
+        messages: dedupeMessages(n.messages),
+      };
+    }
+    return raw;
   } catch {
     return { negotiations: {} };
   }
@@ -67,20 +98,10 @@ export async function POST(request: Request) {
       if (!existing) {
         db.negotiations[incoming.id] = incoming;
       } else {
-        // Merge messages deduplicated by id
-        const messageMap = new Map<string, (typeof incoming.messages)[0]>();
-        for (const m of existing.messages || []) {
-          messageMap.set(m.id, m);
-        }
-        for (const m of incoming.messages || []) {
-          messageMap.set(m.id, m);
-        }
         db.negotiations[incoming.id] = {
           ...existing,
           ...incoming,
-          messages: Array.from(messageMap.values()).sort(
-            (a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0),
-          ),
+          messages: dedupeMessages([...(existing.messages || []), ...(incoming.messages || [])]),
         };
       }
     }
@@ -91,3 +112,4 @@ export async function POST(request: Request) {
     return Response.json({ error: (err as Error).message }, { status: 400 });
   }
 }
+

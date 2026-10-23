@@ -1160,14 +1160,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const sendMessage = useCallback((negId: string, text: string) => {
+    const me = latest.current.user?.username;
+    if (!me) return;
+    const chat = latest.current.negotiations[negId];
+    if (!chat || chat.status !== "open") return;
+
+    // Guard against duplicate send
+    const last = chat.messages.at(-1);
+    if (last && last.from === me && last.text === text && Date.now() - Date.parse(last.at) < 2000) {
+      return;
+    }
+
+    const newMsg: ChatMessage = {
+      id: messageId(),
+      from: me,
+      at: new Date().toISOString(),
+      kind: "text",
+      text,
+    };
+
+    let updatedNegotiation: Negotiation | null = null;
     setState((prev) => {
-      const me = prev.user?.username;
-      if (!me || prev.negotiations[negId]?.status !== "open") return prev;
-      const next = append(prev, negId, { id: messageId(), from: me, at: new Date().toISOString(), kind: "text", text });
-      const updated = next.negotiations[negId];
-      if (updated) syncNegotiationToServer(updated);
-      return next;
+      const currentChat = prev.negotiations[negId];
+      if (!currentChat || currentChat.status !== "open") return prev;
+      if (currentChat.messages.some((m) => m.id === newMsg.id)) return prev;
+      const updated = {
+        ...currentChat,
+        messages: [...currentChat.messages, newMsg],
+      };
+      updatedNegotiation = updated;
+      return {
+        ...prev,
+        negotiations: { ...prev.negotiations, [negId]: updated },
+      };
     });
+
+    if (updatedNegotiation) {
+      syncNegotiationToServer(updatedNegotiation);
+    }
   }, []);
 
   const respondToOffer = useCallback(
@@ -1242,16 +1272,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             } else {
               const existingMsgs = existing.messages?.length || 0;
               const incomingMsgs = incoming.messages?.length || 0;
-              if (existing.status !== incoming.status || incomingMsgs > existingMsgs) {
-                const messageMap = new Map<string, ChatMessage>();
-                for (const m of existing.messages || []) messageMap.set(m.id, m);
-                for (const m of incoming.messages || []) messageMap.set(m.id, m);
+              if (existing.status !== incoming.status || incomingMsgs !== existingMsgs) {
                 merged[id] = {
                   ...existing,
                   ...incoming,
-                  messages: Array.from(messageMap.values()).sort(
-                    (a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0),
-                  ),
+                  messages: incoming.messages,
                 };
                 changed = true;
               }
