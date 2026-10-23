@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowLeft, Check, Flag, Gavel, Send } from "lucide-react";
+import { ArrowLeft, Check, Gavel, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
@@ -108,12 +108,6 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
               <p className="truncate text-sm font-bold">{other}</p>
               <p className="text-[12px] text-muted">{iAmBuyer ? "Seller" : "Buyer"} · only you two see this chat</p>
             </div>
-            {n.status === "sold" ? (
-              <Button size="sm" variant="outline" onClick={() => setReportOpen(true)}>
-                <Flag size={14} />
-                Report lost
-              </Button>
-            ) : null}
           </header>
 
           {/* the listing and the offer on the table */}
