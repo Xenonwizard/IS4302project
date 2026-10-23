@@ -259,7 +259,7 @@ function makeListing(card: CardRecord, index: number): Listing {
   };
 }
 
-export const LISTINGS: Listing[] = CARDS.map((card, i) => makeListing(card, i));
+export const LISTINGS: Listing[] = CARDS.slice(0, 15).map((card, i) => makeListing(card, i));
 
 export const LISTING_BY_ID = new Map(LISTINGS.map((l) => [l.id, l]));
 

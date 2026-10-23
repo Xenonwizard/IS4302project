@@ -93,7 +93,7 @@ export function ChainHistory({ address }: { address: Address }) {
       for (const [key, log] of transfers) {
         if (log.args.from === zeroAddress) continue;
         const self = log.args.from === log.args.to;
-        const out = log.args.from === address;
+        const out = log.args.from?.toLowerCase() === address?.toLowerCase();
         const other = out ? log.args.to! : log.args.from!;
         const detail = self
           ? `token #${log.args.tokenId} sent to yourself`

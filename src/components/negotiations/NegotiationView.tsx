@@ -2,10 +2,16 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowLeft, Check, Flag, Gavel, Send } from "lucide-react";
+import { ArrowLeft, Check, Gavel, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { keccak256, toBytes, zeroAddress } from "viem";
+import { usePublicClient } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
+import { contracts } from "@/lib/chain/config";
+import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { usd } from "@/lib/format";
 import { bidValue, offerMix, pendingOffer } from "@/lib/negotiation";
 import { sellerFee, useStore } from "@/lib/store";
@@ -59,7 +65,12 @@ export function NegotiationView({ id }: { id: string }) {
 }
 
 function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Listing; me: string }) {
-  const { resolve, sendMessage, respondToOffer, withdrawOffer, lostReports } = useStore();
+  const { resolve, sendMessage, respondToOffer, withdrawOffer, lostReports, user, pushToast } = useStore();
+  const { transfer } = useSlabChain();
+  const { cancelListing } = useMarketChain();
+  const client = usePublicClient();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
   const listing = resolve(base);
   const iAmBuyer = n.buyer === me;
   const other = iAmBuyer ? n.seller : n.buyer;
@@ -76,20 +87,67 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
     }
   });
 
-  const last = n.messages.at(-1);
-  const typing = n.status === "open" && last && last.kind !== "system" && last.from === me;
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const count = n.messages.length;
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [count, typing]);
+  }, [count]);
 
+  const sendingRef = useRef(false);
   const send = (value: string) => {
-    if (!value.trim()) return;
+    if (!value.trim() || sendingRef.current) return;
+    sendingRef.current = true;
     sendMessage(n.id, value.trim());
     setText("");
+    setTimeout(() => {
+      sendingRef.current = false;
+    }, 400);
+  };
+
+  const handleAccept = async () => {
+    if (!pending || busy) return;
+    setBusy(true);
+    try {
+      let txHash: string | undefined;
+      // If token is on-chain and user has a connected wallet
+      if (listing.tokenId && user?.address && client) {
+        // 1. Check if listed on SlabMarket. If so, cancel listing so token is unlocked
+        const isListed = await client
+          .readContract({
+            ...contracts.slabVault,
+            functionName: "isListed",
+            args: [BigInt(listing.tokenId)],
+          })
+          .catch(() => false);
+
+        if (isListed) {
+          await cancelListing(listing.tokenId);
+        }
+
+        // 2. Resolve buyer's handle to wallet address
+        const buyerHandle = n.buyer.trim().toLowerCase().replace(/^@/, "");
+        const buyerAddress = await client
+          .readContract({
+            ...contracts.accounts,
+            functionName: "handleOwner",
+            args: [keccak256(toBytes(buyerHandle))],
+          })
+          .catch(() => zeroAddress);
+
+        if (buyerAddress && buyerAddress !== zeroAddress) {
+          const receipt = await transfer(listing.tokenId, buyerAddress, buyerHandle);
+          txHash = receipt.transactionHash;
+        }
+      }
+
+      respondToOffer(n.id, pending.id, true, txHash);
+      void queryClient.invalidateQueries({ queryKey: ["owned-slabs"] });
+    } catch (err) {
+      pushToast({ title: "Could not accept offer", body: (err as Error).message, tone: "error" });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -106,12 +164,6 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
               <p className="truncate text-sm font-bold">{other}</p>
               <p className="text-[12px] text-muted">{iAmBuyer ? "Seller" : "Buyer"} · only you two see this chat</p>
             </div>
-            {n.status === "sold" ? (
-              <Button size="sm" variant="outline" onClick={() => setReportOpen(true)}>
-                <Flag size={14} />
-                Report lost
-              </Button>
-            ) : null}
           </header>
 
           {/* the listing and the offer on the table */}
@@ -131,9 +183,10 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
               n={n}
               iAmBuyer={iAmBuyer}
               pending={pending}
+              busy={busy}
               onEdit={() => setEditOpen(true)}
               onWithdraw={() => pending && withdrawOffer(n.id, pending.id)}
-              onAccept={() => pending && respondToOffer(n.id, pending.id, true)}
+              onAccept={handleAccept}
               onDecline={() => pending && respondToOffer(n.id, pending.id, false)}
             />
           </div>
@@ -142,16 +195,6 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
             {n.messages.map((m) => (
               <MessageRow key={m.id} message={m} me={me} />
             ))}
-            {typing ? (
-              <p className="flex items-center gap-2 pl-10 text-[12px] text-dim">
-                <span className="flex gap-0.5">
-                  <Dot delay="0ms" />
-                  <Dot delay="150ms" />
-                  <Dot delay="300ms" />
-                </span>
-                {other} is typing…
-              </p>
-            ) : null}
           </div>
 
           {n.status === "open" ? (
@@ -239,6 +282,7 @@ function OfferBar({
   n,
   iAmBuyer,
   pending,
+  busy,
   onEdit,
   onWithdraw,
   onAccept,
@@ -247,6 +291,7 @@ function OfferBar({
   n: Negotiation;
   iAmBuyer: boolean;
   pending?: ChatMessage;
+  busy?: boolean;
   onEdit: () => void;
   onWithdraw: () => void;
   onAccept: () => void;
@@ -278,11 +323,11 @@ function OfferBar({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" onClick={onDecline}>
+        <Button size="sm" variant="outline" onClick={onDecline} disabled={busy}>
           Decline
         </Button>
-        <Button size="sm" onClick={onAccept}>
-          Accept {exact(bidValue(pending.offer))}
+        <Button size="sm" onClick={onAccept} disabled={busy}>
+          {busy ? "Accepting…" : `Accept ${exact(bidValue(pending.offer))}`}
         </Button>
       </div>
       <p className="text-[11px] text-dim">

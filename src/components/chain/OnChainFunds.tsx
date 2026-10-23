@@ -54,8 +54,8 @@ export function OnChainFunds() {
 
   const faucet = () =>
     run("faucet", async () => {
-      await send({ contract: "usdc", functionName: "faucet", args: [toUsdcUnits(1000)], label: "Mint test USDC" });
-      pushToast({ title: "1,000 test USDC minted to your wallet", tone: "success" });
+      await send({ contract: "usdc", functionName: "faucet", args: [toUsdcUnits(10000)], label: "Mint test USDC" });
+      pushToast({ title: "10,000 test USDC minted to your wallet", tone: "success" });
     });
 
   const deposit = () =>
@@ -119,7 +119,7 @@ export function OnChainFunds() {
         <h2 className="text-[14px] font-bold">USDC on {chain.name}</h2>
         <Button size="sm" variant="secondary" onClick={faucet} disabled={busy !== null}>
           <Coins size={14} />
-          {busy === "faucet" ? "Minting…" : "Mint 1,000 test USDC"}
+          {busy === "faucet" ? "Minting…" : "Mint 10,000 test USDC"}
         </Button>
       </header>
 

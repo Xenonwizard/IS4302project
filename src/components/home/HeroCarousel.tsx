@@ -8,6 +8,8 @@ import { GRAILS } from "@/lib/catalog";
 import { Slab } from "../slab/Slab";
 import { Button } from "../ui/primitives";
 
+import type { Listing } from "@/lib/types";
+
 const SLIDES = [
   {
     title: "Make an offer, chat 1-to-1",
@@ -27,7 +29,7 @@ const SLIDES = [
   },
 ];
 
-export function HeroCarousel() {
+export function HeroCarousel({ listings }: { listings?: Listing[] } = {}) {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
@@ -36,7 +38,12 @@ export function HeroCarousel() {
   }, []);
 
   const slide = SLIDES[index];
-  const picks = [GRAILS[index % GRAILS.length], GRAILS[(index + 4) % GRAILS.length], GRAILS[(index + 8) % GRAILS.length]];
+  const pool = listings && listings.length ? listings : GRAILS;
+  const picks = [
+    pool[index % pool.length],
+    pool[(index + 1) % pool.length],
+    pool[(index + 2) % pool.length],
+  ].filter(Boolean);
 
   return (
     <section className="relative overflow-hidden rounded-card border border-hairline">

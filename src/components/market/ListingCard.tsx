@@ -48,6 +48,14 @@ export function ListingCard({
             {listing.title}
           </h3>
         </Link>
+        {listing.tokenId ? (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-md bg-accent/15 px-1.5 py-0.5 text-[10.5px] font-bold text-accent">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+              On-chain #{listing.tokenId}
+            </span>
+          </div>
+        ) : null}
         <div className="mt-2.5 flex items-center justify-between gap-2">
           <span className={clsx("font-bold", dense ? "text-sm" : "text-[15px]")}>
             {usd(listing.price)}

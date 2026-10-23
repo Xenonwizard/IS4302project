@@ -12,8 +12,8 @@ import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20P
  *         AccountRegistry at Circle's USDC instead and drop this contract.
  */
 contract MockUSDC is ERC20, ERC20Permit {
-    /// @notice Most a single faucet call can mint: 10,000 USDC.
-    uint256 public constant FAUCET_LIMIT = 10_000 * 1e6;
+    /// @notice Most a single faucet call can mint: 100,000 USDC.
+    uint256 public constant FAUCET_LIMIT = 100_000 * 1e6;
 
     error FaucetLimit(uint256 requested, uint256 limit);
 

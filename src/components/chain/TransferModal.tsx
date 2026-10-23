@@ -11,7 +11,6 @@ import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
-import { Fn, OnChainNote } from "./ui";
 
 /**
  * A → B on Pokechain: the slab's ERC-721 moves to another collector's wallet. Collector Crypt's
@@ -60,10 +59,10 @@ function Transfer({ entry, listing, onClose }: { entry: VaultItem; listing: List
     if (!to) return;
     setBusy(true);
     try {
-      await transfer(tokenId, to.address, to.handle);
+      const receipt = await transfer(tokenId, to.address, to.handle);
       // The receipt is in, so the chain already says they own it: take it out of this vault now
       // rather than waiting for the next ownership poll, and re-read ownership straight away.
-      handOver(listing.id, to.handle);
+      handOver(listing.id, to.handle, receipt.transactionHash);
       void queryClient.invalidateQueries({ queryKey: ["owned-slabs"] });
       pushToast({ title: `Sent to @${to.handle}`, body: `Token #${tokenId} is in their Vault now.`, tone: "success" });
       onClose();
@@ -103,17 +102,6 @@ function Transfer({ entry, listing, onClose }: { entry: VaultItem; listing: List
       ) : null}
       {error ? <p className="text-[13px] font-medium text-bad">{error}</p> : null}
 
-      <OnChainNote>
-        1. Reads <Fn>AccountRegistry.handleOwner(keccak256(handle))</Fn> and <Fn>accountOf</Fn> to find their wallet
-        and check it&apos;s an active account still using that handle (and isn&apos;t yours).
-        <br />
-        2. <Fn>SlabVault.safeTransferFrom(you, them, tokenId)</Fn> moves the token. SlabVault&apos;s <Fn>_update</Fn> only
-        allows it while the slab is <b className="text-white">Vaulted</b> and the receiver&apos;s account is Active. It also
-        moves <Fn>vaultedCount</Fn> with it.
-        <br />
-        Collector Crypt&apos;s NFT doesn&apos;t move: it stays in Pokechain&apos;s escrow. Whoever holds this token is who CC ships
-        to on withdrawal. Paid sales will use the same transfer, inside a TradeEscrow swap.
-      </OnChainNote>
       <Button className="w-full" size="lg" onClick={send} disabled={!to || busy}>
         <Send size={15} />
         {busy ? "Confirm in your wallet…" : to ? `Transfer to @${to.handle}` : "Look up a collector first"}

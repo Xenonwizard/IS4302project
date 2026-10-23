@@ -11,11 +11,20 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 export default buildModule("PokechainModule", (m) => {
   // The deployer is also the vault operator: the server key that mints and ships slabs.
   const operator = m.getAccount(0);
+  const collector1 = m.getAccount(1);
+  const collector2 = m.getAccount(2);
 
   const usdc = m.contract("MockUSDC");
   const accounts = m.contract("AccountRegistry", [usdc]);
   const slabVault = m.contract("SlabVault", [accounts, operator]);
-  m.call(accounts, "setSlabVault", [slabVault]);
+  const slabMarket = m.contract("SlabMarket", [slabVault, usdc, accounts]);
 
-  return { usdc, accounts, slabVault };
+  m.call(accounts, "setSlabVault", [slabVault]);
+  m.call(slabVault, "setMarketplace", [slabMarket]);
+
+  // Seed default test USDC balance for Hardhat test collectors (accounts #1 and #2)
+  m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector1, id: "seed_collector1" });
+  m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector2, id: "seed_collector2" });
+
+  return { usdc, accounts, slabVault, slabMarket };
 });
