@@ -76,7 +76,7 @@ export function ChainHistory({ address }: { address: Address }) {
             : log.eventName === "SubmissionReceived"
               ? `submission #${a.submissionId} · at Pokechain's warehouse`
               : log.eventName === "SubmissionForwarded"
-                ? `submission #${a.submissionId} · to Collector Crypt by ${a.carrier} ${a.trackingNumber}`
+                ? `submission #${a.submissionId} · forwarded to Collector Crypt, parcel details encrypted for it`
                 : log.eventName === "SubmissionRejected"
                   ? `submission #${a.submissionId} · ${a.reason}`
                   : log.eventName === "SlabMinted"

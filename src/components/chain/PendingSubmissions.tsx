@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
+import Link from "next/link";
 import { Check, Loader2, PackageSearch, RefreshCw, Truck, Vault, Warehouse } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePublicClient } from "wagmi";
@@ -23,8 +24,8 @@ interface Pending {
   certNumber: string;
   /** SubmissionStatus: 1 Pending, 2 ReceivedByPokechain, 3 AtCustodian */
   status: number;
-  forwardCarrier: string;
-  forwardTracking: string;
+  /** keccak256(salt ‖ parcel details); the details themselves are only on-chain encrypted */
+  forwardCommitment: string;
   declaredValueCents: number;
   evidenceHash: string;
   inboundCarrier: string;
@@ -62,8 +63,7 @@ export function PendingSubmissions({ onMinted }: { onMinted?: (listing: Listing 
           grader: s.grader as Grader,
           certNumber: s.certNumber,
           status: s.status,
-          forwardCarrier: s.forwardCarrier,
-          forwardTracking: s.forwardTracking,
+          forwardCommitment: s.forwardCommitment,
           declaredValueCents: Number(s.declaredValueCents),
           evidenceHash: s.evidenceHash,
           inboundCarrier: s.inboundCarrier,
@@ -152,7 +152,7 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
     const timer = window.setInterval(async () => {
       if (inFlight.current || document.hidden) return;
       const res = await fetch(`/api/collector-crypt/cards/${sub.grader}/${sub.certNumber}`, { cache: "no-store" });
-      if (res.ok) void mint();
+      if (res.ok && ((await res.json()) as { found: boolean }).found) void mint();
     }, 4000);
     return () => window.clearInterval(timer);
   }, [sub.status, sub.grader, sub.certNumber, mint]);
@@ -200,8 +200,10 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
             curl: `curl -X POST ${origin}/api/chain/forward -H 'content-type: application/json' -d '{"submissionId":"${id}"}'`,
             note: (
               <>
-                Pokechain ships it on to Collector Crypt&apos;s vault and records the parcel with{" "}
-                <Fn>SlabVault.markForwarded({id}, carrier, tracking)</Fn>, so the inbound leg is traceable too.
+                Pokechain ships it on to Collector Crypt. The parcel details (carrier, tracking number) are encrypted to
+                Collector Crypt&apos;s public key, read from <Fn>SlabVault.encryptionKey(custodian)</Fn>. Only the
+                ciphertext and a salted commitment go on-chain in <Fn>SlabVault.markForwarded({id}, ciphertext, commitment)</Fn>.
+                Everyone sees that it happened; only Collector Crypt can read the details.
               </>
             ),
           }
@@ -236,7 +238,7 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
             {sub.grader} cert <span className="font-mono text-white">{sub.certNumber}</span> · declared{" "}
             {usd(sub.declaredValueCents / 100)}
             {sub.inboundTracking ? ` · to Pokechain by ${sub.inboundCarrier} ${sub.inboundTracking}` : ""}
-            {sub.forwardTracking ? ` · to Collector Crypt by ${sub.forwardCarrier} ${sub.forwardTracking}` : ""}
+            {/^0x0*$/.test(sub.forwardCommitment) ? "" : " · parcel details sent to Collector Crypt, encrypted"}
           </p>
         </div>
         <div className="flex gap-2">
@@ -281,7 +283,12 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
           <CopyText text={next.curl} title="Copy the curl command" label="Copy" />
         </div>
         {sub.status === 3 ? (
-          <p className="mt-1.5 text-[11px] text-dim">This page polls Collector Crypt every few seconds and mints once the slab is vaulted.</p>
+          <p className="mt-1.5 text-[11px] text-dim">
+            This page polls Collector Crypt every few seconds and mints once the slab is vaulted.{" "}
+            <Link href="/collector-crypt" className="font-semibold text-accent hover:underline">
+              See what Collector Crypt received →
+            </Link>
+          </p>
         ) : null}
       </div>
       <div className="mt-3">

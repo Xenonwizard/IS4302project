@@ -8,8 +8,8 @@
     "coverage": "hardhat test --coverage",
     "node": "hardhat node",
     "chain": "node scripts/dev-chain.mjs",
-    "deploy:local": "hardhat ignition deploy ignition/modules/Pokechain.ts --network localhost --reset && node scripts/export-frontend.mjs 31337",
-    "deploy:amoy": "hardhat ignition deploy ignition/modules/Pokechain.ts --network amoy && node scripts/export-frontend.mjs 80002"
+    "deploy:local": "hardhat ignition deploy ignition/modules/Pokechain.ts --network localhost --parameters ignition/parameters/local.json --reset && node scripts/export-frontend.mjs 31337",
+    "deploy:amoy": "hardhat ignition deploy ignition/modules/Pokechain.ts --network amoy --parameters ignition/parameters/amoy.json && node scripts/export-frontend.mjs 80002"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "^3.1.9",

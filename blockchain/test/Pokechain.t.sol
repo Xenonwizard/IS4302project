@@ -15,6 +15,11 @@ contract PokechainTest is Test {
     address operator = makeAddr("operator");
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
+    address collectorCrypt = makeAddr("collectorCrypt");
+    bytes32 constant CC_KEY = keccak256("collector crypt x25519 public key");
+    bytes constant CIPHERTEXT = hex"01deadbeef";
+    bytes constant PLAINTEXT = bytes('{"carrier":"SingPost","tracking":"RR1SG"}');
+    bytes32 constant SALT = keccak256("pokechain salt");
 
     uint256 constant USD = 1e6;
     bytes32 constant EVIDENCE = keccak256("manifest: front.jpg, back.jpg, label.jpg");
@@ -24,6 +29,10 @@ contract PokechainTest is Test {
         accounts = new AccountRegistry(usdc);
         vault = new SlabVault(IAccountStatus(address(accounts)), operator);
         accounts.setSlabVault(ISlabVaultCustody(address(vault)));
+        // Collector Crypt is the custodian and publishes its encryption key.
+        vault.setCustodian(collectorCrypt);
+        vm.prank(collectorCrypt);
+        vault.setEncryptionKey(CC_KEY);
 
         vm.prank(alice);
         usdc.faucet(1_000 * USD);
@@ -49,7 +58,7 @@ contract PokechainTest is Test {
         sid = vault.requestSubmission("PSA", cert, 250_000, EVIDENCE, "SingPost", "RR1SG");
         vm.startPrank(operator);
         vault.markReceived(sid);
-        vault.markForwarded(sid, "SingPost", "SP123");
+        vault.markForwarded(sid, CIPHERTEXT, keccak256(abi.encodePacked(SALT, PLAINTEXT)));
         vm.stopPrank();
     }
 
@@ -258,14 +267,60 @@ contract PokechainTest is Test {
         vm.prank(operator);
         vault.markReceived(sid);
 
-        vm.expectEmit(true, true, false, true);
-        emit SlabVault.SubmissionForwarded(sid, alice, "SingPost", "SP123");
+        bytes32 commitment = keccak256(abi.encodePacked(SALT, PLAINTEXT));
+        vm.expectEmit(true, true, true, true);
+        emit SlabVault.SubmissionForwarded(sid, alice, collectorCrypt, CC_KEY, commitment, CIPHERTEXT);
         vm.prank(operator);
-        vault.markForwarded(sid, "SingPost", "SP123");
+        vault.markForwarded(sid, CIPHERTEXT, commitment);
 
         SlabVault.Submission memory sub = vault.submissionOf(sid);
         assertEq(uint8(sub.status), uint8(SlabVault.SubmissionStatus.AtCustodian));
-        assertEq(sub.forwardTracking, "SP123");
+        assertEq(sub.forwardCommitment, commitment);
+    }
+
+    /* ----------------------- encrypted hand-off to CC ----------------------- */
+
+    function test_PartiesPublishTheirOwnKeys() public {
+        assertEq(vault.encryptionKey(collectorCrypt), CC_KEY);
+        bytes32 rotated = keccak256("rotated key");
+        vm.prank(collectorCrypt);
+        vault.setEncryptionKey(rotated);
+        assertEq(vault.encryptionKey(collectorCrypt), rotated);
+        assertEq(vault.encryptionKey(alice), bytes32(0)); // nobody set one for alice
+    }
+
+    function test_OnlyAdminSetsCustodian() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        vault.setCustodian(alice);
+    }
+
+    function test_ForwardNeedsCustodianKey() public {
+        _register(alice, "alice");
+        vm.prank(alice);
+        uint256 sid = vault.requestSubmission("PSA", "12345678", 250_000, EVIDENCE, "SingPost", "RR1SG");
+        vm.prank(operator);
+        vault.markReceived(sid);
+        vault.setCustodian(bob); // bob has published no key
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.NoEncryptionKey.selector, bob));
+        vault.markForwarded(sid, CIPHERTEXT, keccak256(abi.encodePacked(SALT, PLAINTEXT)));
+    }
+
+    function test_DisputeCheckAcceptsOnlyTheCommittedPlaintext() public {
+        _register(alice, "alice");
+        uint256 sid = _submitAndForward(alice, "12345678");
+        assertTrue(vault.verifyForwardCommitment(sid, PLAINTEXT, SALT));
+        assertFalse(vault.verifyForwardCommitment(sid, bytes('{"carrier":"SingPost","tracking":"FAKE"}'), SALT));
+        assertFalse(vault.verifyForwardCommitment(sid, PLAINTEXT, keccak256("wrong salt")));
+    }
+
+    /// Fuzz: no other plaintext/salt pair passes the dispute check.
+    function testFuzz_CommitmentCannotBeForged(bytes calldata plaintext, bytes32 salt) public {
+        vm.assume(keccak256(plaintext) != keccak256(PLAINTEXT) || salt != SALT);
+        _register(alice, "alice");
+        uint256 sid = _submitAndForward(alice, "12345678");
+        assertFalse(vault.verifyForwardCommitment(sid, plaintext, salt));
     }
 
     function test_CannotMintBeforeCollectorCryptHasIt() public {
@@ -292,7 +347,7 @@ contract PokechainTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(SlabVault.WrongSubmissionStatus.selector, sid, SlabVault.SubmissionStatus.Pending)
         );
-        vault.markForwarded(sid, "SingPost", "SP123");
+        vault.markForwarded(sid, CIPHERTEXT, keccak256(abi.encodePacked(SALT, PLAINTEXT)));
     }
 
     function test_RejectAtAnyOpenStage() public {

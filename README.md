@@ -34,9 +34,43 @@ npm run dev       # terminal 2: the app
 
 Then open http://localhost:3000, click **Sign up**, **Connect wallet**, pick **Hardhat test
 collector #1** (no MetaMask needed), choose a handle and **Open account**.
-`npm run contracts:test` runs the Solidity tests. `docs/postman/` has the Postman collection that
-plays Pokechain's warehouse, Collector Crypt and the carrier. The dev server needs internet access to
-fetch card images. (`./dev.sh` is a macOS helper that pins Homebrew's Node; you don't need it.)
+`docs/postman/` has the Postman collection that plays Pokechain's warehouse, Collector Crypt and the
+carrier. The dev server needs internet access to fetch card images. (`./dev.sh` is a macOS helper that
+pins Homebrew's Node; you don't need it.)
+
+Tests:
+
+```bash
+npm run contracts:test
+```
+```bash
+npm run test:unit
+```
+```bash
+npm run test:smoke
+```
+
+`contracts:test` runs the Solidity unit and fuzz tests; `test:unit` checks the encryption round-trip;
+`test:smoke` clicks through each role in Chrome (it starts the chain and the app if they aren't running,
+and resets the demo first).
+
+### Who uses it
+
+| Role | Sees | Can do |
+| --- | --- | --- |
+| **Collector** (wallet account) | Home, Marketplace, Vault, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos, transfer to another collector, withdraw a slab, report it lost, trace it |
+| **Pokechain operator** (server key, simulated warehouse) | The submission tracker buttons, Postman | Receive a slab, forward it to Collector Crypt (encrypted), mint, ship redemptions |
+| **Collector Crypt** (simulated custodian) | **/collector-crypt** | Publish its encryption key, read incoming parcels by decrypting them, vault slabs (Postman) |
+| **Anyone** | **/trace/[tokenId]**, the chain itself | Verify a slab's history, evidence and custody without trusting Pokechain |
+
+### Real vs simulated
+
+**Real:** the Solidity contracts on a real EVM chain (local Hardhat, or Polygon Amoy), wallet
+signatures, EIP-2612 permits, every on-chain read and event, the keccak256 evidence and commitments,
+and the X25519 + XChaCha20-Poly1305 encryption.
+**Simulated (labelled in the UI):** Collector Crypt's API and Solana NFTs (mock routes with the real
+Solana DAS request shapes), the carrier, Pokechain's warehouse actions (the operator buttons), and the
+Hardhat test wallets that stand in for MetaMask locally.
 
 ### Can't sign up or log in?
 

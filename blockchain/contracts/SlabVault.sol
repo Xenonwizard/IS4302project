@@ -23,8 +23,9 @@ interface IAccountStatus {
  *                           of their intake evidence (photos + condition report) and the
  *                           tracking number of the parcel they ship to Pokechain. Pending.
  *   2. `markReceived`       Pokechain's warehouse has it. Submission: ReceivedByPokechain.
- *   3. `markForwarded`      Pokechain ships it on to CC (carrier + tracking recorded).
- *                           Submission: AtCustodian.
+ *   3. `markForwarded`      Pokechain ships it on to CC. The parcel details (carrier, tracking)
+ *                           go on-chain only as ciphertext encrypted to CC's published key,
+ *                           plus a salted commitment for disputes. Submission: AtCustodian.
  *   4. `mintSlab`           CC vaulted it and minted its Solana NFT to Pokechain's escrow; the
  *                           operator checked that NFT (DAS getAsset) and mints this token to the
  *                           collector, storing CC's asset id. Custody: Vaulted.
@@ -103,9 +104,9 @@ contract SlabVault is ERC721, AccessControl {
         /// Collector → Pokechain leg
         string inboundCarrier;
         string inboundTracking;
-        /// Pokechain → Collector Crypt leg
-        string forwardCarrier;
-        string forwardTracking;
+        /// Pokechain → Collector Crypt leg: keccak256(salt ‖ parcel details). The details
+        /// themselves only appear encrypted, in the SubmissionForwarded event.
+        bytes32 forwardCommitment;
         uint64 updatedAt;
     }
 
@@ -122,6 +123,12 @@ contract SlabVault is ERC721, AccessControl {
     /// @notice Slabs each address holds that are still physically in the vault.
     mapping(address => uint256) public vaultedCount;
 
+    /// @notice Public encryption keys (X25519, 32 bytes) that parties publish so others can send
+    ///         them data only they can read. Anyone can publish their own; nobody can set another's.
+    mapping(address => bytes32) public encryptionKey;
+    /// @notice The custodian's address (Collector Crypt). Forwarded parcel details are encrypted to its key.
+    address public custodian;
+
     event SubmissionRequested(
         uint256 indexed submissionId,
         address indexed owner,
@@ -132,7 +139,22 @@ contract SlabVault is ERC721, AccessControl {
         string inboundTracking
     );
     event SubmissionReceived(uint256 indexed submissionId, address indexed owner);
-    event SubmissionForwarded(uint256 indexed submissionId, address indexed owner, string carrier, string trackingNumber);
+    /**
+     * @param recipient who the details are encrypted for (the custodian)
+     * @param recipientKey the exact public key used, so key rotation stays traceable
+     * @param commitment keccak256(salt ‖ plaintext), checkable with verifyForwardCommitment
+     * @param ciphertext the parcel details, readable only with the recipient's private key
+     */
+    event SubmissionForwarded(
+        uint256 indexed submissionId,
+        address indexed owner,
+        address indexed recipient,
+        bytes32 recipientKey,
+        bytes32 commitment,
+        bytes ciphertext
+    );
+    event EncryptionKeySet(address indexed account, bytes32 key);
+    event CustodianSet(address indexed custodian);
     event SubmissionRejected(uint256 indexed submissionId, address indexed owner, string reason);
     event SlabMinted(
         uint256 indexed tokenId, uint256 indexed submissionId, address indexed owner, string certNumber, string custodianRef
@@ -155,6 +177,7 @@ contract SlabVault is ERC721, AccessControl {
     error SlabLocked(uint256 tokenId, Custody current);
     error SelfTransfer(uint256 tokenId);
     error EmptyField();
+    error NoEncryptionKey(address account);
     error MissingEvidence();
 
     constructor(IAccountStatus accounts_, address operator) ERC721("Pokechain Slab", "SLAB") {
@@ -211,17 +234,53 @@ contract SlabVault is ERC721, AccessControl {
         emit SubmissionReceived(submissionId, s.owner);
     }
 
-    /// @notice Step 3: Pokechain ships the slab on to Collector Crypt's vault.
-    function markForwarded(uint256 submissionId, string calldata carrier, string calldata trackingNumber)
+    /* --------------------------- encrypted messaging --------------------------- */
+
+    /// @notice Publishes the caller's public encryption key (X25519). Calling again rotates it.
+    function setEncryptionKey(bytes32 key) external {
+        if (key == bytes32(0)) revert EmptyField();
+        encryptionKey[msg.sender] = key;
+        emit EncryptionKeySet(msg.sender, key);
+    }
+
+    /// @notice Names the custodian (Collector Crypt) whose key forwarded parcel details are encrypted to.
+    function setCustodian(address custodian_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        custodian = custodian_;
+        emit CustodianSet(custodian_);
+    }
+
+    /**
+     * @notice Step 3: Pokechain ships the slab on to Collector Crypt's vault and tells CC which
+     *         parcel to expect, privately.
+     * @param ciphertext carrier, tracking number and submission details, encrypted off-chain to
+     *        encryptionKey[custodian]. Everyone can see it; only Collector Crypt can read it.
+     * @param commitment keccak256(salt ‖ plaintext) with the salt kept by Pokechain, so in a
+     *        dispute the plaintext can be revealed and checked against this value on-chain.
+     */
+    function markForwarded(uint256 submissionId, bytes calldata ciphertext, bytes32 commitment)
         external
         onlyRole(OPERATOR_ROLE)
     {
-        if (bytes(trackingNumber).length == 0) revert EmptyField();
+        bytes32 key = encryptionKey[custodian];
+        if (custodian == address(0) || key == bytes32(0)) revert NoEncryptionKey(custodian);
+        if (ciphertext.length == 0 || commitment == bytes32(0)) revert EmptyField();
         Submission storage s =
             _moveSubmission(submissionId, SubmissionStatus.ReceivedByPokechain, SubmissionStatus.AtCustodian);
-        s.forwardCarrier = carrier;
-        s.forwardTracking = trackingNumber;
-        emit SubmissionForwarded(submissionId, s.owner, carrier, trackingNumber);
+        s.forwardCommitment = commitment;
+        emit SubmissionForwarded(submissionId, s.owner, custodian, key, commitment, ciphertext);
+    }
+
+    /**
+     * @notice Dispute check: does this plaintext (and the salt Pokechain kept) match what was
+     *         committed when the slab was forwarded? Neither side can change its story later.
+     */
+    function verifyForwardCommitment(uint256 submissionId, bytes calldata plaintext, bytes32 salt)
+        external
+        view
+        returns (bool)
+    {
+        bytes32 c = _submissions[submissionId].forwardCommitment;
+        return c != bytes32(0) && keccak256(abi.encodePacked(salt, plaintext)) == c;
     }
 
     /**

@@ -103,7 +103,9 @@ operator can resolve Lost back to `Delivered` or `Vaulted`).
 | --- | --- | --- | --- |
 | `requestSubmission(grader, cert, declaredValueCents, evidenceHash, inboundCarrier, inboundTracking)` | wallet | New **Pending** submission (no token yet), with the declared value, the fingerprint of the intake photos and declarations, and the parcel's tracking number. One physical cert can only be tokenised once | `SubmissionRequested` · `AccountNotActive`, `CertAlreadyTokenised`, `CertAlreadyPending`, `MissingEvidence` |
 | `markReceived(submissionId)` | operator | Pending → **ReceivedByPokechain** | `SubmissionReceived` · `WrongSubmissionStatus` |
-| `markForwarded(submissionId, carrier, tracking)` | operator | → **AtCustodian**; records the Pokechain → Collector Crypt parcel | `SubmissionForwarded` |
+| `markForwarded(submissionId, ciphertext, commitment)` | operator | → **AtCustodian**; the parcel details go on-chain only encrypted to the custodian's published key, plus a salted commitment | `SubmissionForwarded` · `NoEncryptionKey` |
+| `setEncryptionKey(key)` / `setCustodian(address)` | anyone / admin | Publish your X25519 public key; name the custodian (Collector Crypt) | `EncryptionKeySet`, `CustodianSet` |
+| `verifyForwardCommitment(id, message, salt)` | view | Dispute check: true only for exactly what was committed at forwarding | |
 | `mintSlab(submissionId, title, image, custodianRef)` | operator | Only from AtCustodian. Mints the token to the submitter, custody **Vaulted**, stores **CC's Solana asset id** and carries over the declared value and `evidenceHash` | `SlabMinted` |
 | `rejectSubmission(id, reason)` | operator | Any open stage → Rejected (e.g. no such cert, damaged slab) | `SubmissionRejected` |
 | `safeTransferFrom(from, to, tokenId)` | owner | **A → B**: the title changes hands. CC's NFT doesn't move | `Transfer` · `SlabLocked`, `AccountNotActive` |
@@ -224,7 +226,7 @@ sequenceDiagram
   A->>SV: requestSubmission("PSA", "72862688", 263400, evidenceHash, "SingPost", "RR…SG")
   Note over A: ships the slab to Pokechain
   O->>SV: markReceived(1)        (cert + evidence hash checked; else rejectSubmission)
-  O->>SV: markForwarded(1, "SingPost", "RR…SG")
+  O->>SV: markForwarded(1, ciphertext, commitment)   (details encrypted to CC's on-chain key)
   CC->>CC: POST /intake → vaults it, mints NFT to Pokechain escrow
   Note over A: page polls CC's card lookup
   O->>CC: GET /cards/PSA/72862688 → assetId
@@ -240,6 +242,32 @@ no code change: the Solana call is standard DAS `getAsset` JSON-RPC.
 
 The Polygon token stores CC's asset id, and CC's NFT names the cert. **Each chain points at the
 other**, so either side can be audited from the other.
+
+### Sending private data through the chain: the encrypted forward
+
+Collector Crypt needs to know which parcel to expect (carrier, tracking number, which slab), but
+tracking numbers shouldn't be public. So the details travel **through the contract, encrypted**:
+
+1. **Keys on-chain.** Collector Crypt publishes an X25519 public key with
+   `SlabVault.setEncryptionKey(key)`; its private key stays on its server. The admin names it the
+   custodian with `setCustodian(address)` (deployment parameter, `ignition/parameters/local.json`).
+2. **Encrypt to the on-chain key.** Pokechain reads `encryptionKey(custodian)` and seals the
+   details to it: a one-time X25519 key exchange, HKDF-SHA256, then XChaCha20-Poly1305
+   (`src/lib/sealed/envelope.ts`, using the audited `@noble` libraries).
+3. **Post ciphertext + commitment.** `markForwarded(id, ciphertext, commitment)` stores
+   `commitment = keccak256(salt ‖ message)` and emits `SubmissionForwarded(id, owner, recipient,
+   recipientKey, commitment, ciphertext)`. It reverts with `NoEncryptionKey` if the custodian has no
+   key. **No plaintext goes on-chain**; Pokechain keeps the message and salt off-chain.
+4. **Collector Crypt reads its inbox.** It filters `SubmissionForwarded` on its own address (an
+   indexed topic) and decrypts each one with its private key. **/collector-crypt** shows both sides
+   next to each other: the ciphertext anyone can read, and the decrypted details only CC can read.
+   The transaction's sender (Pokechain's operator) proves who sent it and when.
+5. **Disputes are settled by the contract.** Pokechain reveals the message and salt;
+   `verifyForwardCommitment(id, message, salt)` returns true only for exactly what was committed
+   (fuzz-tested: no other message/salt passes).
+
+The same pattern works for any leg (e.g. tracking for a redemption encrypted to the buyer's key),
+and calling `setEncryptionKey` again rotates a key; each event records which key it used.
 
 ### Ownership change: A → B
 
@@ -389,7 +417,7 @@ Requirements: Node.js 22.13+ (Hardhat 3 needs it), and optionally MetaMask. Work
 
 ```bash
 npm run setup          # installs the app and blockchain/ dependencies
-npm run contracts:test # 31 Solidity unit + fuzz tests
+npm run contracts:test # 36 Solidity unit + fuzz tests
 npm run chain          # terminal 1: local chain + deploy + ABI export (leave running)
 npm run dev            # terminal 2: the app on http://localhost:3000
 ```
@@ -437,7 +465,7 @@ blockchain/
   contracts/AccountRegistry.sol   account onboarding / offboarding, USDC custody
   contracts/SlabVault.sol         ERC-721 slab tokens, custody state machine
   contracts/MockUSDC.sol          test USDC with EIP-2612 permit
-  test/Pokechain.t.sol            31 unit + fuzz tests
+  test/Pokechain.t.sol            36 unit + fuzz tests
   ignition/modules/Pokechain.ts   deployment + wiring
   scripts/dev-chain.mjs           npm run chain
   scripts/export-frontend.mjs     ABIs + addresses → src/lib/chain/generated.ts

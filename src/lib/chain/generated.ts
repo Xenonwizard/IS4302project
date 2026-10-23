@@ -1273,6 +1273,17 @@ export const slabVaultAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "NoEncryptionKey",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "tokenId",
         "type": "uint256"
@@ -1415,6 +1426,38 @@ export const slabVaultAbi = [
       }
     ],
     "name": "ApprovalForAll",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "custodian",
+        "type": "address"
+      }
+    ],
+    "name": "CustodianSet",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "key",
+        "type": "bytes32"
+      }
+    ],
+    "name": "EncryptionKeySet",
     "type": "event"
   },
   {
@@ -1682,16 +1725,28 @@ export const slabVaultAbi = [
         "type": "address"
       },
       {
-        "indexed": false,
-        "internalType": "string",
-        "name": "carrier",
-        "type": "string"
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
       },
       {
         "indexed": false,
-        "internalType": "string",
-        "name": "trackingNumber",
-        "type": "string"
+        "internalType": "bytes32",
+        "name": "recipientKey",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes",
+        "name": "ciphertext",
+        "type": "bytes"
       }
     ],
     "name": "SubmissionForwarded",
@@ -1929,6 +1984,38 @@ export const slabVaultAbi = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "custodian",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "encryptionKey",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -2040,14 +2127,14 @@ export const slabVaultAbi = [
         "type": "uint256"
       },
       {
-        "internalType": "string",
-        "name": "carrier",
-        "type": "string"
+        "internalType": "bytes",
+        "name": "ciphertext",
+        "type": "bytes"
       },
       {
-        "internalType": "string",
-        "name": "trackingNumber",
-        "type": "string"
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
       }
     ],
     "name": "markForwarded",
@@ -2431,6 +2518,32 @@ export const slabVaultAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "custodian_",
+        "type": "address"
+      }
+    ],
+    "name": "setCustodian",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "key",
+        "type": "bytes32"
+      }
+    ],
+    "name": "setEncryptionKey",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "tokenId",
         "type": "uint256"
@@ -2582,14 +2695,9 @@ export const slabVaultAbi = [
             "type": "string"
           },
           {
-            "internalType": "string",
-            "name": "forwardCarrier",
-            "type": "string"
-          },
-          {
-            "internalType": "string",
-            "name": "forwardTracking",
-            "type": "string"
+            "internalType": "bytes32",
+            "name": "forwardCommitment",
+            "type": "bytes32"
           },
           {
             "internalType": "uint64",
@@ -2712,6 +2820,35 @@ export const slabVaultAbi = [
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "submissionId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "plaintext",
+        "type": "bytes"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "salt",
+        "type": "bytes32"
+      }
+    ],
+    "name": "verifyForwardCommitment",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",

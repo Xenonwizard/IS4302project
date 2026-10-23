@@ -55,11 +55,11 @@ export async function verifyCustody(origin: string, grader: string, cert: string
   const checks: CheckStep[] = [];
   const call = `Collector Crypt GET /cards/${grader}/${cert}`;
   const res = await fetch(`${ccUrl(origin)}/cards/${encodeURIComponent(grader)}/${encodeURIComponent(cert)}`, { cache: "no-store" });
-  if (res.status === 404) {
+  const card = (await res.json()) as { found: boolean; solana?: { assetId: string } };
+  if (!card.found || !card.solana) {
     checks.push({ call, ok: false, detail: "Not vaulted at Collector Crypt yet" });
     return { status: "awaiting_custodian", checks };
   }
-  const card = (await res.json()) as { solana: { assetId: string } };
   const assetId = card.solana.assetId;
   checks.push({ call, ok: true, detail: `Vaulted, Solana NFT ${assetId}` });
 

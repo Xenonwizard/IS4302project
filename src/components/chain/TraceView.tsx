@@ -154,7 +154,7 @@ export function TraceView({ tokenId }: { tokenId: string }) {
                 <p className="text-[12px] text-bad">No Solana asset {shortHash(data.custodianRef)} found.</p>
               )}
             </RefCard>
-            <RefCard source="Collector Crypt" title="Shipment (outbound)">
+            <RefCard source="Collector Crypt" title="Shipment (outbound)" link={{ href: "/collector-crypt", label: "Inbox (simulated) →" }}>
               {data.custodian.redemption ? (
                 <>
                   <Line label="Redemption" value={data.custodian.redemption.id} />
@@ -232,10 +232,27 @@ export function TraceView({ tokenId }: { tokenId: string }) {
   );
 }
 
-function RefCard({ source, title, children }: { source: Source; title: string; children: React.ReactNode }) {
+function RefCard({
+  source,
+  title,
+  link,
+  children,
+}: {
+  source: Source;
+  title: string;
+  link?: { href: string; label: string };
+  children: React.ReactNode;
+}) {
   return (
     <section className="rounded-card border border-hairline bg-surface p-3.5">
-      <span className={clsx("rounded-md px-1.5 py-0.5 text-[10px] font-bold", SOURCE_STYLE[source])}>{source}</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className={clsx("rounded-md px-1.5 py-0.5 text-[10px] font-bold", SOURCE_STYLE[source])}>{source}</span>
+        {link ? (
+          <a href={link.href} className="text-[11px] font-semibold text-accent hover:underline">
+            {link.label}
+          </a>
+        ) : null}
+      </div>
       <p className="mt-2 text-[13px] font-bold">{title}</p>
       <dl className="mt-2 space-y-1">{children}</dl>
     </section>

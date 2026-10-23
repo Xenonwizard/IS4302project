@@ -56,6 +56,7 @@ for (let i = 0; i < 60 && !(await alive()); i++) await new Promise((r) => setTim
 rmSync(join(root, "ignition", "deployments", "chain-31337"), { recursive: true, force: true });
 rmSync(join(root, "..", ".data", "collector-crypt.json"), { force: true });
 rmSync(join(root, "..", ".data", "evidence"), { recursive: true, force: true });
+rmSync(join(root, "..", ".data", "pokechain-forward-records.json"), { force: true });
 const deploy = spawnSync("npm", ["run", "deploy:local"], { cwd: root, stdio: "inherit", shell });
 if (deploy.status !== 0) {
   console.error("Deploy failed; the node is still running.");

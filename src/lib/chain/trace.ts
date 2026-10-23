@@ -60,7 +60,10 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     push("SubmissionRequested", `#${l.args.submissionId} by ${short(l.args.owner!)}: ${l.args.grader} ${l.args.certNumber}, declared ${value}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
   }
   for (const l of received) push("SubmissionReceived", `Pokechain's warehouse received submission #${l.args.submissionId}`, l);
-  for (const l of forwarded) push("SubmissionForwarded", `Forwarded to Collector Crypt: ${l.args.carrier} ${l.args.trackingNumber}`, l);
+  for (const l of forwarded) {
+    const bytes = (l.args.ciphertext!.length - 2) / 2;
+    push("SubmissionForwarded", `Forwarded to Collector Crypt; parcel details encrypted to its key (${bytes} bytes of ciphertext, commitment ${short(l.args.commitment!)})`, l);
+  }
   if (minted) push("SlabMinted", `Token #${tokenId} to ${short(minted.args.owner!)}; CC NFT ${minted.args.custodianRef}`, minted);
   for (const l of transfers) {
     if (l.args.from === zeroAddress) continue; // the mint, already listed
@@ -111,7 +114,7 @@ export async function traceSlab(origin: string, tokenId: bigint) {
       ? {
           id: submissionId!.toString(),
           status: SUBMISSION_STATUS[submission.status],
-          forwardTracking: submission.forwardTracking,
+          forwardCommitment: submission.forwardCommitment,
           inboundCarrier: submission.inboundCarrier,
           inboundTracking: submission.inboundTracking,
         }

@@ -177,7 +177,59 @@
                 "forward"
               ]
             },
-            "description": "Operator tx: SlabVault.markForwarded(submissionId, carrier, tracking). This records the Pokechain → CC parcel.",
+            "description": "Operator tx: SlabVault.markForwarded(submissionId, ciphertext, commitment). The parcel details are encrypted to Collector Crypt's public key (read from SlabVault.encryptionKey(custodian)); only the ciphertext and keccak256(salt ‖ message) go on-chain. The response shows Pokechain's own copy of the tracking number.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2a · Collector Crypt inbox: decrypt incoming parcels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/inbox",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "inbox"
+              ]
+            },
+            "description": "Simulated Collector Crypt: reads every SubmissionForwarded event addressed to its wallet and decrypts it with its private key. Compare each item's ciphertext (what anyone sees on-chain) with decrypted (what only CC sees)."
+          }
+        },
+        {
+          "name": "2b · Dispute check: verifyForwardCommitment on-chain",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/chain/dispute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chain",
+                "dispute"
+              ]
+            },
+            "description": "Pokechain reveals the message and salt it committed to; SlabVault.verifyForwardCommitment (an eth_call into the contract) returns verified: true only if they match the on-chain commitment.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",

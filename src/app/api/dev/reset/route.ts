@@ -50,6 +50,7 @@ export async function POST() {
     writeFileSync(SNAPSHOT_FILE, JSON.stringify({ snapshotId: next }));
     rmSync(join(DATA, "collector-crypt.json"), { force: true });
     rmSync(join(DATA, "evidence"), { recursive: true, force: true });
+    rmSync(join(DATA, "pokechain-forward-records.json"), { force: true });
     const block = await rpc<string>("eth_blockNumber");
     return Response.json({ reset: true, block: Number(block), snapshotId: next });
   } catch (e) {

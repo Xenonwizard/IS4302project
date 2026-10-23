@@ -1,6 +1,8 @@
 /**
  * Mock Collector Crypt card lookup: GET /api/collector-crypt/cards/PSA/12345678
- * 404 until CC has vaulted the slab; then its status and Solana NFT.
+ * { found: false } until CC has vaulted the slab; then its status and Solana NFT. "Not vaulted
+ * yet" is a normal answer while the app polls, so it isn't sent as a 404 (browsers log those
+ * as console errors).
  */
 import { SOLANA_CLUSTER, lookup } from "@/lib/collectorCrypt/store";
 
@@ -10,7 +12,6 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/collector-c
   if (!card) {
     return Response.json(
       { found: false, grader: grader.toUpperCase(), certNumber: cert, message: "Collector Crypt has not vaulted this slab." },
-      { status: 404 },
     );
   }
   return Response.json({

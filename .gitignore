@@ -41,5 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# mock Grade10 intake records (src/lib/grade10/registry.ts)
+# local demo data: mock Collector Crypt, intake evidence, forward records, chain snapshot
 /.data/
+
+# Playwright output
+/test-results/
+/playwright-report/
