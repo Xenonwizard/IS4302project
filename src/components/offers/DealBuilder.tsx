@@ -4,6 +4,7 @@ import clsx from "clsx";
 import Link from "next/link";
 import { ArrowLeftRight, Banknote, Check, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
@@ -29,12 +30,17 @@ export function DealBuilder({
   listing: Listing;
   presets: { label: string; value: number }[];
   submitLabel: (value: number) => React.ReactNode;
-  onSubmit: (bid: TradeBid) => boolean;
+  onSubmit: (bid: TradeBid, availableFunds?: number) => boolean;
 }) {
-  const { vault, balance, resolve, topUp } = useStore();
+  const { vault, balance, resolve, topUp, user } = useStore();
+  const acct = useOnchainAccount();
   const [kind, setKind] = useState<"cash" | "trade">("cash");
   const [target, setTarget] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+
+  const availableBalance = user?.address
+    ? Math.max(acct.walletUsdc + acct.custodyBalance, balance)
+    : balance;
 
   const mySlabs = useMemo(
     () =>
@@ -51,7 +57,7 @@ export function DealBuilder({
   const slabsValue = cents(slabs.reduce((sum, l) => sum + l.fmv, 0));
   const cash = kind === "cash" ? targetValue : cents(Math.max(0, targetValue - slabsValue));
   const total = cents(cash + slabsValue);
-  const after = cents(balance - cash);
+  const after = cents(availableBalance - cash);
   const short = after < 0;
   const topUpBy = Math.ceil(-after / 100) * 100;
   const needsSlab = kind === "trade" && slabs.length === 0;
@@ -59,7 +65,7 @@ export function DealBuilder({
 
   const submit = () => {
     if (blocked) return;
-    if (onSubmit({ cash, slabIds: slabs.map((l) => l.id) })) {
+    if (onSubmit({ cash, slabIds: slabs.map((l) => l.id) }, availableBalance)) {
       setTarget("");
       setPicked([]);
     }
@@ -198,13 +204,13 @@ export function DealBuilder({
           <Line
             label={
               <span className="flex items-center gap-1.5">
-                <Wallet size={13} /> Wallet balance
+                <Wallet size={13} /> {user?.address ? "USDC balance" : "Wallet balance"}
                 <Link href="/wallet" className="text-[11px] font-semibold text-accent hover:underline">
                   see history
                 </Link>
               </span>
             }
-            value={exact(balance)}
+            value={exact(availableBalance)}
           />
           <Line label="Cash you pay" value={`− ${exact(cash)}`} />
           <Line
@@ -220,11 +226,23 @@ export function DealBuilder({
         <div className="flex items-center justify-between gap-3 rounded-xl bg-warn/10 p-3">
           <p className="text-[12px] text-warn">
             Your wallet is {exact(-after)} short of the cash.{" "}
-            {kind === "trade" ? "Add more slabs, lower the value, or top up." : "Lower the offer or top up."}
+            {user?.address
+              ? "Lower the offer or get more USDC in your wallet."
+              : kind === "trade"
+              ? "Add more slabs, lower the value, or top up."
+              : "Lower the offer or top up."}
           </p>
-          <Button size="sm" variant="secondary" onClick={() => topUp(topUpBy)}>
-            Top up {usd(topUpBy)}
-          </Button>
+          {user?.address ? (
+            <Link href="/wallet">
+              <Button size="sm" variant="secondary">
+                Go to Wallet
+              </Button>
+            </Link>
+          ) : (
+            <Button size="sm" variant="secondary" onClick={() => topUp(topUpBy)}>
+              Top up {usd(topUpBy)}
+            </Button>
+          )}
         </div>
       ) : null}
 

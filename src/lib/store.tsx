@@ -145,6 +145,8 @@ interface StoreValue extends PersistShape {
   buyNow: (listingId: string, txHash?: string) => boolean;
   requestShipping: (id: string) => void;
   /* blockchain: account and slab onboarding / offboarding */
+  /** syncs connected on-chain USDC balance */
+  syncChainBalance: (balance: number) => void;
   /** mirrors an on-chain USDC deposit (+) or withdrawal (−) into the wallet history */
   recordChainCash: (amount: number, label: string, txHash: string) => void;
   /** a slab already in the vault has been minted on-chain */
@@ -164,7 +166,7 @@ interface StoreValue extends PersistShape {
   offboard: () => void;
   /* negotiations */
   /** sends an offer in the buyer's chat with the seller; returns the chat id */
-  makeOffer: (listingId: string, bid: TradeBid) => string | null;
+  makeOffer: (listingId: string, bid: TradeBid, availableFunds?: number) => string | null;
   sendMessage: (negotiationId: string, text: string) => void;
   /** seller side: accept or decline the buyer's pending offer */
   respondToOffer: (negotiationId: string, offerId: string, accept: boolean) => void;
@@ -248,6 +250,7 @@ function settleDeal(
   prev: PersistShape,
   negId: string,
   offerId: string,
+  availableFunds?: number,
 ): { next: PersistShape; error?: string } {
   const me = prev.user?.username;
   const n = prev.negotiations[negId];
@@ -262,7 +265,10 @@ function settleDeal(
   let ledger = prev.ledger;
 
   if (n.buyer === me) {
-    if (cash > ledgerBalance(prev.ledger)) {
+    const effectiveFunds = prev.user?.address
+      ? Math.max(availableFunds ?? 0, ledgerBalance(prev.ledger))
+      : ledgerBalance(prev.ledger);
+    if (cash > effectiveFunds) {
       return { next: prev, error: `Your wallet cannot cover the ${usd(cash, { cents: true })} cash.` };
     }
     const vaulted = (id: string) => prev.vault.some((v) => v.listingId === id && v.status === "Vaulted");
@@ -485,7 +491,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
-  const balance = useMemo(() => ledgerBalance(state.ledger), [state.ledger]);
+  const [chainBalance, setChainBalance] = useState<number>(0);
+  const syncChainBalance = useCallback((bal: number) => {
+    setChainBalance(bal);
+  }, []);
+
+  const balance = useMemo(() => {
+    if (state.user?.address) {
+      return cents(Math.max(chainBalance, ledgerBalance(state.ledger)));
+    }
+    return ledgerBalance(state.ledger);
+  }, [state.user?.address, chainBalance, state.ledger]);
 
   const login = useCallback(
     (username: string, email?: string, address?: string) => {
@@ -1093,11 +1109,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /* ---------------- negotiations ---------------- */
 
   const makeOffer = useCallback(
-    (listingId: string, bid: TradeBid): string | null => {
+    (listingId: string, bid: TradeBid, availableFunds?: number): string | null => {
       const user = state.user;
       const listing = current(state, listingId);
       if (!user || !listing) return null;
-      if (bid.cash > balance) {
+      const effective = availableFunds !== undefined ? availableFunds : balance;
+      if (bid.cash > effective) {
         pushToast({ title: "Not enough in your wallet", body: "Lower the cash part or top up first.", tone: "error" });
         return null;
       }
@@ -1143,18 +1160,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const me = snapshot.user?.username;
       if (!me) return;
       if (accept) {
-        const { error } = settleDeal(snapshot, negId, offerId);
+        const { error } = settleDeal(snapshot, negId, offerId, balance);
         if (error) {
           pushToast({ title: "Could not accept", body: error, tone: "error" });
           return;
         }
-        setState((prev) => settleDeal(prev, negId, offerId).next);
+        setState((prev) => settleDeal(prev, negId, offerId, balance).next);
         pushToast({ title: "Offer accepted", body: "See your Vault and Wallet for the update.", tone: "success" });
       } else {
         setState((prev) => markOffer(prev, negId, offerId, "declined", `${me} declined the offer.`, me));
       }
     },
-    [pushToast],
+    [pushToast, balance],
   );
 
   const withdrawOffer = useCallback((negId: string, offerId: string) => {
@@ -1330,6 +1347,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ...state,
     ready,
     balance,
+    syncChainBalance,
     login,
     logout,
     requireAuth,

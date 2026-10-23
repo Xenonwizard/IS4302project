@@ -14,15 +14,21 @@ const NO_WALLET_TIMEOUT_MS = 8000;
  * handle, and when the wallet disconnects (or switches to another address) it signs out.
  */
 export function ChainSessionSync() {
-  const { ready, user, login, logout } = useStore();
+  const { ready, user, login, logout, syncChainBalance } = useStore();
   const { status: connection } = useAccount();
-  const { address, isConnected, status, handle, loaded } = useOnchainAccount();
+  const { address, isConnected, status, handle, loaded, walletUsdc, custodyBalance } = useOnchainAccount();
   /** wagmi starts every page load "disconnected" until it reconnects, so only a real drop counts */
   const seenConnected = useRef(false);
   // Runs before the effect below (effects run in order), so a drop in this render is seen.
   useEffect(() => {
     if (isConnected) seenConnected.current = true;
   }, [isConnected]);
+
+  useEffect(() => {
+    if (isConnected && address && loaded) {
+      syncChainBalance(walletUsdc + custodyBalance);
+    }
+  }, [isConnected, address, loaded, walletUsdc, custodyBalance, syncChainBalance]);
 
   useEffect(() => {
     if (!ready || connection === "connecting" || connection === "reconnecting") return;
