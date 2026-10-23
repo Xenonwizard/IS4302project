@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { CheckCircle2, Route, Truck } from "lucide-react";
 import { useState } from "react";
-import { keccak256, toBytes } from "viem";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
@@ -35,8 +34,6 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ carrier: string; trackingNumber: string; redemptionRef: string } | null>(null);
   const [submitted, setSubmitted] = useState(false);
-
-  const hash = shipTo.trim() ? keccak256(toBytes(shipTo.trim())) : null;
 
   const tokenise = async () => {
     setBusy(true);
@@ -126,7 +123,7 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
         </>
       ) : (
         <>
-          <Field label="Ship to" hint="Only its keccak256 hash goes on-chain. The address itself goes to Collector Crypt, who ships it.">
+          <Field label="Ship to">
             <textarea
               className={`${inputClass} h-20 py-2.5`}
               value={shipTo}
@@ -134,21 +131,6 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
               placeholder={"Ash Ketchum\n1 Pallet Town Road, Kanto 000001"}
             />
           </Field>
-          {hash ? <p className="break-all font-mono text-[11px] text-dim">shippingHash = {hash}</p> : null}
-          <OnChainNote>
-            1. <Fn>SlabVault.requestRedemption(tokenId, shippingHash)</Fn> moves custody to{" "}
-            <b className="text-white">Redemption requested</b>. The token is <b className="text-white">locked</b>:{" "}
-            <Fn>_update</Fn> now refuses transfers, and it drops out of <Fn>vaultedCount</Fn>.
-            <br />
-            2. Pokechain&apos;s server checks the address hashes to your <Fn>shippingHash</Fn>. Then, as the
-            holder of Collector Crypt&apos;s NFT, it asks CC to ship there. CC freezes its NFT (not burned) and
-            returns a redemption id and tracking number. The operator records them with{" "}
-            <Fn>markShipped(tokenId, redemptionId, carrier, tracking)</Fn>.
-            <br />
-            Nothing is burned on either chain. If the parcel goes missing you can call <Fn>reportLost</Fn>. The
-            Trace page then lines up the Polygon trail, CC&apos;s tracking and the Solana NFT&apos;s history. The listing
-            comes off the marketplace and open offers are declined.
-          </OnChainNote>
           <Button className="w-full" size="lg" onClick={withdraw} disabled={busy || !shipTo.trim()}>
             <Truck size={16} />
             {busy ? "Working…" : "Withdraw and ship to me"}
