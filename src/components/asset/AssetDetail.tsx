@@ -54,8 +54,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     isWatched,
     toggleWatch,
     requireAuth,
-    comments,
-    addComment,
     pushToast,
     isListed,
     delist,
@@ -285,7 +283,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const [offerOpen, setOfferOpen] = useState(false);
   const [view, setView] = useState<"slab" | "front" | "back">("slab");
   const [spin, setSpin] = useState(false);
-  const [draft, setDraft] = useState("");
 
   const handleBuy = async () => {
     setBuyBusy(true);
@@ -326,8 +323,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     }
   };
 
-  const localComments = comments[listing.id] ?? [];
-  const allComments = [...localComments, ...listing.comments];
   const openChats = Object.values(negotiations).filter(
     (n) => n.listingId === listing.id && n.status === "open",
   ).length;
@@ -393,54 +388,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               </p>
             </div>
           </div>
-
-          {/* comments */}
-          <section className="mt-6">
-            <h2 className="mb-3 text-base font-bold">Comments</h2>
-            <div className="rounded-card border border-hairline bg-surface p-4">
-              <div className="flex gap-2">
-                <input
-                  className={inputClass}
-                  placeholder="Add a comment…"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                />
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    if (!draft.trim()) return;
-                    if (!requireAuth()) return;
-                    addComment(listing.id, draft.trim());
-                    setDraft("");
-                  }}
-                >
-                  Post
-                </Button>
-              </div>
-              {allComments.length ? (
-                <ul className="mt-4 space-y-4">
-                  {allComments.map((c) => (
-                    <li key={c.id} className="flex gap-3">
-                      <Avatar name={c.user} size={28} />
-                      <div className="min-w-0">
-                        <p className="text-[13px] font-semibold">
-                          {c.user}{" "}
-                          <span className="font-normal text-dim">
-                            · <TimeAgo value={c.at} />
-                          </span>
-                        </p>
-                        <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{c.text}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="py-8 text-center text-[13px] text-dim">
-                  No comments yet. Be the first to comment!
-                </p>
-              )}
-            </div>
-          </section>
 
           {/* activity */}
           <section className="mt-6">
