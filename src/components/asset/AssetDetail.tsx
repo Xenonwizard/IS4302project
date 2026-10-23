@@ -25,7 +25,11 @@ import { shortDate, truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
-import type { Grader, Listing } from "@/lib/types";
+import { DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
+import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ActivityEvent, Grader, Listing } from "@/lib/types";
+import { CopyText } from "../chain/ChainConsole";
 import { OfferModal } from "../modals/OfferModal";
 import { CardBack } from "../slab/CardBack";
 import { Slab, SlabStage } from "../slab/Slab";
@@ -64,6 +68,132 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
   const { buyCard, cancelListing } = useMarketChain();
   const acct = useOnchainAccount();
+  const client = usePublicClient();
+  const queryClient = useQueryClient();
+
+  const tokenIdBigInt = listing.tokenId ? BigInt(listing.tokenId) : null;
+  const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
+
+  const refreshActivity = () => {
+    if (listing.tokenId) {
+      void queryClient.invalidateQueries({ queryKey: ["token-activity", listing.tokenId] });
+    }
+  };
+
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardPurchased",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardListed",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
+  const { data: onChainEvents = [] } = useQuery({
+    queryKey: ["token-activity", listing.tokenId],
+    enabled: enabledOnChain,
+    refetchInterval: 5000,
+    queryFn: async (): Promise<ActivityEvent[]> => {
+      if (!client || tokenIdBigInt === null) return [];
+      try {
+        const [marketCode, vaultCode] = await Promise.all([
+          client.getBytecode({ address: contracts.slabMarket.address }).catch(() => null),
+          client.getBytecode({ address: contracts.slabVault.address }).catch(() => null),
+        ]);
+        if (!marketCode || marketCode === "0x" || !vaultCode || vaultCode === "0x") return [];
+
+        const from = { fromBlock: DEPLOY_BLOCK };
+        const [sales, listings] = await Promise.all([
+          client
+            .getContractEvents({
+              ...contracts.slabMarket,
+              eventName: "CardPurchased",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
+          client
+            .getContractEvents({
+              ...contracts.slabMarket,
+              eventName: "CardListed",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
+        ]);
+
+        const events: ActivityEvent[] = [];
+
+        for (const log of sales) {
+          const a = log.args as { tokenId?: bigint; seller?: string; buyer?: string; price?: bigint; fee?: bigint; settledAt?: bigint };
+          if (!a?.buyer) continue;
+          const [sellerAcct, buyerAcct] = await Promise.all([
+            a.seller
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.seller as `0x${string}`] }).catch(() => null)
+              : null,
+            a.buyer
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.buyer as `0x${string}`] }).catch(() => null)
+              : null,
+          ]);
+
+          const fromName = sellerAcct?.handle || shortHash(a.seller);
+          const toName = buyerAcct?.handle || shortHash(a.buyer);
+          const at = a.settledAt ? new Date(Number(a.settledAt) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Sale",
+            price: fromUsdcUnits(a.price ?? BigInt(0)),
+            from: fromName,
+            to: toName,
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
+        for (const log of listings) {
+          const a = log.args as { tokenId?: bigint; seller?: string; price?: bigint; listedAt?: bigint };
+          if (!a?.seller) continue;
+          const sellerAcct = await client
+            .readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.seller as `0x${string}`] })
+            .catch(() => null);
+          const fromName = sellerAcct?.handle || shortHash(a.seller);
+          const at = a.listedAt ? new Date(Number(a.listedAt) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Listed",
+            price: fromUsdcUnits(a.price ?? BigInt(0)),
+            from: fromName,
+            to: "Marketplace",
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
+        return events;
+      } catch {
+        return [];
+      }
+    },
+  });
+
+  const allActivity = useMemo(() => {
+    const combined = [...onChainEvents, ...(listing.activity ?? [])];
+    const seen = new Set<string>();
+    const deduped: ActivityEvent[] = [];
+    for (const item of combined) {
+      const key = `${item.kind}-${item.txHash}-${item.from}-${item.to}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(item);
+      }
+    }
+    return deduped.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  }, [onChainEvents, listing.activity]);
 
   const [buyOpen, setBuyOpen] = useState(false);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -82,6 +212,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
       }
       buyNow(listing.id, txHash);
       setBuyOpen(false);
+      refreshActivity();
     } catch (err) {
       pushToast({
         title: "Purchase failed",
@@ -231,7 +362,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <section className="mt-6">
             <h2 className="mb-3 text-base font-bold">Activity history</h2>
             <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-              {listing.activity.map((e, i) => (
+              {allActivity.map((e, i) => (
                 <li key={`${e.txHash}-${i}`} className="flex items-center gap-4 p-4">
                   <Badge tone={e.kind === "Mint" ? "accent" : e.kind === "Sale" ? "good" : "neutral"}>
                     {e.kind}
@@ -247,8 +378,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                     <TimeAgo value={e.at} />
                   </span>
                   <span className="hidden shrink-0 items-center gap-1 text-[12px] text-dim sm:flex">
-                    {truncMiddle(e.txHash, 6, 4)}
-                    <ExternalLink size={12} />
+                    <CopyText text={e.txHash} title={truncMiddle(e.txHash, 6, 4)} />
                   </span>
                 </li>
               ))}

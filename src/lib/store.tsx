@@ -24,8 +24,9 @@ import {
   systemMessage,
   type BotAction,
 } from "./negotiation";
-import { hashString } from "./rng";
+import { hashString, hexId } from "./rng";
 import type {
+  ActivityEvent,
   ChatMessage,
   Grader,
   LedgerEntry,
@@ -33,6 +34,7 @@ import type {
   LostItem,
   LostReport,
   Negotiation,
+  Sale,
   SlabToken,
   TradeBid,
   VaultItem,
@@ -69,6 +71,8 @@ export interface ListingOverride {
   owner?: string;
   soldTo?: string;
   delisted?: boolean;
+  activity?: ActivityEvent[];
+  sales?: Sale[];
 }
 
 interface PersistShape {
@@ -559,7 +563,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (listing: Listing): Listing => {
       const o = state.overrides[listing.id];
       if (!o) return listing;
-      return { ...listing, price: o.price ?? listing.price, owner: o.owner ?? listing.owner };
+      const combinedActivity = o.activity
+        ? [...o.activity, ...(listing.activity ?? []).filter((a) => !o.activity!.some((oa) => oa.txHash === a.txHash))]
+        : listing.activity;
+      const combinedSales = o.sales
+        ? [...o.sales, ...(listing.sales ?? [])]
+        : listing.sales;
+      return {
+        ...listing,
+        price: o.price ?? listing.price,
+        owner: o.owner ?? listing.owner,
+        activity: combinedActivity,
+        sales: combinedSales,
+      };
     },
     [state.overrides],
   );
@@ -735,12 +751,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         };
 
         const overrides = { ...prev.overrides };
+        const saleTx = txHash || `0x${hexId(hashString(now + listing.id), 20)}`;
+        const saleEvent: ActivityEvent = {
+          kind: "Sale",
+          price,
+          from: listing.owner,
+          to: me,
+          at: now,
+          txHash: saleTx,
+        };
+        const prevActivity = overrides[listing.id]?.activity ?? listing.activity ?? [];
+        const prevSales = overrides[listing.id]?.sales ?? listing.sales ?? [];
+
         overrides[listing.id] = {
           ...overrides[listing.id],
           owner: me,
           soldTo: me,
           delisted: true,
+          activity: [saleEvent, ...prevActivity.filter((e) => e.txHash !== saleTx)],
+          sales: [{ date: now, price }, ...prevSales],
         };
+
+        const updatedSlabs = prev.slabs.map((s) => {
+          if (s.id !== listing.id) return s;
+          return {
+            ...s,
+            owner: me,
+            ownerAddress: user.address ?? s.ownerAddress,
+            activity: [saleEvent, ...(s.activity ?? []).filter((e) => e.txHash !== saleTx)],
+            sales: [{ date: now, price }, ...(s.sales ?? [])],
+          };
+        });
 
         const negotiations = closeSellerChats(
           { ...prev, negotiations: prev.negotiations },
@@ -753,6 +794,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           negotiations,
           vault: [newVaultItem, ...vault.filter((v) => v.listingId !== listing.id)],
           ledger,
+          slabs: updatedSlabs,
           overrides,
         };
       });

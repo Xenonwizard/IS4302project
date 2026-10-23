@@ -79,7 +79,7 @@ export function ListForSaleForm({
       <div className="mt-3 flex items-start gap-2 rounded-xl bg-surface-2 p-3 text-[12px] text-muted">
         <Lock size={15} className="mt-0.5 shrink-0 text-accent" />
         <p>
-          Per Pokéchain Rule 5, listed slabs cannot simultaneously be pledged, redeemed, or transferred. Cancelling this listing releases the restriction.
+          Listed slabs cannot simultaneously be pledged, redeemed, or transferred. Cancelling this listing releases the restriction.
         </p>
       </div>
 
