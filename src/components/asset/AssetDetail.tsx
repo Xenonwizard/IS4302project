@@ -59,21 +59,30 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     delist,
     buyNow,
     negotiations,
+    slabs,
+    vault,
   } = useStore();
 
-  const listing = resolve(base);
-  const owned = isOwned(listing.id);
+  const baseResolved = resolve(base);
+  const resolvedTokenId =
+    baseResolved.tokenId ||
+    slabs.find((s) => s.id === baseResolved.id)?.tokenId ||
+    vault.find((v) => v.listingId === baseResolved.id)?.token?.tokenId;
+  const listing = useMemo(
+    () => ({ ...baseResolved, tokenId: resolvedTokenId || baseResolved.tokenId }),
+    [baseResolved, resolvedTokenId],
+  );
 
   const { buyCard, cancelListing } = useMarketChain();
   const acct = useOnchainAccount();
   const client = usePublicClient();
   const queryClient = useQueryClient();
 
-  const tokenIdBigInt = listing.tokenId ? BigInt(listing.tokenId) : null;
+  const tokenIdBigInt = resolvedTokenId ? BigInt(resolvedTokenId) : null;
   const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
 
   const { data: onChainMarketListing } = useQuery({
-    queryKey: ["token-market-listing", listing.tokenId],
+    queryKey: ["token-market-listing", resolvedTokenId],
     enabled: enabledOnChain,
     refetchInterval: 3000,
     queryFn: async () => {
@@ -96,6 +105,48 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     },
   });
 
+  const { data: onChainOwner } = useQuery({
+    queryKey: ["token-owner", resolvedTokenId],
+    enabled: enabledOnChain,
+    refetchInterval: 3000,
+    queryFn: async () => {
+      if (!client || tokenIdBigInt === null) return null;
+      try {
+        const ownerAddr = await client.readContract({
+          ...contracts.slabVault,
+          functionName: "ownerOf",
+          args: [tokenIdBigInt],
+        });
+        if (!ownerAddr || ownerAddr === zeroAddress) return null;
+        const ownerAcct = await client
+          .readContract({
+            ...contracts.accounts,
+            functionName: "accountOf",
+            args: [ownerAddr],
+          })
+          .catch(() => null);
+        return {
+          address: ownerAddr,
+          handle: ownerAcct?.handle || shortHash(ownerAddr),
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  const currentOwner = enabledOnChain && onChainOwner?.handle
+    ? onChainOwner.handle
+    : listing.owner;
+
+  const currentOwnerAddress = enabledOnChain && onChainOwner?.address
+    ? onChainOwner.address
+    : listing.ownerAddress;
+
+  const owned = enabledOnChain && onChainOwner && user?.address
+    ? onChainOwner.address.toLowerCase() === user.address.toLowerCase()
+    : isOwned(listing.id);
+
   const listed = enabledOnChain
     ? Boolean(onChainMarketListing)
     : isListed(listing.id);
@@ -104,10 +155,22 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ? onChainMarketListing.price
     : (listed || !owned ? listing.price : listing.fmv);
 
+  const effectiveListing = useMemo(
+    () => ({
+      ...listing,
+      owner: currentOwner,
+      ownerAddress: currentOwnerAddress,
+      price: displayPrice,
+    }),
+    [listing, currentOwner, currentOwnerAddress, displayPrice],
+  );
+
   const refreshActivity = () => {
-    if (listing.tokenId) {
-      void queryClient.invalidateQueries({ queryKey: ["token-activity", listing.tokenId] });
-      void queryClient.invalidateQueries({ queryKey: ["token-market-listing", listing.tokenId] });
+    if (resolvedTokenId) {
+      void queryClient.invalidateQueries({ queryKey: ["token-activity", resolvedTokenId] });
+      void queryClient.invalidateQueries({ queryKey: ["token-market-listing", resolvedTokenId] });
+      void queryClient.invalidateQueries({ queryKey: ["token-owner", resolvedTokenId] });
+      void queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
     }
   };
 
@@ -497,11 +560,11 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             <span className="flex items-center gap-2 text-muted">
               Owned by
               <Link
-                href={`/profile/${listing.owner}`}
+                href={`/profile/${currentOwner}`}
                 className="flex items-center gap-1.5 font-semibold text-accent hover:underline"
               >
-                <Avatar name={listing.owner} size={18} />
-                {listing.owner}
+                <Avatar name={currentOwner} size={18} />
+                {currentOwner}
               </Link>
             </span>
           </div>
@@ -659,7 +722,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           </section>
 
           <PriceHistory listing={listing} />
-          <Details listing={listing} />
+          <Details listing={effectiveListing} />
         </div>
       </div>
 
@@ -675,7 +738,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <p className="mt-1 text-[12px] text-muted">
                 {listing.grader} Cert #{listing.certNumber}
               </p>
-              <p className="mt-1 text-[12px] text-muted">Seller: @{listing.owner}</p>
+              <p className="mt-1 text-[12px] text-muted">Seller: @{currentOwner}</p>
             </div>
           </div>
 
@@ -736,7 +799,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
         </div>
       </Modal>
 
-      <OfferModal listing={listing} open={offerOpen} onClose={() => setOfferOpen(false)} />
+      <OfferModal listing={effectiveListing} open={offerOpen} onClose={() => setOfferOpen(false)} />
     </div>
   );
 }

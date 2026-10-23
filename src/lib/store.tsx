@@ -70,6 +70,8 @@ export interface Toast {
 export interface ListingOverride {
   price?: number;
   owner?: string;
+  ownerAddress?: string;
+  listedAt?: string;
   soldTo?: string;
   delisted?: boolean;
   activity?: ActivityEvent[];
@@ -528,7 +530,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const id = ++toastSeq.current;
     setToasts((prev) => {
       const filtered = prev.filter((p) => p.title !== t.title || p.body !== t.body);
-      return [...filtered.slice(-3), { ...t, id }];
+      return [...filtered.slice(-2), { ...t, id }];
     });
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((x) => x.id !== id));
@@ -639,6 +641,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ...listing,
         price: o.price ?? listing.price,
         owner: o.owner ?? listing.owner,
+        ownerAddress: o.ownerAddress ?? listing.ownerAddress,
+        listedAt: o.listedAt ?? listing.listedAt,
         activity: combinedActivity,
         sales: combinedSales,
       };
@@ -655,12 +659,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (id: string) => {
       const o = state.overrides[id];
       if (o?.delisted !== undefined) return !o.delisted;
+      const slab = state.slabs.find((s) => s.id === id);
+      if (slab?.tokenId) {
+        const matchingSlabListed = state.slabs.some(
+          (s) => s.tokenId === slab.tokenId && state.overrides[s.id]?.delisted === false,
+        );
+        if (matchingSlabListed) return true;
+      }
       // Submitted and tokenized slabs are unlisted by default unless explicitly listed
       if (id.startsWith("sub-") || id.startsWith("token-")) return false;
       // Catalog demo cards are listed by default
       return true;
     },
-    [state.overrides],
+    [state.overrides, state.slabs],
   );
 
   const toggleWatch = useCallback((id: string) => {
@@ -728,9 +739,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const listFromVault = useCallback(
     (id: string, price: number) => {
+      const now = new Date().toISOString();
       setState((prev) => ({
         ...prev,
-        overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], price, delisted: false } },
+        overrides: {
+          ...prev.overrides,
+          [id]: {
+            ...prev.overrides[id],
+            price,
+            delisted: false,
+            listedAt: now,
+          },
+        },
         vault: prev.vault.map((v) =>
           v.listingId === id ? { ...v, status: "Listed", listedPrice: price } : v,
         ),
@@ -1016,8 +1036,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             const o = ownedMap.get(v.token.tokenId)!;
             if (o.isListed) {
               newOverrides[v.listingId] = { ...newOverrides[v.listingId], price: o.listedPrice, delisted: false };
-            } else if (v.status !== "Listed") {
-              newOverrides[v.listingId] = { ...newOverrides[v.listingId], delisted: true };
             }
           }
         }
@@ -1056,15 +1074,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             owner: a.seller || newOverrides[a.listing.id]?.owner,
             delisted: false,
           };
+          if (a.listing.tokenId) {
+            for (const s of prev.slabs) {
+              if (s.tokenId === a.listing.tokenId) {
+                newOverrides[s.id] = {
+                  ...newOverrides[s.id],
+                  price: a.price,
+                  owner: a.seller || newOverrides[s.id]?.owner,
+                  delisted: false,
+                };
+              }
+            }
+          }
         }
 
         // Delist any on-chain tokens that were previously listed but are no longer active
-        for (const s of prev.slabs) {
-          if (s.tokenId && !activeTokenIds.has(s.tokenId) && !activeIds.has(s.id)) {
-            newOverrides[s.id] = {
-              ...newOverrides[s.id],
-              delisted: true,
-            };
+        if (activeListings.length > 0) {
+          for (const s of prev.slabs) {
+            if (s.tokenId && !activeTokenIds.has(s.tokenId) && !activeIds.has(s.id)) {
+              newOverrides[s.id] = {
+                ...newOverrides[s.id],
+                delisted: true,
+              };
+            }
           }
         }
 
@@ -1346,7 +1378,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               const offerAmount = acceptedOffer?.offer?.cash ?? 0;
               const soldAt = lastMsg?.at || new Date().toISOString();
               const existingOverrides = newOverrides[incoming.listingId] || {};
-              if (existingOverrides.owner !== incoming.buyer || !existingOverrides.delisted) {
+              // Only apply when ownership hasn't transferred to the buyer yet.
+              // Once the buyer owns the slab and may have listed it, do not force delisting.
+              if (existingOverrides.owner !== incoming.buyer) {
                 const baseListing = getListing(incoming.listingId) || prev.slabs.find((s) => s.id === incoming.listingId);
                 const existingActivity = existingOverrides.activity || baseListing?.activity || [];
                 const alreadyHasSale = existingActivity.some(
@@ -1667,9 +1701,18 @@ export function useStore(): StoreValue {
 
 /** Marketplace inventory = catalog plus submitted slabs, minus anything off the market. */
 export function useMarketInventory(): Listing[] {
-  const { overrides, resolve, slabs } = useStore();
-  return useMemo(
-    () => [...slabs, ...LISTINGS].filter((l) => !overrides[l.id]?.delisted).map(resolve),
-    [slabs, overrides, resolve],
-  );
+  const { isListed, resolve, slabs } = useStore();
+  return useMemo(() => {
+    const map = new Map<string, Listing>();
+    for (const l of [...slabs, ...LISTINGS]) {
+      if (isListed(l.id)) {
+        const item = resolve(l);
+        const key = item.tokenId ? `token-${item.tokenId}` : item.id;
+        if (!map.has(key) || l.tokenId) {
+          map.set(key, item);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [slabs, isListed, resolve]);
 }

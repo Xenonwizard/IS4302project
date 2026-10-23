@@ -32,6 +32,7 @@ export function ChainMarketSync() {
     queryKey: ["market-active-listings"],
     enabled,
     refetchInterval: 5000,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client) return [];
       try {

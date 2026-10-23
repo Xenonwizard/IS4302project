@@ -37,6 +37,7 @@ export function useMarketChain() {
       });
       await queryClient.invalidateQueries({ queryKey: ["market-listing", tokenId] });
       await queryClient.invalidateQueries({ queryKey: ["owned-slabs", address] });
+      await queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
       return receipt.transactionHash;
     },
     [send, address, queryClient],
@@ -52,6 +53,7 @@ export function useMarketChain() {
       });
       await queryClient.invalidateQueries({ queryKey: ["market-listing", tokenId] });
       await queryClient.invalidateQueries({ queryKey: ["owned-slabs", address] });
+      await queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
       return receipt.transactionHash;
     },
     [send, address, queryClient],
@@ -89,6 +91,7 @@ export function useMarketChain() {
       await queryClient.invalidateQueries({ queryKey: ["market-listing", tokenId] });
       await queryClient.invalidateQueries({ queryKey: ["owned-slabs", address] });
       await queryClient.invalidateQueries({ queryKey: ["market-sales", tokenId] });
+      await queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
       return receipt.transactionHash;
     },
     [send, address, client, queryClient],
