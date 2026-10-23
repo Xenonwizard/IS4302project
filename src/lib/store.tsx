@@ -652,7 +652,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const isListed = useCallback(
-    (id: string) => !state.overrides[id]?.delisted,
+    (id: string) => {
+      const o = state.overrides[id];
+      if (o?.delisted !== undefined) return !o.delisted;
+      // Submitted and tokenized slabs are unlisted by default unless explicitly listed
+      if (id.startsWith("sub-") || id.startsWith("token-")) return false;
+      // Catalog demo cards are listed by default
+      return true;
+    },
     [state.overrides],
   );
 

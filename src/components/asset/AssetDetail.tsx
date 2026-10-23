@@ -63,7 +63,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
   const listing = resolve(base);
   const owned = isOwned(listing.id);
-  const listed = isListed(listing.id);
 
   const { buyCard, cancelListing } = useMarketChain();
   const acct = useOnchainAccount();
@@ -73,9 +72,42 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const tokenIdBigInt = listing.tokenId ? BigInt(listing.tokenId) : null;
   const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
 
+  const { data: onChainMarketListing } = useQuery({
+    queryKey: ["token-market-listing", listing.tokenId],
+    enabled: enabledOnChain,
+    refetchInterval: 3000,
+    queryFn: async () => {
+      if (!client || tokenIdBigInt === null) return null;
+      try {
+        const l = await client.readContract({
+          ...contracts.slabMarket,
+          functionName: "getListing",
+          args: [tokenIdBigInt],
+        });
+        if (!l || l.seller === zeroAddress || l.price === BigInt(0)) return null;
+        return {
+          seller: l.seller,
+          price: fromUsdcUnits(l.price),
+          listedAt: Number(l.listedAt),
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  const listed = enabledOnChain
+    ? Boolean(onChainMarketListing)
+    : isListed(listing.id);
+
+  const displayPrice = enabledOnChain && onChainMarketListing
+    ? onChainMarketListing.price
+    : (listed || !owned ? listing.price : listing.fmv);
+
   const refreshActivity = () => {
     if (listing.tokenId) {
       void queryClient.invalidateQueries({ queryKey: ["token-activity", listing.tokenId] });
+      void queryClient.invalidateQueries({ queryKey: ["token-market-listing", listing.tokenId] });
     }
   };
 
@@ -297,7 +329,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     try {
       let txHash = "";
       if (user?.address && listing.tokenId) {
-        txHash = await buyCard(listing.tokenId, listing.price);
+        txHash = await buyCard(listing.tokenId, displayPrice);
       }
       buyNow(listing.id, txHash);
       setBuyOpen(false);
@@ -514,7 +546,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                     {listed ? "Asking" : owned ? "Market value" : "Last asked"}
                   </p>
                   <p className="mt-1 text-[30px] font-bold leading-none">
-                    {usd(listed || !owned ? listing.price : listing.fmv)}
+                    {usd(displayPrice)}
                   </p>
                 </div>
               </div>
@@ -561,7 +593,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                     onClick={() => requireAuth(() => setBuyOpen(true)) && setBuyOpen(true)}
                   >
                     <ShoppingCart size={16} />
-                    Buy now for {usd(listing.price)}
+                    Buy now for {usd(displayPrice)}
                   </Button>
                   <Button
                     size="lg"
@@ -650,7 +682,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <dl className="mt-5 space-y-2.5 rounded-2xl bg-surface-2 p-4 text-[13px]">
             <div className="flex justify-between">
               <dt className="text-muted">Item price</dt>
-              <dd className="font-semibold">{usd(listing.price, { cents: true })}</dd>
+              <dd className="font-semibold">{usd(displayPrice, { cents: true })}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted">Pokéchain fee (Rule 2)</dt>
@@ -659,7 +691,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             <div className="h-px bg-hairline" />
             <div className="flex justify-between">
               <dt className="text-muted">Total payment</dt>
-              <dd className="text-base font-bold text-accent">{usd(listing.price, { cents: true })} USDC</dd>
+              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} USDC</dd>
             </div>
           </dl>
 
@@ -670,11 +702,11 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </span>
           </div>
 
-          {user?.address && acct.walletUsdc < listing.price ? (
+          {user?.address && acct.walletUsdc < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
-              You need {usd(listing.price - acct.walletUsdc, { cents: true })} more USDC. Top up or mint test USDC in your wallet.
+              You need {usd(displayPrice - acct.walletUsdc, { cents: true })} more USDC. Top up or mint test USDC in your wallet.
             </p>
-          ) : !user?.address && balance < listing.price ? (
+          ) : !user?.address && balance < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
               Your demo balance is insufficient. Top up in your account menu.
             </p>
@@ -694,11 +726,11 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               className="flex-1"
               disabled={
                 buyBusy ||
-                (user?.address ? acct.walletUsdc < listing.price : balance < listing.price)
+                (user?.address ? acct.walletUsdc < displayPrice : balance < displayPrice)
               }
               onClick={handleBuy}
             >
-              {buyBusy ? "Settling atomically..." : `Pay ${usd(listing.price, { cents: true })}`}
+              {buyBusy ? "Settling atomically..." : `Pay ${usd(displayPrice, { cents: true })}`}
             </Button>
           </div>
         </div>
