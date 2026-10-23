@@ -26,6 +26,7 @@ import { useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
+import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ActivityEvent, Grader, Listing } from "@/lib/types";
@@ -94,6 +95,20 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     onLogs: refreshActivity,
   });
 
+  useWatchContractEvent({
+    ...contracts.slabVault,
+    eventName: "Transfer",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
+  useWatchContractEvent({
+    ...contracts.slabVault,
+    eventName: "SlabMinted",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
   const { data: onChainEvents = [] } = useQuery({
     queryKey: ["token-activity", listing.tokenId],
     enabled: enabledOnChain,
@@ -108,7 +123,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
         if (!marketCode || marketCode === "0x" || !vaultCode || vaultCode === "0x") return [];
 
         const from = { fromBlock: DEPLOY_BLOCK };
-        const [sales, listings] = await Promise.all([
+        const [sales, listings, transfers, mints] = await Promise.all([
           client
             .getContractEvents({
               ...contracts.slabMarket,
@@ -125,9 +140,26 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               ...from,
             })
             .catch(() => []),
+          client
+            .getContractEvents({
+              ...contracts.slabVault,
+              eventName: "Transfer",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
+          client
+            .getContractEvents({
+              ...contracts.slabVault,
+              eventName: "SlabMinted",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
         ]);
 
         const events: ActivityEvent[] = [];
+        const saleTxHashes = new Set(sales.map((s) => s.transactionHash));
 
         for (const log of sales) {
           const a = log.args as { tokenId?: bigint; seller?: string; buyer?: string; price?: bigint; fee?: bigint; settledAt?: bigint };
@@ -174,6 +206,53 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           });
         }
 
+        for (const log of transfers) {
+          const a = log.args as { from?: string; to?: string; tokenId?: bigint };
+          // If from is 0x0, it's the mint. If txHash was a sale, it's already shown as Sale.
+          if (!a?.from || a.from === zeroAddress || saleTxHashes.has(log.transactionHash)) continue;
+
+          const [fromAcct, toAcct] = await Promise.all([
+            a.from
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.from as `0x${string}`] }).catch(() => null)
+              : null,
+            a.to
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.to as `0x${string}`] }).catch(() => null)
+              : null,
+          ]);
+
+          const fromName = fromAcct?.handle || shortHash(a.from);
+          const toName = toAcct?.handle || shortHash(a.to);
+          const block = await client.getBlock({ blockNumber: log.blockNumber }).catch(() => null);
+          const at = block?.timestamp ? new Date(Number(block.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Transfer",
+            from: fromName,
+            to: toName,
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
+        for (const log of mints) {
+          const a = log.args as { owner?: string; certNumber?: string };
+          if (!a?.owner) continue;
+          const ownerAcct = await client
+            .readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.owner as `0x${string}`] })
+            .catch(() => null);
+          const ownerName = ownerAcct?.handle || shortHash(a.owner);
+          const block = await client.getBlock({ blockNumber: log.blockNumber }).catch(() => null);
+          const at = block?.timestamp ? new Date(Number(block.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Mint",
+            from: "0x0000...0000",
+            to: ownerName,
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
         return events;
       } catch {
         return [];
@@ -182,11 +261,16 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   });
 
   const allActivity = useMemo(() => {
-    const combined = [...onChainEvents, ...(listing.activity ?? [])];
+    // If we have real on-chain events, filter out synthetic initial Mint from catalog
+    const baseActivity = onChainEvents.length
+      ? (listing.activity ?? []).filter((a) => a.kind !== "Mint" && !onChainEvents.some((oe) => oe.txHash === a.txHash))
+      : (listing.activity ?? []);
+
+    const combined = [...onChainEvents, ...baseActivity];
     const seen = new Set<string>();
     const deduped: ActivityEvent[] = [];
     for (const item of combined) {
-      const key = `${item.kind}-${item.txHash}-${item.from}-${item.to}`;
+      const key = `${item.kind}-${item.txHash}`;
       if (!seen.has(key)) {
         seen.add(key);
         deduped.push(item);

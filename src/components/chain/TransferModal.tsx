@@ -60,10 +60,10 @@ function Transfer({ entry, listing, onClose }: { entry: VaultItem; listing: List
     if (!to) return;
     setBusy(true);
     try {
-      await transfer(tokenId, to.address, to.handle);
+      const receipt = await transfer(tokenId, to.address, to.handle);
       // The receipt is in, so the chain already says they own it: take it out of this vault now
       // rather than waiting for the next ownership poll, and re-read ownership straight away.
-      handOver(listing.id, to.handle);
+      handOver(listing.id, to.handle, receipt.transactionHash);
       void queryClient.invalidateQueries({ queryKey: ["owned-slabs"] });
       pushToast({ title: `Sent to @${to.handle}`, body: `Token #${tokenId} is in their Vault now.`, tone: "success" });
       onClose();

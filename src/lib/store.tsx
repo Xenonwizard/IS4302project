@@ -156,7 +156,7 @@ interface StoreValue extends PersistShape {
   syncChainSlabs: (owned: ChainSlab[], ownedByOthers: string[]) => void;
   syncMarketListings: (listings: { listing: Listing; price: number; seller: string }[]) => void;
   /** the transfer to another collector confirmed: the slab leaves this vault and its chats close */
-  handOver: (listingId: string, toHandle: string) => void;
+  handOver: (listingId: string, toHandle: string, txHash?: string) => void;
   /** the slab has left the vault: unlisted, its chats closed, moved to the Withdrawn tab */
   withdrawSlab: (listingId: string, withdrawal: Withdrawal) => void;
   updateWithdrawal: (listingId: string, patch: Partial<Withdrawal>) => void;
@@ -870,12 +870,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       for (const o of arrived) {
         const made = makeSubmittedListing({ grader: o.grader, certNumber: o.certNumber, owner: me.username, nowMs: Date.now() });
         if (!made) continue;
+        const existingSlab = snapshot.slabs.find((s) => s.id === made.id || s.tokenId === o.token.tokenId);
+        const existingOverrides = snapshot.overrides[made.id];
+        const preservedActivity = existingOverrides?.activity ?? existingSlab?.activity;
         const listing = {
           ...made,
-          price: o.isListed && o.listedPrice ? o.listedPrice : made.price,
+          price: o.isListed && o.listedPrice ? o.listedPrice : (existingOverrides?.price ?? made.price),
           tokenId: o.token.tokenId,
           contract: o.token.contract,
           ownerAddress: o.token.owner,
+          activity: preservedActivity ?? made.activity,
+          sales: existingOverrides?.sales ?? existingSlab?.sales ?? made.sales,
         };
         registerListing(listing);
         const withdrawn = o.custody !== "Vaulted";
@@ -1018,13 +1023,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const handOver = useCallback(
-    (listingId: string, toHandle: string) => {
-      setState((prev) => ({
-        ...prev,
-        negotiations: closeSellerChats(prev, listingId, `The slab was transferred to @${toHandle}.`),
-        overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
-        vault: prev.vault.filter((v) => v.listingId !== listingId),
-      }));
+    (listingId: string, toHandle: string, txHash?: string) => {
+      setState((prev) => {
+        const fromHandle = prev.user?.username ?? "you";
+        const now = new Date().toISOString();
+        const transferTx = txHash || `0x${hexId(Date.now(), 20)}`;
+        const transferEvent: ActivityEvent = {
+          kind: "Transfer",
+          from: fromHandle,
+          to: toHandle,
+          at: now,
+          txHash: transferTx,
+        };
+
+        const existingOverrides = prev.overrides[listingId];
+        const prevActivity = existingOverrides?.activity ?? [];
+
+        return {
+          ...prev,
+          negotiations: closeSellerChats(prev, listingId, `The slab was transferred to @${toHandle}.`),
+          overrides: {
+            ...prev.overrides,
+            [listingId]: {
+              ...existingOverrides,
+              delisted: true,
+              owner: toHandle,
+              activity: [transferEvent, ...prevActivity.filter((e) => e.txHash !== transferTx)],
+            },
+          },
+          vault: prev.vault.filter((v) => v.listingId !== listingId),
+        };
+      });
     },
     [],
   );
