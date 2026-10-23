@@ -25,6 +25,7 @@ import {
   type BotAction,
 } from "./negotiation";
 import { hashString, hexId } from "./rng";
+import { contracts } from "./chain/config";
 import type {
   ActivityEvent,
   ChatMessage,
@@ -268,10 +269,10 @@ function settleDeal(
   const sellerVaultItem = prev.vault.find((v) => v.listingId === listing.id);
   const token: SlabToken | undefined =
     sellerVaultItem?.token ||
-    (listing.tokenId && listing.contract
+    (listing.tokenId
       ? {
           chainId: 31337,
-          contract: listing.contract,
+          contract: listing.contract || contracts.slabVault.address,
           tokenId: listing.tokenId,
           owner: n.buyer,
           mintTx: "",
@@ -515,9 +516,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state, ready]);
 
+  const recentToasts = useRef<Map<string, number>>(new Map());
+
   const pushToast = useCallback((t: Omit<Toast, "id">) => {
+    const key = `${t.title}::${t.body || ""}`;
+    const now = Date.now();
+    const last = recentToasts.current.get(key) || 0;
+    if (now - last < 4000) return; // Deduplicate identical toasts within 4s
+    recentToasts.current.set(key, now);
+
     const id = ++toastSeq.current;
-    setToasts((prev) => [...prev, { ...t, id }]);
+    setToasts((prev) => {
+      const filtered = prev.filter((p) => p.title !== t.title || p.body !== t.body);
+      return [...filtered.slice(-3), { ...t, id }];
+    });
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((x) => x.id !== id));
     }, 4200);
@@ -1293,6 +1305,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           let changed = false;
           const merged = { ...prev.negotiations };
           let newVault = prev.vault;
+          const newOverrides = { ...prev.overrides };
 
           for (const [id, incoming] of Object.entries(data.negotiations!)) {
             const existing = merged[id];
@@ -1318,43 +1331,84 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               }
             }
 
-            if (prev.user && incoming.buyer === prev.user.username && incoming.status === "sold") {
-              const existingItem = newVault.find((v) => v.listingId === incoming.listingId);
-              const baseListing = getListing(incoming.listingId);
-              const token: SlabToken | undefined =
-                baseListing?.tokenId && baseListing?.contract
-                  ? {
-                      chainId: 31337,
-                      contract: baseListing.contract,
-                      tokenId: baseListing.tokenId,
-                      owner: prev.user.address || "",
-                      mintTx: "",
-                      custodianRef: "",
-                    }
-                  : undefined;
-
-              if (!existingItem) {
-                newVault = [
-                  {
-                    listingId: incoming.listingId,
-                    acquiredAt: incoming.messages.at(-1)?.at || new Date().toISOString(),
-                    via: "Trade",
-                    status: "Vaulted",
-                    token,
-                  },
-                  ...newVault,
-                ];
-                changed = true;
-              } else if (!existingItem.token && token) {
-                newVault = newVault.map((item) =>
-                  item.listingId === incoming.listingId ? { ...item, token } : item,
+            if (incoming.status === "sold") {
+              const lastMsg = incoming.messages.at(-1);
+              const acceptedOffer = incoming.messages.find(
+                (m) => m.kind === "offer" && m.status === "accepted"
+              );
+              const offerAmount = acceptedOffer?.offer?.cash ?? 0;
+              const soldAt = lastMsg?.at || new Date().toISOString();
+              const existingOverrides = newOverrides[incoming.listingId] || {};
+              if (existingOverrides.owner !== incoming.buyer || !existingOverrides.delisted) {
+                const baseListing = getListing(incoming.listingId) || prev.slabs.find((s) => s.id === incoming.listingId);
+                const existingActivity = existingOverrides.activity || baseListing?.activity || [];
+                const alreadyHasSale = existingActivity.some(
+                  (a) => a.kind === "Sale" && a.to === incoming.buyer && a.from === incoming.seller
                 );
+                const saleActivity: ActivityEvent = {
+                  kind: "Sale",
+                  from: incoming.seller,
+                  to: incoming.buyer,
+                  price: offerAmount > 0 ? offerAmount : undefined,
+                  at: soldAt,
+                  txHash: `0x${hexId(hashString(soldAt + incoming.id), 8)}`,
+                };
+                const updatedActivity = alreadyHasSale ? existingActivity : [saleActivity, ...existingActivity];
+                newOverrides[incoming.listingId] = {
+                  ...existingOverrides,
+                  owner: incoming.buyer,
+                  soldTo: incoming.buyer,
+                  delisted: true,
+                  activity: updatedActivity,
+                };
                 changed = true;
               }
             }
 
+            if (prev.user && incoming.buyer === prev.user.username && incoming.status === "sold") {
+              const existingItem = newVault.find((v) => v.listingId === incoming.listingId);
+              const baseListing = getListing(incoming.listingId) || prev.slabs.find((s) => s.id === incoming.listingId);
+              const tokenId = baseListing?.tokenId;
+              const token: SlabToken | undefined = tokenId
+                ? {
+                    chainId: 31337,
+                    contract: baseListing?.contract || contracts.slabVault.address,
+                    tokenId,
+                    owner: prev.user.address || "",
+                    mintTx: "",
+                    custodianRef: "",
+                  }
+                : undefined;
+
+              // Only manage newVault here for off-chain users (without a connected wallet).
+              // For on-chain users, ChainVaultSync is the single source of truth for token ownership.
+              if (!prev.user.address && !tokenId) {
+                if (!existingItem) {
+                  newVault = [
+                    {
+                      listingId: incoming.listingId,
+                      acquiredAt: incoming.messages.at(-1)?.at || new Date().toISOString(),
+                      via: "Trade",
+                      status: "Vaulted",
+                      token,
+                    },
+                    ...newVault,
+                  ];
+                  changed = true;
+                } else if (!existingItem.token && token) {
+                  newVault = newVault.map((item) =>
+                    item.listingId === incoming.listingId ? { ...item, token } : item,
+                  );
+                  changed = true;
+                }
+              }
+            }
+
             if (prev.user && incoming.seller === prev.user.username && incoming.status === "sold") {
-              if (newVault.some((v) => v.listingId === incoming.listingId)) {
+              const item = newVault.find((v) => v.listingId === incoming.listingId);
+              // Only remove here if user is not on-chain or item has no token.
+              // For on-chain users, ChainVaultSync is the authoritative source for token ownership.
+              if (item && !prev.user.address && !item.token) {
                 newVault = newVault.filter((v) => v.listingId !== incoming.listingId);
                 changed = true;
               }
@@ -1366,6 +1420,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...prev,
             negotiations: merged,
             vault: newVault,
+            overrides: newOverrides,
           };
         });
       } catch {

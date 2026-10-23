@@ -260,11 +260,19 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
   const allActivity = useMemo(() => {
     // If we have real on-chain events, filter out synthetic initial Mint from catalog
+    // But keep Sale events which have the negotiated deal price
     const baseActivity = onChainEvents.length
-      ? (listing.activity ?? []).filter((a) => a.kind !== "Mint" && !onChainEvents.some((oe) => oe.txHash === a.txHash))
+      ? (listing.activity ?? []).filter((a) => {
+          if (a.kind === "Mint") return false;
+          if (a.kind === "Sale" && a.price) return true;
+          return !onChainEvents.some((oe) => oe.txHash === a.txHash);
+        })
       : (listing.activity ?? []);
 
-    const combined = [...onChainEvents, ...baseActivity];
+    const saleTxHashes = new Set(baseActivity.filter((b) => b.kind === "Sale").map((b) => b.txHash));
+    const filteredOnChain = onChainEvents.filter((oe) => !(oe.kind === "Transfer" && saleTxHashes.has(oe.txHash)));
+
+    const combined = [...filteredOnChain, ...baseActivity];
     const seen = new Set<string>();
     const deduped: ActivityEvent[] = [];
     for (const item of combined) {

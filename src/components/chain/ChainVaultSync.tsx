@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { CUSTODY, DEPLOY_BLOCK, chain, contracts, fromUsdcUnits } from "@/lib/chain/config";
@@ -18,19 +18,23 @@ export function ChainVaultSync() {
   const { user, ready, vault, syncChainSlabs } = useStore();
   const { address } = useOnchainAccount();
   const client = usePublicClient();
-  const enabled = Boolean(ready && client && address && user?.address === address);
+  const addrLower = address?.toLowerCase();
+  const enabled = Boolean(ready && client && address && user?.address?.toLowerCase() === addrLower);
   const queryClient = useQueryClient();
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", address] });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", addrLower] });
   useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, enabled, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, enabled, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", args: { seller: address }, enabled, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", args: { seller: address }, enabled, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, onLogs: refresh });
-  // Tokens the Vault already lists: each gets an explicit ownerOf check.
+
+  // Tokens the Vault already lists: keep ref updated to avoid re-triggering queryKey
   const knownIds = vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])).sort().join(",");
+  const knownIdsRef = useRef(knownIds);
+  knownIdsRef.current = knownIds;
 
   const { data } = useQuery({
-    queryKey: ["owned-slabs", address, knownIds],
+    queryKey: ["owned-slabs", addrLower],
     enabled,
     refetchInterval: 5000,
     queryFn: async (): Promise<{ owned: ChainSlab[]; ownedByOthers: string[] }> => {
@@ -42,17 +46,33 @@ export function ChainVaultSync() {
         eventName: "Transfer",
         args: { to: address },
         fromBlock: DEPLOY_BLOCK,
-      });
+      }).catch(() => []);
       const firstSeen = new Map<bigint, boolean>(); // tokenId → minted to us (from the zero address)
       for (const e of incoming) {
         const id = e.args.tokenId!;
         if (!firstSeen.has(id)) firstSeen.set(id, e.args.from === zeroAddress);
       }
-      const known = knownIds ? knownIds.split(",").map(BigInt) : [];
-      const ids = [...new Set([...firstSeen.keys(), ...known])];
-      const owners = await Promise.all(ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] })));
-      const mine = ids.filter((_, i) => owners[i] === address);
-      const ownedByOthers = ids.filter((_, i) => owners[i] !== address).map(String);
+
+      // Also check on-chain nextTokenId to discover all tokens in existence
+      const nextTokenId = await client!
+        .readContract({ ...contracts.slabVault, functionName: "nextTokenId" })
+        .catch(() => null);
+      const allOnchainIds: bigint[] = [];
+      if (nextTokenId && typeof nextTokenId === "bigint" && nextTokenId > BigInt(1)) {
+        for (let i = BigInt(1); i < nextTokenId; i += BigInt(1)) {
+          allOnchainIds.push(i);
+        }
+      }
+
+      const known = knownIdsRef.current ? knownIdsRef.current.split(",").map(BigInt) : [];
+      const ids = [...new Set([...allOnchainIds, ...firstSeen.keys(), ...known])];
+      const owners = await Promise.all(
+        ids.map((id) =>
+          client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] }).catch(() => null)
+        )
+      );
+      const mine = ids.filter((_, i) => owners[i] && owners[i]?.toLowerCase() === addrLower);
+      const ownedByOthers = ids.filter((_, i) => owners[i] && owners[i]?.toLowerCase() !== addrLower).map(String);
       const [slabs, marketListings] = await Promise.all([
         Promise.all(mine.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),
         Promise.all(
@@ -65,8 +85,8 @@ export function ChainVaultSync() {
         const mListing = marketListings[i];
         const isListedOnChain = Boolean(
           mListing &&
-          address &&
-          mListing.seller.toLowerCase() === address.toLowerCase() &&
+          addrLower &&
+          mListing.seller.toLowerCase() === addrLower &&
           mListing.price > BigInt(0)
         );
         const listedPrice = isListedOnChain && mListing ? fromUsdcUnits(mListing.price) : undefined;

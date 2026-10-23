@@ -35,11 +35,13 @@ export function ChainSessionSync() {
     // Someone using the off-chain demo login is left alone.
     if (user && !user.address) return;
     if (isConnected && address && loaded && status === "Active") {
-      if (user?.address !== address || user.username !== handle) login(handle, undefined, address);
+      if (user?.address?.toLowerCase() !== address.toLowerCase() || user.username !== handle) {
+        login(handle, undefined, address);
+      }
       return;
     }
     if (!user?.address) return;
-    if (isConnected && loaded && (user.address !== address || status !== "Active")) {
+    if (isConnected && loaded && (!address || user.address.toLowerCase() !== address.toLowerCase() || status !== "Active")) {
       logout(); // switched to another address, or the account was closed
     } else if (connection === "disconnected") {
       if (seenConnected.current) logout();
