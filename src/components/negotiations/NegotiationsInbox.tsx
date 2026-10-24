@@ -23,7 +23,7 @@ export const INBOX_URL_KEY = "pokechain.inboxUrl";
 export function NegotiationsInbox() {
   const params = useSearchParams();
   const router = useRouter();
-  const { ready, user, negotiations, lostReports, setAuthOpen } = useStore();
+  const { ready, user, negotiations, lostReports, setAuthOpen, slabs } = useStore();
   const [tab, setTab] = useState<Tab>(() => {
     const t = params.get("tab");
     return t === "buying" || t === "selling" ? t : params.get("listing") ? "selling" : "all";
@@ -45,7 +45,17 @@ export function NegotiationsInbox() {
     }
   }, [tab, listingFilter, router]);
 
-  if (ready && !me) {
+  if (!ready) {
+    return (
+      <div className="space-y-6 px-4 py-6 lg:px-6">
+        <div className="skeleton h-10 w-48 rounded-xl" />
+        <div className="skeleton h-12 w-full rounded-2xl" />
+        <div className="skeleton h-[400px] w-full rounded-card" />
+      </div>
+    );
+  }
+
+  if (!me) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
         <span className="grid h-14 w-14 place-items-center rounded-2xl bg-accent/15 text-accent">
@@ -68,7 +78,15 @@ export function NegotiationsInbox() {
   const shown = mine
     .filter((n) => tab === "all" || (tab === "buying" ? n.buyer === me : n.seller === me))
     .filter((n) => !listingFilter || n.listingId === listingFilter);
-  const filtered = listingFilter ? getListing(listingFilter) : undefined;
+  const filtered = listingFilter
+    ? getListing(listingFilter) ||
+      slabs.find(
+        (s) =>
+          s.id === listingFilter ||
+          s.tokenId === listingFilter ||
+          s.id === `token-${listingFilter}`,
+      )
+    : undefined;
 
   return (
     <div className="space-y-6 px-4 py-6 lg:px-6">
