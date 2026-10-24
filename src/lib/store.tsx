@@ -700,7 +700,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? [...o.activity, ...(listing.activity ?? []).filter((a) => !o.activity!.some((oa) => oa.txHash === a.txHash))]
         : listing.activity;
       const combinedSales = o.sales
-        ? [...o.sales, ...(listing.sales ?? [])]
+        ? [...o.sales, ...(listing.sales ?? []).filter((s) => !o.sales!.some((os) => os.date === s.date))]
         : listing.sales;
       return {
         ...listing,
@@ -950,7 +950,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           txHash: saleTx,
         };
         const prevActivity = overrides[listing.id]?.activity ?? listing.activity ?? [];
-        const prevSales = overrides[listing.id]?.sales ?? listing.sales ?? [];
+        const saleItem: Sale = { date: now, price };
+        const prevSales = (overrides[listing.id]?.sales ?? listing.sales ?? []).filter((s) => s.date !== now);
 
         overrides[listing.id] = {
           ...overrides[listing.id],
@@ -958,17 +959,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           soldTo: me,
           delisted: true,
           activity: [saleEvent, ...prevActivity.filter((e) => e.txHash !== saleTx)],
-          sales: [{ date: now, price }, ...prevSales],
+          sales: [saleItem, ...prevSales],
         };
 
         const updatedSlabs = prev.slabs.map((s) => {
           if (s.id !== listing.id) return s;
+          const slabSales = (s.sales ?? []).filter((sl) => sl.date !== now);
           return {
             ...s,
             owner: me,
             ownerAddress: user.address ?? s.ownerAddress,
             activity: [saleEvent, ...(s.activity ?? []).filter((e) => e.txHash !== saleTx)],
-            sales: [{ date: now, price }, ...(s.sales ?? [])],
+            sales: [saleItem, ...slabSales],
           };
         });
 

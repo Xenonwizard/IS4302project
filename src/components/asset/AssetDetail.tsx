@@ -29,7 +29,7 @@ import { DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ActivityEvent, Grader, Listing } from "@/lib/types";
+import type { ActivityEvent, Grader, Listing, Sale } from "@/lib/types";
 import { CopyText } from "../chain/ChainConsole";
 import { TokenRecord } from "../chain/TokenRecord";
 import { OfferModal } from "../modals/OfferModal";
@@ -864,7 +864,19 @@ function PriceHistory({ listing }: { listing: Listing }) {
   const [grader, setGrader] = useState<Grader>(listing.grader);
   const [grade, setGrade] = useState<number>(listing.grade);
   const [allOpen, setAllOpen] = useState(false);
-  const sales = useMemo(() => salesFor(listing, grader, grade), [listing, grader, grade]);
+  const sales = useMemo(() => {
+    const raw = salesFor(listing, grader, grade);
+    const seen = new Set<string>();
+    const deduped: Sale[] = [];
+    for (const s of raw) {
+      const key = `${s.date}-${s.price}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(s);
+      }
+    }
+    return deduped;
+  }, [listing, grader, grade]);
 
   return (
     <section className="rounded-card border border-hairline bg-surface">
@@ -917,8 +929,8 @@ function PriceHistory({ listing }: { listing: Listing }) {
 
         {sales.length ? (
           <ul className="divide-y divide-[rgba(255,255,255,0.08)]">
-            {sales.slice(0, 3).map((s) => (
-              <li key={s.date} className="flex items-center justify-between py-2.5 text-[13px]">
+            {sales.slice(0, 3).map((s, idx) => (
+              <li key={`${s.date}-${s.price}-${idx}`} className="flex items-center justify-between py-2.5 text-[13px]">
                 <span className="text-muted">{shortDate(s.date)}</span>
                 <span className="font-semibold">{usd(s.price)}</span>
               </li>
@@ -933,8 +945,8 @@ function PriceHistory({ listing }: { listing: Listing }) {
 
       <Modal open={allOpen} onClose={() => setAllOpen(false)} title={`${grader} ${grade} sales`}>
         <ul className="divide-y divide-[rgba(255,255,255,0.08)] p-5 pt-0">
-          {sales.map((s) => (
-            <li key={s.date} className="flex items-center justify-between py-3 text-[13px]">
+          {sales.map((s, idx) => (
+            <li key={`${s.date}-${s.price}-${idx}`} className="flex items-center justify-between py-3 text-[13px]">
               <span className="text-muted">{shortDate(s.date)}</span>
               <span className="font-semibold">{usd(s.price)}</span>
             </li>
