@@ -90,7 +90,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const { data: onChainMarketListing } = useQuery({
     queryKey: ["token-market-listing", resolvedTokenId],
     enabled: enabledOnChain,
-    refetchInterval: 3000,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
@@ -115,7 +117,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const { data: onChainOwner } = useQuery({
     queryKey: ["token-owner", resolvedTokenId],
     enabled: enabledOnChain,
-    refetchInterval: 3000,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
@@ -188,6 +192,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabMarket,
     eventName: "CardPurchased",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
@@ -195,6 +201,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabMarket,
     eventName: "CardListed",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
@@ -202,6 +210,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabVault,
     eventName: "Transfer",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
@@ -209,13 +219,17 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabVault,
     eventName: "SlabMinted",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
   const { data: onChainEvents = [] } = useQuery({
     queryKey: ["token-activity", listing.tokenId],
     enabled: enabledOnChain,
-    refetchInterval: 5000,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<ActivityEvent[]> => {
       if (!client || tokenIdBigInt === null) return [];
       try {

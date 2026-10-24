@@ -685,25 +685,52 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const isListed = useCallback(
     (id: string) => {
-      const o = state.overrides[id];
-      if (o?.delisted !== undefined) return !o.delisted;
-      const slab = state.slabs.find(
-        (s) => s.id === id || s.tokenId === id || `token-${s.tokenId}` === id,
+      // 1. Find all slab representations matching this id or tokenId
+      const matchingSlabs = state.slabs.filter(
+        (s) => s.id === id || s.tokenId === id || (s.tokenId && `token-${s.tokenId}` === id),
       );
-      if (slab?.tokenId) {
-        const tokenId = slab.tokenId;
-        const matchingOverride =
-          state.overrides[slab.id] ||
-          state.overrides[`token-${tokenId}`] ||
-          state.overrides[tokenId];
-        if (matchingOverride?.delisted !== undefined) return !matchingOverride.delisted;
-        if (slab.isListed !== undefined) return slab.isListed;
-        const matchingSlabListed = state.slabs.some(
-          (s) => s.tokenId === tokenId && (s.isListed || state.overrides[s.id]?.delisted === false),
-        );
-        if (matchingSlabListed) return true;
+
+      // 2. If any matching slab is explicitly listed on-chain (isListed: true from SlabMarket), it is listed!
+      if (matchingSlabs.some((s) => s.isListed === true)) {
+        return true;
       }
-      if (slab?.isListed !== undefined) return slab.isListed;
+
+      // 3. Check for positive overrides: if explicitly listed via override, it is listed
+      const o = state.overrides[id];
+      if (o?.delisted === false) return true;
+
+      // 4. Check tokenId-based positive overrides
+      const tokenSlab = matchingSlabs.find((s) => s.tokenId);
+      const tokenId = tokenSlab?.tokenId || (id.startsWith("token-") ? id.slice(6) : undefined);
+      if (tokenId) {
+        if (
+          state.overrides[`token-${tokenId}`]?.delisted === false ||
+          state.overrides[tokenId]?.delisted === false
+        ) {
+          return true;
+        }
+      }
+
+      // 5. If any matching slab is explicitly unlisted on-chain (isListed: false), it is unlisted
+      if (matchingSlabs.length > 0 && matchingSlabs.every((s) => s.isListed === false)) {
+        return false;
+      }
+
+      // 6. Check negative overrides
+      if (o?.delisted === true) return false;
+      if (tokenId) {
+        if (
+          state.overrides[`token-${tokenId}`]?.delisted === true ||
+          state.overrides[tokenId]?.delisted === true
+        ) {
+          return false;
+        }
+      }
+
+      // 7. Fallback to slab.isListed if specified
+      const anyListedFlag = matchingSlabs.find((s) => s.isListed !== undefined)?.isListed;
+      if (anyListedFlag !== undefined) return anyListedFlag;
+
       // When deployed on-chain, catalog demo cards should NOT be listed
       if (IS_DEPLOYED) return false;
       // Submitted and tokenized slabs are unlisted by default unless explicitly listed
@@ -1155,7 +1182,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         for (const s of prev.slabs) {
           if (!newSlabsMap.has(s.id)) {
-            newSlabsMap.set(s.id, s);
+            const isStillActive = s.tokenId ? activeTokenIds.has(s.tokenId) : false;
+            newSlabsMap.set(s.id, { ...s, isListed: isStillActive });
           }
         }
 
@@ -1751,7 +1779,8 @@ export function useMarketInventory(): Listing[] {
       if (isListed(l.id)) {
         const item = resolve(l);
         const key = item.tokenId ? `token-${item.tokenId}` : item.id;
-        if (!map.has(key) || l.tokenId) {
+        // Prefer canonical token-${tokenId} listing over legacy sub-xxx representation
+        if (!map.has(key) || (item.id.startsWith("token-") && !map.get(key)!.id.startsWith("token-"))) {
           map.set(key, item);
         }
       }

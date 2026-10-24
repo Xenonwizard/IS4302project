@@ -24,14 +24,37 @@ export function ChainMarketSync() {
     void queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
   };
 
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, onLogs: refresh });
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardListed",
+    enabled,
+    poll: true,
+    pollingInterval: 1000,
+    onLogs: refresh,
+  });
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "ListingCancelled",
+    enabled,
+    poll: true,
+    pollingInterval: 1000,
+    onLogs: refresh,
+  });
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardPurchased",
+    enabled,
+    poll: true,
+    pollingInterval: 1000,
+    onLogs: refresh,
+  });
 
   const { data } = useQuery({
     queryKey: ["market-active-listings"],
     enabled,
-    refetchInterval: 5000,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client) return [];
