@@ -29,9 +29,18 @@ const SELLER_QUICK = ["Yes, it's available.", "Price is firm, sorry.", "Can you 
 
 /** A one-to-one chat between a buyer and the seller about one listing. */
 export function NegotiationView({ id }: { id: string }) {
-  const { ready, user, negotiations, requireAuth } = useStore();
+  const { ready, user, negotiations, requireAuth, slabs } = useStore();
   const n = negotiations[id];
-  const base = n ? getListing(n.listingId) : undefined;
+  const base = n
+    ? getListing(n.listingId) ||
+      slabs.find(
+        (s) =>
+          s.id === n.listingId ||
+          s.tokenId === n.listingId ||
+          s.id === `token-${n.listingId}` ||
+          (s.tokenId && `token-${s.tokenId}` === n.listingId),
+      )
+    : undefined;
 
   if (!ready) {
     return (
