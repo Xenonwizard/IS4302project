@@ -8,7 +8,7 @@
     "coverage": "hardhat test --coverage",
     "node": "hardhat node",
     "chain": "node scripts/dev-chain.mjs",
-    "deploy:local": "hardhat ignition deploy ignition/modules/Pokechain.ts --network localhost --reset && node scripts/export-frontend.mjs 31337",
+    "deploy:local": "hardhat ignition deploy ignition/modules/Pokechain.ts --network localhost --reset && node scripts/export-frontend.mjs 31337 && node scripts/seed.mjs",
     "deploy:amoy": "hardhat ignition deploy ignition/modules/Pokechain.ts --network amoy && node scripts/export-frontend.mjs 80002"
   },
   "devDependencies": {

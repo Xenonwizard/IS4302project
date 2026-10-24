@@ -100,6 +100,8 @@ export function ChainVaultSync() {
             declaredValueCents: Number(slabs[i].declaredValueCents),
             evidenceHash: slabs[i].evidenceHash,
           },
+          title: slabs[i].title,
+          image: slabs[i].image,
           grader: slabs[i].grader as Grader,
           certNumber: slabs[i].certNumber,
           custody: CUSTODY[slabs[i].custody],

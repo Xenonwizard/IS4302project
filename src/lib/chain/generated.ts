@@ -2513,6 +2513,67 @@ export const slabVaultAbi = [
   {
     "inputs": [
       {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "recipient",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "grader",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "certNumber",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "image",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "custodianRef",
+            "type": "string"
+          },
+          {
+            "internalType": "uint64",
+            "name": "declaredValueCents",
+            "type": "uint64"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "evidenceHash",
+            "type": "bytes32"
+          }
+        ],
+        "internalType": "struct SlabVault.SeedParams",
+        "name": "p",
+        "type": "tuple"
+      }
+    ],
+    "name": "seedSlab",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "operator",
         "type": "address"

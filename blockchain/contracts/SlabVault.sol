@@ -272,6 +272,46 @@ contract SlabVault is ERC721, AccessControl {
         emit SlabMinted(tokenId, submissionId, s.owner, s.certNumber, custodianRef);
     }
 
+    struct SeedParams {
+        address recipient;
+        string grader;
+        string certNumber;
+        string title;
+        string image;
+        string custodianRef;
+        uint64 declaredValueCents;
+        bytes32 evidenceHash;
+    }
+
+    /**
+     * @notice Seeds an initial vaulted slab directly to an active collector account.
+     * @dev Only callable by the operator role for platform initialization.
+     */
+    function seedSlab(SeedParams calldata p) external onlyRole(OPERATOR_ROLE) returns (uint256 tokenId) {
+        if (!accounts.isActive(p.recipient)) revert AccountNotActive(p.recipient);
+        if (bytes(p.custodianRef).length == 0) revert EmptyField();
+        bytes32 key = certKey(p.grader, p.certNumber);
+        if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
+
+        tokenId = nextTokenId++;
+        tokenOfCert[key] = tokenId;
+
+        Slab storage slab = _slabs[tokenId];
+        slab.grader = p.grader;
+        slab.certNumber = p.certNumber;
+        slab.title = p.title;
+        slab.image = p.image;
+        slab.custodianRef = p.custodianRef;
+        slab.declaredValueCents = p.declaredValueCents;
+        slab.evidenceHash = p.evidenceHash;
+        slab.mintedAt = uint64(block.timestamp);
+        slab.custody = Custody.Vaulted;
+        slab.custodyUpdatedAt = uint64(block.timestamp);
+
+        _safeMint(p.recipient, tokenId);
+        emit SlabMinted(tokenId, 0, p.recipient, p.certNumber, p.custodianRef);
+    }
+
     function rejectSubmission(uint256 submissionId, string calldata reason) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _submissions[submissionId];
         if (!_isOpen(s.status)) revert SubmissionNotPending(submissionId);

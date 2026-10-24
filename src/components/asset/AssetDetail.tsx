@@ -67,8 +67,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const baseResolved = resolve(base);
   const resolvedTokenId =
     baseResolved.tokenId ||
-    slabs.find((s) => s.id === baseResolved.id)?.tokenId ||
-    vault.find((v) => v.listingId === baseResolved.id)?.token?.tokenId;
+    slabs.find((s) => s.id === baseResolved.id || s.tokenId === baseResolved.id || `token-${s.tokenId}` === baseResolved.id)?.tokenId ||
+    vault.find((v) => v.listingId === baseResolved.id || v.token?.tokenId === baseResolved.id)?.token?.tokenId ||
+    (baseResolved.id.startsWith("token-") ? baseResolved.id.replace("token-", "") : /^\d+$/.test(baseResolved.id) ? baseResolved.id : null);
   const listing = useMemo(
     () => ({ ...baseResolved, tokenId: resolvedTokenId || baseResolved.tokenId }),
     [baseResolved, resolvedTokenId],
@@ -90,6 +91,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     queryKey: ["token-market-listing", resolvedTokenId],
     enabled: enabledOnChain,
     refetchInterval: 3000,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
       try {
@@ -114,6 +116,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     queryKey: ["token-owner", resolvedTokenId],
     enabled: enabledOnChain,
     refetchInterval: 3000,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
       try {
@@ -153,7 +156,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     : isOwned(listing.id);
 
   const listed = enabledOnChain
-    ? Boolean(onChainMarketListing)
+    ? onChainMarketListing !== undefined
+      ? Boolean(onChainMarketListing)
+      : isListed(listing.id)
     : isListed(listing.id);
 
   const displayPrice = enabledOnChain && onChainMarketListing
