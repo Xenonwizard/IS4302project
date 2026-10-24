@@ -9,10 +9,11 @@
  *   useEscrowedByMe()           my slabs locked in my open offers (tokenId → offerId), for the Vault
  *   useCollectors()             every active account (AccountOpened events + isActive), to trade with
  *   useTradeActions()           createOffer / accept / decline / withdraw / counter, from the user's wallet
+ *   useHandleAddress(handle)    the wallet behind a handle (AccountRegistry.handleOwner), to trade with from a chat
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { type Address } from "viem";
+import { keccak256, parseEventLogs, toBytes, zeroAddress, type Address, type TransactionReceipt } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { CUSTODY, DEPLOY_BLOCK, OFFER_STATUS, contracts, fromUsdcUnits, toUsdcUnits, type OfferStatusName } from "./config";
 import { useChainTx } from "./useChainTx";
@@ -23,7 +24,10 @@ export interface TradeSlab {
   image: string;
   grader: string;
   certNumber: string;
+  /** what its owner declared at submission, recorded on-chain */
   declaredValueCents: number;
+  /** listed for sale on SlabMarket: can't be put into an offer until it is delisted */
+  listed?: boolean;
 }
 
 export interface TradeOffer {
@@ -83,17 +87,21 @@ export function useTradeSlabs(owner: Address | undefined) {
       const ids = [...new Set(incoming.map((e) => e.args.tokenId!))];
       const owners = await Promise.all(ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] })));
       const held = ids.filter((_, i) => owners[i] === owner);
-      const slabs = await Promise.all(held.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] })));
+      const [slabs, listed] = await Promise.all([
+        Promise.all(held.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),
+        Promise.all(held.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "isListed", args: [id] }).catch(() => false))),
+      ]);
       return held
-        .map((id, i) => ({ id, s: slabs[i] }))
+        .map((id, i) => ({ id, s: slabs[i], listed: listed[i] }))
         .filter(({ s }) => CUSTODY[s.custody] === "Vaulted")
-        .map(({ id, s }) => ({
+        .map(({ id, s, listed }) => ({
           tokenId: id.toString(),
           title: s.title,
           image: s.image,
           grader: s.grader,
           certNumber: s.certNumber,
           declaredValueCents: Number(s.declaredValueCents),
+          listed,
         }));
     },
   });
@@ -175,9 +183,9 @@ export function useEscrowedByMe(me: Address | undefined) {
     refetchInterval: 8000,
     queryFn: async () => {
       const offers = await readOffers(client!, me!);
-      const held: Record<string, { offerId: string; taker: Address }> = {};
+      const held: Record<string, { offerId: string; taker: Address; room: string }> = {};
       for (const o of offers) {
-        if (o.status === "Open" && o.maker === me) for (const t of o.makerSlabs) held[t] = { offerId: o.id, taker: o.taker };
+        if (o.status === "Open" && o.maker === me) for (const t of o.makerSlabs) held[t] = { offerId: o.id, taker: o.taker, room: o.room };
       }
       return held;
     },
@@ -200,6 +208,28 @@ export function useCollectors(me: Address | undefined) {
         .filter((c) => c.active);
     },
   });
+}
+
+/** The wallet behind a handle, from AccountRegistry. Undefined until read, or if no one has it. */
+export function useHandleAddress(handle: string | undefined) {
+  const client = usePublicClient();
+  const clean = handle?.trim().toLowerCase().replace(/^@/, "");
+  return useQuery({
+    queryKey: ["handle-address", clean],
+    enabled: Boolean(client && clean),
+    staleTime: 60_000,
+    queryFn: async (): Promise<Address | null> => {
+      const owner = await client!.readContract({ ...contracts.accounts, functionName: "handleOwner", args: [keccak256(toBytes(clean!))] });
+      return owner === zeroAddress ? null : owner;
+    },
+  });
+}
+
+/** The id of the offer a createOffer / counter transaction made, read from its events. */
+export function newOfferId(receipt: TransactionReceipt): string | undefined {
+  const logs = parseEventLogs({ abi: contracts.tradeEscrow.abi, logs: receipt.logs, eventName: "OfferCreated" });
+  // A counter emits OfferCreated for the new offer too, so the last one is the offer just made.
+  return logs.at(-1)?.args.offerId?.toString();
 }
 
 export interface OfferTerms {

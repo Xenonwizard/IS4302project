@@ -29,6 +29,7 @@ import { contracts } from "./chain/config";
 import type {
   ActivityEvent,
   ChatMessage,
+  ChatTrade,
   Grader,
   LedgerEntry,
   Listing,
@@ -171,6 +172,15 @@ interface StoreValue extends PersistShape {
   /** sends an offer in the buyer's chat with the seller; returns the chat id */
   makeOffer: (listingId: string, bid: TradeBid, availableFunds?: number) => string | null;
   sendMessage: (negotiationId: string, text: string) => void;
+  /**
+   * Opens (or reopens) my chat with the owner of `anchor`, with no offer yet. The slab only anchors the
+   * chat; a trade in it can ask for any of their slabs. Returns the chat id.
+   */
+  openChat: (anchor: Listing) => string | null;
+  /** puts an on-chain trade offer into the chat as a message from me */
+  postTrade: (negotiationId: string, trade: ChatTrade) => void;
+  /** a short note in the chat saying what just happened (accepted, withdrawn…) */
+  chatNote: (negotiationId: string, text: string) => void;
   /** seller side: accept or decline the buyer's pending offer */
   respondToOffer: (negotiationId: string, offerId: string, accept: boolean, txHash?: string) => void;
   /** buyer side: take back a pending offer */
@@ -1305,6 +1315,68 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const openChat = useCallback((anchor: Listing): string | null => {
+    const me = latest.current.user?.username;
+    if (!me || anchor.owner === me) return null;
+    const id = negotiationId(anchor.id, me);
+    registerListing(anchor);
+    let updated: Negotiation | null = null;
+    setState((prev) => {
+      const existing = prev.negotiations[id];
+      const n: Negotiation =
+        existing && existing.status === "open"
+          ? existing
+          : {
+              id,
+              listingId: anchor.id,
+              seller: anchor.owner,
+              buyer: me,
+              status: "open",
+              createdAt: new Date().toISOString(),
+              messages: [
+                ...(existing?.messages ?? []),
+                systemMessage(existing ? `${me} reopened the chat.` : `${me} opened a chat with ${anchor.owner}.`, me),
+              ],
+            };
+      updated = n;
+      return {
+        ...prev,
+        // Kept so the chat's slab can be found again after a reload, but never shown as for sale.
+        slabs: prev.slabs.some((s) => s.id === anchor.id) ? prev.slabs : [anchor, ...prev.slabs],
+        overrides: prev.overrides[anchor.id] ? prev.overrides : { ...prev.overrides, [anchor.id]: { delisted: true } },
+        negotiations: { ...prev.negotiations, [id]: n },
+      };
+    });
+    if (updated) syncNegotiationToServer(updated);
+    return id;
+  }, []);
+
+  /** Adds one message from the signed-in user to an open chat and shares it with the other side. */
+  const appendMessage = useCallback((negId: string, build: (me: string) => ChatMessage, allowClosed = false) => {
+    const me = latest.current.user?.username;
+    if (!me) return;
+    let updated: Negotiation | null = null;
+    setState((prev) => {
+      const chat = prev.negotiations[negId];
+      if (!chat || (chat.status !== "open" && !allowClosed)) return prev;
+      updated = { ...chat, messages: [...chat.messages, build(me)] };
+      return { ...prev, negotiations: { ...prev.negotiations, [negId]: updated } };
+    });
+    if (updated) syncNegotiationToServer(updated);
+  }, []);
+
+  const postTrade = useCallback(
+    (negId: string, trade: ChatTrade) =>
+      appendMessage(negId, (me) => ({ id: messageId(), from: me, at: new Date().toISOString(), kind: "trade", trade })),
+    [appendMessage],
+  );
+
+  const chatNote = useCallback(
+    // A note about what just happened on-chain is kept even if the chat has closed in the meantime.
+    (negId: string, text: string) => appendMessage(negId, (me) => systemMessage(text, me), true),
+    [appendMessage],
+  );
+
   const respondToOffer = useCallback(
     (negId: string, offerId: string, accept: boolean, txHash?: string) => {
       const snapshot = latest.current;
@@ -1694,6 +1766,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     offboard,
     makeOffer,
     sendMessage,
+    openChat,
+    postTrade,
+    chatNote,
     respondToOffer,
     withdrawOffer,
     fileLostReport,

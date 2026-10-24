@@ -43,7 +43,9 @@ export function ChainVaultSync() {
   // Tokens the Vault already lists: keep ref updated to avoid re-triggering queryKey
   const knownIds = vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])).sort().join(",");
   const knownIdsRef = useRef(knownIds);
-  knownIdsRef.current = knownIds;
+  useEffect(() => {
+    knownIdsRef.current = knownIds;
+  }, [knownIds]);
 
   const { data } = useQuery({
     queryKey: ["owned-slabs", addrLower],

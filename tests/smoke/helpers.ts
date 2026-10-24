@@ -1,7 +1,8 @@
 import { createPublicClient, createWalletClient, http, parseEventLogs, type Address } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { accountRegistryAbi, deployments, slabVaultAbi } from "../../src/lib/chain/generated";
+import { accountRegistryAbi, deployments, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect } from "./fixtures";
 
 const local = deployments["31337"];
@@ -34,6 +35,24 @@ export const MISTY: Address = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 export async function ownerOf(tokenId: number) {
   const pub = createPublicClient({ chain: hardhat, transport: http() });
   return pub.readContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "ownerOf", args: [BigInt(tokenId)] });
+}
+
+/** Hardhat's published test key for account #2 (@misty). It only exists on the local test chain. */
+const MISTY_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
+
+/** @misty lists one of her slabs for sale on the marketplace (SlabMarket.list), at a dollar price. */
+export async function listAsMisty(tokenId: number, dollars: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const wallet = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(MISTY_KEY) });
+  await pub.waitForTransactionReceipt({
+    hash: await wallet.writeContract({ address: local.SlabMarket, abi: slabMarketAbi, functionName: "list", args: [BigInt(tokenId), BigInt(dollars * 1_000_000)] }),
+  });
+}
+
+/** Whether SlabVault says a slab is currently listed for sale. */
+export async function isListed(tokenId: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  return pub.readContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "isListed", args: [BigInt(tokenId)] });
 }
 
 /** Custody balance in AccountRegistry, in dollars. */

@@ -325,7 +325,7 @@ function SlabCard({
   /** tokenised slabs on a wallet account only */
   onTransfer?: () => void;
   /** the open trade offer that has this slab locked in escrow */
-  inOffer?: { offerId: string; taker: string };
+  inOffer?: { offerId: string; taker: string; room: string };
 }) {
   if (inOffer) {
     return (
@@ -340,10 +340,10 @@ function SlabCard({
             <Badge tone="accent"><Lock size={11} /> In offer #{inOffer.offerId}</Badge>
           </div>
           <p className="mt-1.5 text-[11px] text-dim">
-            Locked in TradeEscrow until the other collector answers, or you withdraw the offer.
+            Locked in TradeEscrow until the other collector answers, or you withdraw the offer in the chat.
           </p>
-          <Link href={`/trades/chain-${inOffer.taker}`} className="mt-3 block">
-            <Button size="sm" variant="secondary" className="w-full">See offer</Button>
+          <Link href={`/trades/${inOffer.room}`} className="mt-3 block">
+            <Button size="sm" variant="secondary" className="w-full">See chat</Button>
           </Link>
         </div>
       </div>

@@ -13,8 +13,9 @@ deposit and withdraw test USDC (EIP-2612 permit) and can close the account. A sl
 `SlabVault` is **minted the moment it is submitted**, pending and locked, so a parcel lost in the post
 is already a token that can be reported. It unlocks once Collector Crypt (simulated) has vaulted the
 slab and its Solana NFT is in Pokechain's escrow. Collectors then **trade slabs and cash both ways**
-in `TradeEscrow` ("3 Pikachus + $50 for your 2 Articunos"): the offer is locked in escrow and settles
-in one transaction, or not at all. Withdrawn slabs keep their token, locked, for tracing across
+in `TradeEscrow` ("3 Pikachus + $50 for your 2 Articunos"). The offer is made **inside a chat** while the two
+talk, weighed with each slab's market value or its owner's stated value, locked in escrow, and settled in
+one transaction, or not at all. Withdrawn slabs keep their token, locked, for tracing across
 Polygon, Solana and Collector Crypt. See **[docs/blockchain-onboarding.md](docs/blockchain-onboarding.md)**
 for the full explanation. Offers on the simulated catalogue sellers still live in `localStorage`.
 
@@ -45,8 +46,10 @@ collector #1** (no MetaMask needed), choose a handle and **Open account**.
 
 To try a trade straight away: **Chain log** (bottom left) → **Load demo traders**. That opens **@ash**
 (test collector #1: 3 Pikachus + a Charizard) and **@misty** (#2: 2 Articunos + a Charizard-GX), $1,000
-each, all through the real contracts. **Log in** with collector #1 → **Negotiation rooms** → **@misty** →
-**Make an offer**. Then sign out, log in with #2, and **Accept**, **Counter** or **Decline**.
+each, all through the real contracts. **Log in** with collector #1 → **Negotiation rooms** → **Chat** next to
+**@misty** → type a message → **Make a trade offer**: pick slabs from both vaults, add cash, and choose for each
+slab whether it counts at its **market** or **stated** value. The balance panel shows who comes out ahead.
+Then sign out, log in with #2, open the chat, and **Accept**, **Counter** or **Decline**.
 `docs/postman/` has the Postman collection that plays Pokechain's warehouse, Collector Crypt and the
 carrier. The dev server needs internet access to fetch card images. (`./dev.sh` is a macOS helper that
 pins Homebrew's Node; you don't need it.)
@@ -63,7 +66,7 @@ npm run test:unit
 npm run test:smoke
 ```
 
-`contracts:test` runs the Solidity unit and fuzz tests (54, including trade cash conservation);
+`contracts:test` runs the Solidity unit and fuzz tests (67, including trade cash conservation);
 `test:unit` checks the encryption round-trip; `test:smoke` clicks through each role in Chrome, including
 a lost parcel and a two-browser trade (it starts the chain and the app if they aren't running, and
 resets the demo first).
@@ -72,7 +75,7 @@ resets the demo first).
 
 | Role | Sees | Can do |
 | --- | --- | --- |
-| **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (NFT minted at once), report a parcel lost on the way in or out, trade slabs + cash with another collector (offer, accept, counter, decline, withdraw), transfer, withdraw a slab, trace it |
+| **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (NFT minted at once), report a parcel lost on the way in or out, trade slabs + cash with another collector in a chat (offer, accept, counter, decline, withdraw; each slab counted at market or stated value), transfer, withdraw a slab, trace it |
 | **Pokechain operator** (server key, simulated warehouse) | The submission tracker buttons, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, ship redemptions, close lost reports. No power over trades |
 | **Collector Crypt** (simulated custodian) | **/collector-crypt** | Publish its encryption key, read incoming parcels by decrypting them, vault slabs (Postman) |
 | **Anyone** | **/trace/[tokenId]**, the chain itself | Verify a slab's history, evidence and custody without trusting Pokechain |
@@ -82,7 +85,10 @@ resets the demo first).
 **Real:** the Solidity contracts on a real EVM chain (local Hardhat, or Polygon Amoy), wallet
 signatures, EIP-2612 permits, every on-chain read and event, the keccak256 evidence and commitments,
 and the X25519 + XChaCha20-Poly1305 encryption.
-Trades between collectors are real too: `TradeEscrow` holds the offer and swaps both sides on-chain.
+Trades between collectors are real too: `TradeEscrow` holds the offer and swaps both sides on-chain. The stated
+value of a slab is on-chain (`declaredValueCents`); the **market value** is the marketplace's estimate for the
+card and grade (seeded from the Pokémon TCG price data, not a live feed), and the balance maths is off-chain, in
+the browser: the contract moves whatever the offer names.
 **Simulated (labelled in the UI):** Collector Crypt's API and Solana NFTs (mock routes with the real
 Solana DAS request shapes), the carrier (including "parcel found"), Pokechain's warehouse actions (the
 operator buttons), the demo traders' seed, and the Hardhat test wallets that stand in for MetaMask locally.
@@ -99,7 +105,8 @@ operator buttons), the demo traders' seed, and the Hardhat test wallets that sta
 | *Something is already listening on 8545* | An old chain is still running | Close the other terminal (or the process on port 8545) and run `npm run chain` again |
 | Signed in on an old session, odd balances, or slabs that don't exist | Browser data from an earlier chain | Chain log panel → **Reset chain + demo data**, or use a private window |
 | *Load demo traders* says the handle is taken, or you can't sign up with collector #1 | Collector #1 is already **@ash** (demo traders loaded) | Use **Log in** with collector #1 instead of Sign up, or reset the chain first |
-| A trade offer won't send: *"isn't in the vault"* or *"isn't owned by that collector"* | The slab is still pending, withdrawn, or locked in another open offer | Pick another slab, or withdraw the other offer first |
+| A trade offer won't send: *"isn't in the vault"* or *"isn't owned by that collector"* | The slab is still pending, withdrawn, or locked in another open offer | Pick another slab, or withdraw the other offer in its chat first |
+| One of *your* slabs is greyed out in the trade builder: *"Listed for sale"* | A slab listed on the marketplace can't be locked in an offer | Cancel the listing in the Vault first (their listed slabs can still be asked for) |
 | MetaMask: wrong network, or transactions stuck | MetaMask isn't on the local chain, or remembers an old one | Use **Hardhat test collector #1**; or in MetaMask approve *Add network* (127.0.0.1:8545, chain 31337) and Settings → Advanced → **Clear activity tab data** |
 | Account page shows nothing after `git pull` | The contracts changed | Stop `npm run chain`, run `npm run setup`, start `npm run chain` again, then reset demo data |
 
@@ -116,9 +123,8 @@ npm run lint                 # eslint
 | `/` | Hero carousel, deal / fresh / grail rails, live trade rooms, browse by era, how-it-works |
 | `/marketplace` | 176 slabs, text search, 6 sort modes, filters (era, grade, grader, rarity, set, year, price, FMV, deals), density toggle, load-more, shareable URL state |
 | `/asset/[id]` | 3D slab viewer (tilt, turntable spin, card front, card back), buy now, make an offer, live trade room, cart, offers (owners can accept), market value, comps by grader and grade, population report, on-chain details, comments, activity |
-| `/trades` | On-chain trade rooms (one per collector), your chats, and your lost-item reports |
-| `/trades/chain-[address]` | On-chain trade room with one collector: build an offer from both vaults + cash, accept / counter / decline / withdraw (TradeEscrow) |
-| `/trades/[id]` | Chat with a (simulated) catalogue seller about one slab: bid with cash and/or vault slabs, owner accepts, Report lost |
+| `/trades` | Collectors to chat with, your chats, and your lost-item reports |
+| `/trades/[id]` | A chat about one slab. With a collector: messages plus multi-slab trade offers (TradeEscrow) with the market / stated balance. With a (simulated) catalogue seller: bid with cash and/or vault slabs, Report lost |
 | `/vault` | Collection, my listings, offers made, orders, watchlist; list for sale, delist, open trade room, request shipping |
 | `/checkout`, `/checkout/success` | Cart review, payment method, order receipt with tx hash |
 | `/profile/[username]` | Any seller's public collection and activity |
@@ -142,9 +148,15 @@ npm run lint                 # eslint
 7. **List from the vault**, **make an offer**, **accept an offer** on a slab you own, and
    **request shipping**.
 8. **Reset demo data** in the user menu wipes `localStorage`.
-9. **Trade on-chain with another collector** (Negotiation rooms → a collector's room): slabs and cash
-   on both sides, locked in `TradeEscrow`, accepted, countered, declined or withdrawn; both Vaults and
-   balances update from the chain.
+9. **Trade on-chain with another collector, in a chat** (Negotiation rooms → **Chat** with a collector, or
+   **Make an offer** on a slab a collector has listed): chat, then **Make a trade offer** with slabs and
+   cash on both sides. Each slab counts at its **market value** (the marketplace estimate for that card and
+   grade) or its **stated value** (what its owner declared at submission, recorded on-chain). The balance
+   shows what you give, what you get, who is ahead and by how much, and the same trade at all-market and
+   all-stated values; slabs whose stated value is over 20% off market are flagged. Only you see your
+   balance. The offer is locked in `TradeEscrow` and the other collector accepts, counters or declines in
+   the chat; both Vaults and balances update from the chain. Their slab that is listed for sale is
+   delisted (its own transaction) when they accept.
 
 ## The 3D slab
 
@@ -168,7 +180,9 @@ npm run lint                 # eslint
 | --- | --- |
 | `src/data/pokemon-cards.json` | 176 real cards from the Pokémon TCG API: set, number, rarity, image URLs and the raw TCGplayer market price at build time |
 | `src/lib/catalog.ts` | Turns each card into a listing: grader, grade, graded FMV (raw price × era- and grade-based premium), ask, owner, offers, sales, activity |
-| `src/lib/trade.ts` | Trade room seeding, bid valuation, and the simulated crowd and owner |
+| `src/lib/negotiation.ts` | Chat offers and the simulated catalogue buyer or seller |
+| `src/lib/valuation.ts` | The trade balance: market vs stated value per slab, who is ahead, the verdict (unit-tested) |
+| `src/lib/chain/slabValue.ts` | Market value of a tokenised slab (from its cert, same estimate as the submit form) and the chat's anchor listing |
 | `src/lib/store.tsx` | Session, cart, vault, orders, offers, trade rooms, settlement, lost-item reports + `localStorage` |
 | `src/lib/filters.ts` | Filter model, matching and sorting |
 | `src/lib/rng.ts` / `pools.ts` | Seeded PRNG, handles, grade labels, comment and note text |
