@@ -259,9 +259,13 @@ function withToken(listing: Listing, token: SlabToken): Listing {
 
 /** The listing as it stands in this state: price and owner after any changes. */
 function current(prev: PersistShape, id: string): Listing | undefined {
-  const base = getListing(id);
+  const base =
+    getListing(id) ||
+    prev.slabs.find(
+      (s) => s.id === id || s.tokenId === id || (s.tokenId && `token-${s.tokenId}` === id),
+    );
   if (!base) return undefined;
-  const o = prev.overrides[id];
+  const o = prev.overrides[base.id] || prev.overrides[id];
   return o ? { ...base, price: o.price ?? base.price, owner: o.owner ?? base.owner } : base;
 }
 
@@ -289,7 +293,12 @@ function settleDeal(
   let vault = prev.vault;
   let ledger = prev.ledger;
 
-  const sellerVaultItem = prev.vault.find((v) => v.listingId === listing.id);
+  const sellerVaultItem = prev.vault.find(
+    (v) =>
+      v.listingId === listing.id ||
+      v.listingId === n.listingId ||
+      (listing.tokenId && (v.token?.tokenId === listing.tokenId || v.listingId === `token-${listing.tokenId}`)),
+  );
   const token: SlabToken | undefined =
     sellerVaultItem?.token ||
     (listing.tokenId
@@ -298,7 +307,7 @@ function settleDeal(
           contract: listing.contract || contracts.slabVault.address,
           tokenId: listing.tokenId,
           owner: n.buyer,
-          mintTx: "",
+          mintTx: txHash || "",
           custodianRef: "",
         }
       : undefined);
@@ -307,11 +316,11 @@ function settleDeal(
     const effectiveFunds = prev.user?.address
       ? Math.max(availableFunds ?? 0, ledgerBalance(prev.ledger))
       : ledgerBalance(prev.ledger);
-    if (cash > effectiveFunds) {
+    if (cash > effectiveFunds && !txHash) {
       return { next: prev, error: `Your wallet cannot cover the ${usd(cash, { cents: true })} cash.` };
     }
     const vaulted = (id: string) => prev.vault.some((v) => v.listingId === id && v.status === "Vaulted");
-    if (!slabIds.every(vaulted)) {
+    if (!slabIds.every(vaulted) && !txHash) {
       return { next: prev, error: "A slab in this offer is no longer in your vault." };
     }
     vault = vault.filter((v) => !slabIds.includes(v.listingId));
@@ -332,10 +341,24 @@ function settleDeal(
       ];
     }
   } else if (n.seller === me) {
-    if (!prev.vault.some((v) => v.listingId === listing.id)) {
+    const ownsSlab =
+      Boolean(txHash) ||
+      Boolean(listing.tokenId) ||
+      prev.vault.some(
+        (v) =>
+          v.listingId === listing.id ||
+          v.listingId === n.listingId ||
+          (listing.tokenId && (v.token?.tokenId === listing.tokenId || v.listingId === `token-${listing.tokenId}`)),
+      );
+    if (!ownsSlab) {
       return { next: prev, error: "You no longer own this slab." };
     }
-    vault = vault.filter((v) => v.listingId !== listing.id);
+    vault = vault.filter(
+      (v) =>
+        v.listingId !== listing.id &&
+        v.listingId !== n.listingId &&
+        (!listing.tokenId || (v.token?.tokenId !== listing.tokenId && v.listingId !== `token-${listing.tokenId}`)),
+    );
     vault = [
       ...slabIds.map<VaultItem>((id) => ({ listingId: id, acquiredAt: now, via: "Trade", status: "Vaulted" })),
       ...vault,
@@ -359,19 +382,33 @@ function settleDeal(
     txHash: txHash || `0x${hexId(hashString(now + n.id), 8)}`,
   };
   const existingActivity = overrides[listing.id]?.activity || listing.activity || [];
-  overrides[listing.id] = {
-    ...overrides[listing.id],
+  const overrideUpdate = {
     owner: n.buyer,
     soldTo: n.buyer,
     delisted: true,
     activity: [newActivity, ...existingActivity],
   };
+  overrides[listing.id] = { ...overrides[listing.id], ...overrideUpdate };
+  overrides[n.listingId] = { ...overrides[n.listingId], ...overrideUpdate };
+  if (listing.tokenId) {
+    overrides[`token-${listing.tokenId}`] = { ...overrides[`token-${listing.tokenId}`], ...overrideUpdate };
+    overrides[listing.tokenId] = { ...overrides[listing.tokenId], ...overrideUpdate };
+  }
   for (const id of slabIds) overrides[id] = { ...overrides[id], owner: n.seller, delisted: true };
 
   const negotiations = { ...prev.negotiations };
   for (const other of Object.values(prev.negotiations)) {
-    if (other.listingId !== listing.id || other.status !== "open") continue;
-    if (other.id === n.id) {
+    if (other.status !== "open") continue;
+    const isSameRoom = other.id === n.id;
+    const isSameListing =
+      other.listingId === listing.id ||
+      other.listingId === n.listingId ||
+      (listing.tokenId &&
+        (other.listingId === `token-${listing.tokenId}` || other.listingId === listing.tokenId));
+
+    if (!isSameRoom && !isSameListing) continue;
+
+    if (isSameRoom) {
       negotiations[other.id] = {
         ...other,
         status: "sold",
@@ -1430,7 +1467,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             } else {
               const existingMsgs = existing.messages?.length || 0;
               const incomingMsgs = incoming.messages?.length || 0;
-              if (existing.status !== incoming.status || incomingMsgs !== existingMsgs) {
+              const hasDiff =
+                existing.status !== incoming.status ||
+                incomingMsgs !== existingMsgs ||
+                JSON.stringify(existing.messages) !== JSON.stringify(incoming.messages);
+              if (hasDiff) {
                 merged[id] = {
                   ...existing,
                   ...incoming,
