@@ -35,8 +35,17 @@ function testCollectorWallet({ index, address, hue }: (typeof TEST_COLLECTORS)[n
   };
   const remember = (on: boolean) => {
     try {
-      if (on) window.localStorage.setItem(flag, "1");
-      else window.localStorage.removeItem(flag);
+      if (on) {
+        // Disconnect all other test collectors so wagmi never tries to keep multiple test wallets authorized
+        for (const c of TEST_COLLECTORS) {
+          if (c.index !== index) {
+            window.localStorage.removeItem(`pokechain.hardhat-${c.index}.connected`);
+          }
+        }
+        window.localStorage.setItem(flag, "1");
+      } else {
+        window.localStorage.removeItem(flag);
+      }
     } catch {
       /* storage blocked: the wallet just won't survive a reload */
     }

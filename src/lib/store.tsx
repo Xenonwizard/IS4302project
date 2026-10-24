@@ -11,7 +11,8 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { BRAND } from "./brand";
-import { LISTINGS, getListing, makeStarterListings, makeSubmittedListing, registerListing } from "./catalog";
+import { LISTINGS, buildOnChainListing, getListing, makeStarterListings, makeSubmittedListing, registerListing } from "./catalog";
+import { IS_DEPLOYED } from "./chain/config";
 import { usd } from "./format";
 import {
   botReply,
@@ -109,6 +110,8 @@ const EMPTY: PersistShape = {
 /** A slab token the connected wallet owns, as SlabVault reports it. */
 export interface ChainSlab {
   token: SlabToken;
+  title?: string;
+  image?: string;
   grader: Grader;
   certNumber: string;
   /** SlabVault custody, e.g. "Vaulted", "Shipped" */
@@ -256,9 +259,13 @@ function withToken(listing: Listing, token: SlabToken): Listing {
 
 /** The listing as it stands in this state: price and owner after any changes. */
 function current(prev: PersistShape, id: string): Listing | undefined {
-  const base = getListing(id);
+  const base =
+    getListing(id) ||
+    prev.slabs.find(
+      (s) => s.id === id || s.tokenId === id || (s.tokenId && `token-${s.tokenId}` === id),
+    );
   if (!base) return undefined;
-  const o = prev.overrides[id];
+  const o = prev.overrides[base.id] || prev.overrides[id];
   return o ? { ...base, price: o.price ?? base.price, owner: o.owner ?? base.owner } : base;
 }
 
@@ -286,7 +293,12 @@ function settleDeal(
   let vault = prev.vault;
   let ledger = prev.ledger;
 
-  const sellerVaultItem = prev.vault.find((v) => v.listingId === listing.id);
+  const sellerVaultItem = prev.vault.find(
+    (v) =>
+      v.listingId === listing.id ||
+      v.listingId === n.listingId ||
+      (listing.tokenId && (v.token?.tokenId === listing.tokenId || v.listingId === `token-${listing.tokenId}`)),
+  );
   const token: SlabToken | undefined =
     sellerVaultItem?.token ||
     (listing.tokenId
@@ -295,7 +307,7 @@ function settleDeal(
           contract: listing.contract || contracts.slabVault.address,
           tokenId: listing.tokenId,
           owner: n.buyer,
-          mintTx: "",
+          mintTx: txHash || "",
           custodianRef: "",
         }
       : undefined);
@@ -304,11 +316,11 @@ function settleDeal(
     const effectiveFunds = prev.user?.address
       ? Math.max(availableFunds ?? 0, ledgerBalance(prev.ledger))
       : ledgerBalance(prev.ledger);
-    if (cash > effectiveFunds) {
+    if (cash > effectiveFunds && !txHash) {
       return { next: prev, error: `Your wallet cannot cover the ${usd(cash, { cents: true })} cash.` };
     }
     const vaulted = (id: string) => prev.vault.some((v) => v.listingId === id && v.status === "Vaulted");
-    if (!slabIds.every(vaulted)) {
+    if (!slabIds.every(vaulted) && !txHash) {
       return { next: prev, error: "A slab in this offer is no longer in your vault." };
     }
     vault = vault.filter((v) => !slabIds.includes(v.listingId));
@@ -329,10 +341,24 @@ function settleDeal(
       ];
     }
   } else if (n.seller === me) {
-    if (!prev.vault.some((v) => v.listingId === listing.id)) {
+    const ownsSlab =
+      Boolean(txHash) ||
+      Boolean(listing.tokenId) ||
+      prev.vault.some(
+        (v) =>
+          v.listingId === listing.id ||
+          v.listingId === n.listingId ||
+          (listing.tokenId && (v.token?.tokenId === listing.tokenId || v.listingId === `token-${listing.tokenId}`)),
+      );
+    if (!ownsSlab) {
       return { next: prev, error: "You no longer own this slab." };
     }
-    vault = vault.filter((v) => v.listingId !== listing.id);
+    vault = vault.filter(
+      (v) =>
+        v.listingId !== listing.id &&
+        v.listingId !== n.listingId &&
+        (!listing.tokenId || (v.token?.tokenId !== listing.tokenId && v.listingId !== `token-${listing.tokenId}`)),
+    );
     vault = [
       ...slabIds.map<VaultItem>((id) => ({ listingId: id, acquiredAt: now, via: "Trade", status: "Vaulted" })),
       ...vault,
@@ -356,19 +382,33 @@ function settleDeal(
     txHash: txHash || `0x${hexId(hashString(now + n.id), 8)}`,
   };
   const existingActivity = overrides[listing.id]?.activity || listing.activity || [];
-  overrides[listing.id] = {
-    ...overrides[listing.id],
+  const overrideUpdate = {
     owner: n.buyer,
     soldTo: n.buyer,
     delisted: true,
     activity: [newActivity, ...existingActivity],
   };
+  overrides[listing.id] = { ...overrides[listing.id], ...overrideUpdate };
+  overrides[n.listingId] = { ...overrides[n.listingId], ...overrideUpdate };
+  if (listing.tokenId) {
+    overrides[`token-${listing.tokenId}`] = { ...overrides[`token-${listing.tokenId}`], ...overrideUpdate };
+    overrides[listing.tokenId] = { ...overrides[listing.tokenId], ...overrideUpdate };
+  }
   for (const id of slabIds) overrides[id] = { ...overrides[id], owner: n.seller, delisted: true };
 
   const negotiations = { ...prev.negotiations };
   for (const other of Object.values(prev.negotiations)) {
-    if (other.listingId !== listing.id || other.status !== "open") continue;
-    if (other.id === n.id) {
+    if (other.status !== "open") continue;
+    const isSameRoom = other.id === n.id;
+    const isSameListing =
+      other.listingId === listing.id ||
+      other.listingId === n.listingId ||
+      (listing.tokenId &&
+        (other.listingId === `token-${listing.tokenId}` || other.listingId === listing.tokenId));
+
+    if (!isSameRoom && !isSameListing) continue;
+
+    if (isSameRoom) {
       negotiations[other.id] = {
         ...other,
         status: "sold",
@@ -542,11 +582,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const key = `${t.title}::${t.body || ""}`;
     const now = Date.now();
     const last = recentToasts.current.get(key) || 0;
-    if (now - last < 4000) return; // Deduplicate identical toasts within 4s
+    if (now - last < 6000) return; // Deduplicate identical toasts within 6s
     recentToasts.current.set(key, now);
 
     const id = ++toastSeq.current;
     setToasts((prev) => {
+      if (prev.some((p) => p.title === t.title && p.body === t.body)) return prev;
       const filtered = prev.filter((p) => p.title !== t.title || p.body !== t.body);
       return [...filtered.slice(-2), { ...t, id }];
     });
@@ -589,10 +630,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             overrides: mergedOverrides,
             negotiations: mergedNegotiations,
           };
+          // If switching to an on-chain account, filter out vault items that belong to other addresses
+          if (address) {
+            prev.vault = next.vault.filter(
+              (v) => !v.token || v.token.owner.toLowerCase() === address.toLowerCase(),
+            );
+          }
           prev.slabs.forEach(registerListing);
         }
         const fresh = !prev.ledger.length && !prev.vault.length;
-        const starters = fresh && username === DEMO_USER ? makeStarterListings(username, Date.now()) : [];
+        const starters = fresh && !address && username === DEMO_USER ? makeStarterListings(username, Date.now()) : [];
         starters.forEach(registerListing);
         return {
           ...prev,
@@ -653,7 +700,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? [...o.activity, ...(listing.activity ?? []).filter((a) => !o.activity!.some((oa) => oa.txHash === a.txHash))]
         : listing.activity;
       const combinedSales = o.sales
-        ? [...o.sales, ...(listing.sales ?? [])]
+        ? [...o.sales, ...(listing.sales ?? []).filter((s) => !o.sales!.some((os) => os.date === s.date))]
         : listing.sales;
       return {
         ...listing,
@@ -675,18 +722,57 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const isListed = useCallback(
     (id: string) => {
-      const o = state.overrides[id];
-      if (o?.delisted !== undefined) return !o.delisted;
-      const slab = state.slabs.find((s) => s.id === id);
-      if (slab?.tokenId) {
-        const matchingSlabListed = state.slabs.some(
-          (s) => s.tokenId === slab.tokenId && state.overrides[s.id]?.delisted === false,
-        );
-        if (matchingSlabListed) return true;
+      // 1. Find all slab representations matching this id or tokenId
+      const matchingSlabs = state.slabs.filter(
+        (s) => s.id === id || s.tokenId === id || (s.tokenId && `token-${s.tokenId}` === id),
+      );
+
+      // 2. If any matching slab is explicitly listed on-chain (isListed: true from SlabMarket), it is listed!
+      if (matchingSlabs.some((s) => s.isListed === true)) {
+        return true;
       }
+
+      // 3. Check for positive overrides: if explicitly listed via override, it is listed
+      const o = state.overrides[id];
+      if (o?.delisted === false) return true;
+
+      // 4. Check tokenId-based positive overrides
+      const tokenSlab = matchingSlabs.find((s) => s.tokenId);
+      const tokenId = tokenSlab?.tokenId || (id.startsWith("token-") ? id.slice(6) : undefined);
+      if (tokenId) {
+        if (
+          state.overrides[`token-${tokenId}`]?.delisted === false ||
+          state.overrides[tokenId]?.delisted === false
+        ) {
+          return true;
+        }
+      }
+
+      // 5. If any matching slab is explicitly unlisted on-chain (isListed: false), it is unlisted
+      if (matchingSlabs.length > 0 && matchingSlabs.every((s) => s.isListed === false)) {
+        return false;
+      }
+
+      // 6. Check negative overrides
+      if (o?.delisted === true) return false;
+      if (tokenId) {
+        if (
+          state.overrides[`token-${tokenId}`]?.delisted === true ||
+          state.overrides[tokenId]?.delisted === true
+        ) {
+          return false;
+        }
+      }
+
+      // 7. Fallback to slab.isListed if specified
+      const anyListedFlag = matchingSlabs.find((s) => s.isListed !== undefined)?.isListed;
+      if (anyListedFlag !== undefined) return anyListedFlag;
+
+      // When deployed on-chain, catalog demo cards should NOT be listed
+      if (IS_DEPLOYED) return false;
       // Submitted and tokenized slabs are unlisted by default unless explicitly listed
       if (id.startsWith("sub-") || id.startsWith("token-")) return false;
-      // Catalog demo cards are listed by default
+      // Catalog demo cards are listed by default when offline
       return true;
     },
     [state.overrides, state.slabs],
@@ -864,7 +950,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           txHash: saleTx,
         };
         const prevActivity = overrides[listing.id]?.activity ?? listing.activity ?? [];
-        const prevSales = overrides[listing.id]?.sales ?? listing.sales ?? [];
+        const saleItem: Sale = { date: now, price };
+        const prevSales = (overrides[listing.id]?.sales ?? listing.sales ?? []).filter((s) => s.date !== now);
 
         overrides[listing.id] = {
           ...overrides[listing.id],
@@ -872,17 +959,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           soldTo: me,
           delisted: true,
           activity: [saleEvent, ...prevActivity.filter((e) => e.txHash !== saleTx)],
-          sales: [{ date: now, price }, ...prevSales],
+          sales: [saleItem, ...prevSales],
         };
 
         const updatedSlabs = prev.slabs.map((s) => {
           if (s.id !== listing.id) return s;
+          const slabSales = (s.sales ?? []).filter((sl) => sl.date !== now);
           return {
             ...s,
             owner: me,
             ownerAddress: user.address ?? s.ownerAddress,
             activity: [saleEvent, ...(s.activity ?? []).filter((e) => e.txHash !== saleTx)],
-            sales: [{ date: now, price }, ...(s.sales ?? [])],
+            sales: [saleItem, ...slabSales],
           };
         });
 
@@ -971,18 +1059,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       const added: { listing: Listing; item: VaultItem }[] = [];
       for (const o of arrived) {
-        const made = makeSubmittedListing({ grader: o.grader, certNumber: o.certNumber, owner: me.username, nowMs: Date.now() });
-        if (!made) continue;
-        const existingSlab = snapshot.slabs.find((s) => s.id === made.id || s.tokenId === o.token.tokenId);
-        const existingOverrides = snapshot.overrides[made.id];
-        const preservedActivity = existingOverrides?.activity ?? existingSlab?.activity;
-        const baseWithToken = withToken(made, o.token);
-        const listing = {
-          ...baseWithToken,
-          price: o.isListed && o.listedPrice ? o.listedPrice : (existingOverrides?.price ?? baseWithToken.price),
-          activity: preservedActivity ?? baseWithToken.activity,
-          sales: existingOverrides?.sales ?? existingSlab?.sales ?? baseWithToken.sales,
-        };
+        const listing = buildOnChainListing({
+          tokenId: o.token.tokenId,
+          title: o.title || `Vaulted Slab #${o.token.tokenId}`,
+          image: o.image || "",
+          grader: o.grader,
+          certNumber: o.certNumber,
+          declaredValueCents: o.token.declaredValueCents,
+          price: o.isListed && o.listedPrice ? o.listedPrice : undefined,
+          owner: me.username,
+          ownerAddress: me.address,
+          contract: o.token.contract,
+        });
         registerListing(listing);
         const withdrawn = o.custody !== "Vaulted";
         const status: VaultItem["status"] = withdrawn ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
@@ -1029,14 +1117,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           });
 
         const newOverrides = { ...prev.overrides };
-        for (const id of goneIds) {
-          newOverrides[id] = { ...newOverrides[id], delisted: true };
-        }
+        // Update listing price and listing state only for items owned by this user
         for (const a of added) {
           if (a.item.status === "Listed") {
             newOverrides[a.listing.id] = { ...newOverrides[a.listing.id], price: a.item.listedPrice, delisted: false };
-          } else {
-            newOverrides[a.listing.id] = { ...newOverrides[a.listing.id], delisted: true };
           }
         }
         for (const v of updatedVault) {
@@ -1056,7 +1140,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           overrides: newOverrides,
         };
       });
-      for (const a of added) pushToast({ title: `Token #${a.item.token!.tokenId} arrived`, body: `${a.listing.shortName} is now in your Vault.`, tone: "success" });
+      // Only show arrival toasts if this is not the initial hydration of pre-existing vault slabs
+      if (known.size > 0) {
+        for (const a of added) pushToast({ title: `Token #${a.item.token!.tokenId} arrived`, body: `${a.listing.shortName} is now in your Vault.`, tone: "success" });
+      }
       for (const v of gone) pushToast({ title: `Token #${v.token!.tokenId} left your wallet`, body: "Another collector owns it now." });
     },
     [pushToast],
@@ -1083,6 +1170,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             delisted: false,
           };
           if (a.listing.tokenId) {
+            newOverrides[`token-${a.listing.tokenId}`] = {
+              ...newOverrides[`token-${a.listing.tokenId}`],
+              price: a.price,
+              owner: a.seller || newOverrides[`token-${a.listing.tokenId}`]?.owner,
+              delisted: false,
+            };
+            newOverrides[a.listing.tokenId] = {
+              ...newOverrides[a.listing.tokenId],
+              price: a.price,
+              owner: a.seller || newOverrides[a.listing.tokenId]?.owner,
+              delisted: false,
+            };
             for (const s of prev.slabs) {
               if (s.tokenId === a.listing.tokenId) {
                 newOverrides[s.id] = {
@@ -1104,24 +1203,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ...newOverrides[s.id],
                 delisted: true,
               };
+              newOverrides[`token-${s.tokenId}`] = {
+                ...newOverrides[`token-${s.tokenId}`],
+                delisted: true,
+              };
             }
           }
         }
 
-        const newSlabsMap = new Map(prev.slabs.map((s) => [s.id, s]));
+        const newSlabsMap = new Map<string, Listing>();
         for (const a of activeListings) {
-          if (!newSlabsMap.has(a.listing.id)) {
-            newSlabsMap.set(a.listing.id, a.listing);
-          } else {
-            const existing = newSlabsMap.get(a.listing.id)!;
-            newSlabsMap.set(a.listing.id, {
-              ...existing,
-              price: a.price,
-              owner: a.seller || existing.owner,
-              ownerAddress: a.listing.ownerAddress || existing.ownerAddress,
-              tokenId: a.listing.tokenId || existing.tokenId,
-              listedAt: a.listing.listedAt || existing.listedAt,
-            });
+          const l = { ...a.listing, isListed: true };
+          newSlabsMap.set(a.listing.id, l);
+          if (a.listing.tokenId) {
+            newSlabsMap.set(`token-${a.listing.tokenId}`, { ...l, id: `token-${a.listing.tokenId}` });
+          }
+        }
+        for (const s of prev.slabs) {
+          if (!newSlabsMap.has(s.id)) {
+            const isStillActive = s.tokenId ? activeTokenIds.has(s.tokenId) : false;
+            newSlabsMap.set(s.id, { ...s, isListed: isStillActive });
           }
         }
 
@@ -1368,7 +1469,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             } else {
               const existingMsgs = existing.messages?.length || 0;
               const incomingMsgs = incoming.messages?.length || 0;
-              if (existing.status !== incoming.status || incomingMsgs !== existingMsgs) {
+              const hasDiff =
+                existing.status !== incoming.status ||
+                incomingMsgs !== existingMsgs ||
+                JSON.stringify(existing.messages) !== JSON.stringify(incoming.messages);
+              if (hasDiff) {
                 merged[id] = {
                   ...existing,
                   ...incoming,
@@ -1712,11 +1817,13 @@ export function useMarketInventory(): Listing[] {
   const { isListed, resolve, slabs } = useStore();
   return useMemo(() => {
     const map = new Map<string, Listing>();
-    for (const l of [...slabs, ...LISTINGS]) {
+    const pool = IS_DEPLOYED ? slabs : slabs.length > 0 ? slabs : LISTINGS;
+    for (const l of pool) {
       if (isListed(l.id)) {
         const item = resolve(l);
         const key = item.tokenId ? `token-${item.tokenId}` : item.id;
-        if (!map.has(key) || l.tokenId) {
+        // Prefer canonical token-${tokenId} listing over legacy sub-xxx representation
+        if (!map.has(key) || (item.id.startsWith("token-") && !map.get(key)!.id.startsWith("token-"))) {
           map.set(key, item);
         }
       }

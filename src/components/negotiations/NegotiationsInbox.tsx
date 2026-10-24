@@ -4,12 +4,12 @@ import clsx from "clsx";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Flag, MessagesSquare, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { bidValue, lastActivity, latestOffer, offerMix } from "@/lib/negotiation";
 import { useStore } from "@/lib/store";
-import type { Negotiation } from "@/lib/types";
+import type { Listing, Negotiation } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 import { Avatar, Badge, Button, TimeAgo } from "../ui/primitives";
 import { reportItemLabel } from "./ReportLostModal";
@@ -23,7 +23,7 @@ export const INBOX_URL_KEY = "pokechain.inboxUrl";
 export function NegotiationsInbox() {
   const params = useSearchParams();
   const router = useRouter();
-  const { ready, user, negotiations, lostReports, setAuthOpen } = useStore();
+  const { ready, user, negotiations, lostReports, setAuthOpen, slabs, vault } = useStore();
   const [tab, setTab] = useState<Tab>(() => {
     const t = params.get("tab");
     return t === "buying" || t === "selling" ? t : params.get("listing") ? "selling" : "all";
@@ -45,7 +45,79 @@ export function NegotiationsInbox() {
     }
   }, [tab, listingFilter, router]);
 
-  if (ready && !me) {
+  const matchingListingIds = useMemo(() => {
+    if (!listingFilter) return null;
+    const ids = new Set<string>([listingFilter]);
+    if (listingFilter.startsWith("token-")) ids.add(listingFilter.replace("token-", ""));
+    else if (/^\d+$/.test(listingFilter)) ids.add(`token-${listingFilter}`);
+
+    // Look for target slab across slabs, catalog and vault
+    const slab =
+      getListing(listingFilter) ||
+      slabs.find(
+        (s) =>
+          s.id === listingFilter ||
+          s.tokenId === listingFilter ||
+          s.id === `token-${listingFilter}` ||
+          (s.tokenId && `token-${s.tokenId}` === listingFilter),
+      ) ||
+      vault.find(
+        (v) =>
+          v.listingId === listingFilter ||
+          v.token?.tokenId === listingFilter ||
+          (v.token?.tokenId && `token-${v.token.tokenId}` === listingFilter),
+      );
+
+    if (slab) {
+      if ("id" in slab) {
+        ids.add(slab.id);
+        if (slab.tokenId) {
+          ids.add(slab.tokenId);
+          ids.add(`token-${slab.tokenId}`);
+        }
+        if (slab.certNumber) {
+          for (const s of slabs) {
+            if (s.certNumber === slab.certNumber) {
+              ids.add(s.id);
+              if (s.tokenId) {
+                ids.add(s.tokenId);
+                ids.add(`token-${s.tokenId}`);
+              }
+            }
+          }
+          for (const v of vault) {
+            const vListing = getListing(v.listingId) || slabs.find((s) => s.id === v.listingId);
+            if (vListing?.certNumber === slab.certNumber) {
+              ids.add(v.listingId);
+              if (v.token?.tokenId) {
+                ids.add(v.token.tokenId);
+                ids.add(`token-${v.token.tokenId}`);
+              }
+            }
+          }
+        }
+      } else {
+        if (slab.listingId) ids.add(slab.listingId);
+        if (slab.token?.tokenId) {
+          ids.add(slab.token.tokenId);
+          ids.add(`token-${slab.token.tokenId}`);
+        }
+      }
+    }
+    return ids;
+  }, [listingFilter, slabs, vault]);
+
+  if (!ready) {
+    return (
+      <div className="space-y-6 px-4 py-6 lg:px-6">
+        <div className="skeleton h-10 w-48 rounded-xl" />
+        <div className="skeleton h-12 w-full rounded-2xl" />
+        <div className="skeleton h-[400px] w-full rounded-card" />
+      </div>
+    );
+  }
+
+  if (!me) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
         <span className="grid h-14 w-14 place-items-center rounded-2xl bg-accent/15 text-accent">
@@ -67,8 +139,43 @@ export function NegotiationsInbox() {
     .sort((a, b) => Date.parse(lastActivity(b)) - Date.parse(lastActivity(a)));
   const shown = mine
     .filter((n) => tab === "all" || (tab === "buying" ? n.buyer === me : n.seller === me))
-    .filter((n) => !listingFilter || n.listingId === listingFilter);
-  const filtered = listingFilter ? getListing(listingFilter) : undefined;
+    .filter((n) => {
+      if (!matchingListingIds) return true;
+      if (matchingListingIds.has(n.listingId)) return true;
+      const nSlab =
+        getListing(n.listingId) ||
+        slabs.find(
+          (s) =>
+            s.id === n.listingId ||
+            s.tokenId === n.listingId ||
+            s.id === `token-${n.listingId}` ||
+            (s.tokenId && `token-${s.tokenId}` === n.listingId),
+        );
+      if (nSlab) {
+        if (matchingListingIds.has(nSlab.id)) return true;
+        if (nSlab.tokenId && (matchingListingIds.has(nSlab.tokenId) || matchingListingIds.has(`token-${nSlab.tokenId}`))) return true;
+      }
+      return false;
+    });
+  const filtered = listingFilter
+    ? getListing(listingFilter) ||
+      slabs.find(
+        (s) =>
+          s.id === listingFilter ||
+          s.tokenId === listingFilter ||
+          s.id === `token-${listingFilter}` ||
+          (s.tokenId && `token-${s.tokenId}` === listingFilter),
+      ) ||
+      (() => {
+        const v = vault.find(
+          (item) =>
+            item.listingId === listingFilter ||
+            item.token?.tokenId === listingFilter ||
+            (item.token?.tokenId && `token-${item.token.tokenId}` === listingFilter),
+        );
+        return v ? getListing(v.listingId) || slabs.find((s) => s.id === v.listingId) : undefined;
+      })()
+    : undefined;
 
   return (
     <div className="space-y-6 px-4 py-6 lg:px-6">
@@ -110,7 +217,7 @@ export function NegotiationsInbox() {
       {shown.length ? (
         <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
           {shown.map((n) => (
-            <Row key={n.id} n={n} me={me!} />
+            <Row key={n.id} n={n} me={me!} slabs={slabs} />
           ))}
         </ul>
       ) : (
@@ -163,8 +270,16 @@ export function NegotiationsInbox() {
   );
 }
 
-function Row({ n, me }: { n: Negotiation; me: string }) {
-  const listing = getListing(n.listingId);
+function Row({ n, me, slabs }: { n: Negotiation; me: string; slabs: Listing[] }) {
+  const listing =
+    getListing(n.listingId) ||
+    slabs.find(
+      (s) =>
+        s.id === n.listingId ||
+        s.tokenId === n.listingId ||
+        s.id === `token-${n.listingId}` ||
+        (s.tokenId && `token-${s.tokenId}` === n.listingId),
+    );
   if (!listing) return null;
   const iAmBuyer = n.buyer === me;
   const other = iAmBuyer ? n.seller : n.buyer;

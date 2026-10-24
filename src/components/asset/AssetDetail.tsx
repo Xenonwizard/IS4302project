@@ -29,7 +29,7 @@ import { DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ActivityEvent, Grader, Listing } from "@/lib/types";
+import type { ActivityEvent, Grader, Listing, Sale } from "@/lib/types";
 import { CopyText } from "../chain/ChainConsole";
 import { TokenRecord } from "../chain/TokenRecord";
 import { OfferModal } from "../modals/OfferModal";
@@ -67,8 +67,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const baseResolved = resolve(base);
   const resolvedTokenId =
     baseResolved.tokenId ||
-    slabs.find((s) => s.id === baseResolved.id)?.tokenId ||
-    vault.find((v) => v.listingId === baseResolved.id)?.token?.tokenId;
+    slabs.find((s) => s.id === baseResolved.id || s.tokenId === baseResolved.id || `token-${s.tokenId}` === baseResolved.id)?.tokenId ||
+    vault.find((v) => v.listingId === baseResolved.id || v.token?.tokenId === baseResolved.id)?.token?.tokenId ||
+    (baseResolved.id.startsWith("token-") ? baseResolved.id.replace("token-", "") : /^\d+$/.test(baseResolved.id) ? baseResolved.id : null);
   const listing = useMemo(
     () => ({ ...baseResolved, tokenId: resolvedTokenId || baseResolved.tokenId }),
     [baseResolved, resolvedTokenId],
@@ -89,7 +90,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const { data: onChainMarketListing } = useQuery({
     queryKey: ["token-market-listing", resolvedTokenId],
     enabled: enabledOnChain,
-    refetchInterval: 3000,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
       try {
@@ -113,7 +117,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const { data: onChainOwner } = useQuery({
     queryKey: ["token-owner", resolvedTokenId],
     enabled: enabledOnChain,
-    refetchInterval: 3000,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
       try {
@@ -153,7 +160,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     : isOwned(listing.id);
 
   const listed = enabledOnChain
-    ? Boolean(onChainMarketListing)
+    ? onChainMarketListing !== undefined
+      ? Boolean(onChainMarketListing)
+      : isListed(listing.id)
     : isListed(listing.id);
 
   const displayPrice = enabledOnChain && onChainMarketListing
@@ -183,6 +192,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabMarket,
     eventName: "CardPurchased",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
@@ -190,6 +201,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabMarket,
     eventName: "CardListed",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
@@ -197,6 +210,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabVault,
     eventName: "Transfer",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
@@ -204,13 +219,17 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     ...contracts.slabVault,
     eventName: "SlabMinted",
     enabled: enabledOnChain,
+    poll: true,
+    pollingInterval: 1000,
     onLogs: refreshActivity,
   });
 
   const { data: onChainEvents = [] } = useQuery({
     queryKey: ["token-activity", listing.tokenId],
     enabled: enabledOnChain,
-    refetchInterval: 5000,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<ActivityEvent[]> => {
       if (!client || tokenIdBigInt === null) return [];
       try {
@@ -845,7 +864,19 @@ function PriceHistory({ listing }: { listing: Listing }) {
   const [grader, setGrader] = useState<Grader>(listing.grader);
   const [grade, setGrade] = useState<number>(listing.grade);
   const [allOpen, setAllOpen] = useState(false);
-  const sales = useMemo(() => salesFor(listing, grader, grade), [listing, grader, grade]);
+  const sales = useMemo(() => {
+    const raw = salesFor(listing, grader, grade);
+    const seen = new Set<string>();
+    const deduped: Sale[] = [];
+    for (const s of raw) {
+      const key = `${s.date}-${s.price}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(s);
+      }
+    }
+    return deduped;
+  }, [listing, grader, grade]);
 
   return (
     <section className="rounded-card border border-hairline bg-surface">
@@ -898,8 +929,8 @@ function PriceHistory({ listing }: { listing: Listing }) {
 
         {sales.length ? (
           <ul className="divide-y divide-[rgba(255,255,255,0.08)]">
-            {sales.slice(0, 3).map((s) => (
-              <li key={s.date} className="flex items-center justify-between py-2.5 text-[13px]">
+            {sales.slice(0, 3).map((s, idx) => (
+              <li key={`${s.date}-${s.price}-${idx}`} className="flex items-center justify-between py-2.5 text-[13px]">
                 <span className="text-muted">{shortDate(s.date)}</span>
                 <span className="font-semibold">{usd(s.price)}</span>
               </li>
@@ -914,8 +945,8 @@ function PriceHistory({ listing }: { listing: Listing }) {
 
       <Modal open={allOpen} onClose={() => setAllOpen(false)} title={`${grader} ${grade} sales`}>
         <ul className="divide-y divide-[rgba(255,255,255,0.08)] p-5 pt-0">
-          {sales.map((s) => (
-            <li key={s.date} className="flex items-center justify-between py-3 text-[13px]">
+          {sales.map((s, idx) => (
+            <li key={`${s.date}-${s.price}-${idx}`} className="flex items-center justify-between py-3 text-[13px]">
               <span className="text-muted">{shortDate(s.date)}</span>
               <span className="font-semibold">{usd(s.price)}</span>
             </li>

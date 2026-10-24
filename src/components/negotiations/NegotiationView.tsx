@@ -29,9 +29,18 @@ const SELLER_QUICK = ["Yes, it's available.", "Price is firm, sorry.", "Can you 
 
 /** A one-to-one chat between a buyer and the seller about one listing. */
 export function NegotiationView({ id }: { id: string }) {
-  const { ready, user, negotiations, requireAuth } = useStore();
+  const { ready, user, negotiations, requireAuth, slabs } = useStore();
   const n = negotiations[id];
-  const base = n ? getListing(n.listingId) : undefined;
+  const base = n
+    ? getListing(n.listingId) ||
+      slabs.find(
+        (s) =>
+          s.id === n.listingId ||
+          s.tokenId === n.listingId ||
+          s.id === `token-${n.listingId}` ||
+          (s.tokenId && `token-${s.tokenId}` === n.listingId),
+      )
+    : undefined;
 
   if (!ready) {
     return (
@@ -105,6 +114,39 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
     }, 400);
   };
 
+  // If the card was already transferred on-chain to the buyer, automatically finalize the deal in the negotiation room
+  useEffect(() => {
+    if (!client || !listing.tokenId || !user?.address || n.status !== "open" || !pending) return;
+    let cancelled = false;
+    async function checkAutoSettle() {
+      try {
+        const buyerHandle = n.buyer.trim().toLowerCase().replace(/^@/, "");
+        const [ownerAddr, buyerAddr] = await Promise.all([
+          client!.readContract({
+            ...contracts.slabVault,
+            functionName: "ownerOf",
+            args: [BigInt(listing.tokenId!)],
+          }).catch(() => zeroAddress),
+          client!.readContract({
+            ...contracts.accounts,
+            functionName: "handleOwner",
+            args: [keccak256(toBytes(buyerHandle))],
+          }).catch(() => zeroAddress),
+        ]);
+        if (cancelled) return;
+        if (buyerAddr && buyerAddr !== zeroAddress && ownerAddr.toLowerCase() === buyerAddr.toLowerCase()) {
+          respondToOffer(n.id, pending!.id, true);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    void checkAutoSettle();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, listing.tokenId, user?.address, n.status, n.id, n.buyer, pending, respondToOffer]);
+
   const handleAccept = async () => {
     if (!pending || busy) return;
     setBusy(true);
@@ -112,32 +154,43 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
       let txHash: string | undefined;
       // If token is on-chain and user has a connected wallet
       if (listing.tokenId && user?.address && client) {
-        // 1. Check if listed on SlabMarket. If so, cancel listing so token is unlocked
-        const isListed = await client
-          .readContract({
-            ...contracts.slabVault,
-            functionName: "isListed",
-            args: [BigInt(listing.tokenId)],
-          })
-          .catch(() => false);
-
-        if (isListed) {
-          await cancelListing(listing.tokenId);
-        }
-
-        // 2. Resolve buyer's handle to wallet address
+        // Resolve buyer's handle to wallet address
         const buyerHandle = n.buyer.trim().toLowerCase().replace(/^@/, "");
-        const buyerAddress = await client
-          .readContract({
+        const [ownerAddr, buyerAddress] = await Promise.all([
+          client.readContract({
+            ...contracts.slabVault,
+            functionName: "ownerOf",
+            args: [BigInt(listing.tokenId)],
+          }).catch(() => zeroAddress),
+          client.readContract({
             ...contracts.accounts,
             functionName: "handleOwner",
             args: [keccak256(toBytes(buyerHandle))],
-          })
-          .catch(() => zeroAddress);
+          }).catch(() => zeroAddress),
+        ]);
 
-        if (buyerAddress && buyerAddress !== zeroAddress) {
-          const receipt = await transfer(listing.tokenId, buyerAddress, buyerHandle);
-          txHash = receipt.transactionHash;
+        const alreadyTransferred =
+          buyerAddress !== zeroAddress &&
+          ownerAddr.toLowerCase() === buyerAddress.toLowerCase();
+
+        if (!alreadyTransferred) {
+          // 1. Check if listed on SlabMarket. If so, cancel listing so token is unlocked
+          const isListed = await client
+            .readContract({
+              ...contracts.slabVault,
+              functionName: "isListed",
+              args: [BigInt(listing.tokenId)],
+            })
+            .catch(() => false);
+
+          if (isListed) {
+            await cancelListing(listing.tokenId);
+          }
+
+          if (buyerAddress && buyerAddress !== zeroAddress) {
+            const receipt = await transfer(listing.tokenId, buyerAddress, buyerHandle);
+            txHash = receipt.transactionHash;
+          }
         }
       }
 
@@ -318,7 +371,7 @@ function OfferBar({
     );
   }
 
-  if (!pending?.offer) return <span className="text-[12px] text-dim">Waiting for an offer</span>;
+  if (!pending?.offer || pending.status !== "pending") return <span className="text-[12px] text-dim">Waiting for an offer</span>;
   const { cash, slabIds } = pending.offer;
   return (
     <div className="flex flex-col items-end gap-1">

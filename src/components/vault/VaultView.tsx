@@ -34,6 +34,7 @@ export function VaultView() {
   const params = useSearchParams();
   const {
     user,
+    ready,
     vault,
     delist,
     requestShipping,
@@ -89,6 +90,16 @@ export function VaultView() {
     unlisted: unlisted.length,
     withdrawn: withdrawn.length,
   };
+
+  if (!ready) {
+    return (
+      <div className="space-y-6 px-4 py-6 lg:px-6">
+        <div className="skeleton h-10 w-48 rounded-xl" />
+        <div className="skeleton h-24 w-full rounded-2xl" />
+        <div className="skeleton h-[400px] w-full rounded-card" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (

@@ -273,6 +273,99 @@ export function getListing(id: string): Listing | undefined {
  */
 export function registerListing(listing: Listing): void {
   LISTING_BY_ID.set(listing.id, listing);
+  if (listing.tokenId) {
+    LISTING_BY_ID.set(`token-${listing.tokenId}`, listing);
+    LISTING_BY_ID.set(listing.tokenId, listing);
+  }
+}
+
+/**
+ * Creates a clean, typed Listing structure directly from on-chain smart contract data
+ * (SlabVault and SlabMarket), preserving authentic titles, images, and prices.
+ */
+export function buildOnChainListing(input: {
+  tokenId: string;
+  title: string;
+  image: string;
+  grader: Grader;
+  certNumber: string;
+  price?: number;
+  declaredValueCents?: number;
+  owner: string;
+  ownerAddress?: string;
+  listedAt?: string;
+  contract?: string;
+}): Listing {
+  const id = `token-${input.tokenId}`;
+  const fmv = input.declaredValueCents ? input.declaredValueCents / 100 : (input.price ?? 1000);
+  const price = input.price ?? fmv;
+
+  // Try to parse grade and grade label from title if present, e.g. "(PSA 10 GEM MT)" or "(PSA 9.5 MINT+)"
+  const gradeMatch = input.title.match(/\((?:PSA|BGS|CGC|SGC)\s+([\d.]+)(?:\s+([^)]+))?\)/i);
+  const grade = gradeMatch ? parseFloat(gradeMatch[1]) : 10;
+  const gradeLabel = gradeMatch && gradeMatch[2] ? gradeMatch[2].trim() : "GEM MT";
+
+  // Extract short name (e.g. "Alakazam ★" or "Charizard")
+  let shortName = input.title;
+  const titleParts = input.title.split("#");
+  if (titleParts.length > 1) {
+    const afterHash = titleParts[1].replace(/^\d+(\/\d+)?\s+/, "");
+    const nameOnly = afterHash.split(" - ")[0].split(" (")[0];
+    if (nameOnly) shortName = nameOnly.trim();
+  }
+
+  // Extract set and year if present: "2006 Pokémon Crystal Guardians ..."
+  const yearMatch = input.title.match(/^(\d{4})\s+Pokémon\s+([^-#(]+)/i);
+  const year = yearMatch ? parseInt(yearMatch[1], 10) : new Date().getFullYear();
+  const set = yearMatch ? yearMatch[2].trim() : "Pokéchain Vault";
+
+  const numMatch = input.title.match(/#(\d+(?:\/\d+)?)/);
+  const cardNumber = numMatch ? numMatch[1] : input.tokenId;
+
+  return {
+    id,
+    tokenId: input.tokenId,
+    title: input.title,
+    shortName,
+    year,
+    set,
+    series: "Authentic",
+    cardNumber,
+    subject: shortName,
+    grader: input.grader,
+    grade,
+    gradeLabel,
+    language: "English",
+    variant: "Holo",
+    price,
+    fmv,
+    confidence: "High",
+    owner: input.owner,
+    ownerAddress: input.ownerAddress || "",
+    certNumber: input.certNumber,
+    listedAt: input.listedAt || new Date().toISOString(),
+    endsAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+    likes: 0,
+    offers: [],
+    sales: [],
+    activity: [
+      {
+        kind: "Mint",
+        from: "0x0000...0000",
+        to: input.owner,
+        at: input.listedAt || new Date().toISOString(),
+        txHash: `0x${hexId(hashString(input.tokenId + input.certNumber), 8)}`,
+      },
+    ],
+    comments: [],
+    contract: input.contract || "",
+    chain: "Polygon",
+    note: `Vaulted and insured on Pokéchain. Backed 1:1 by physical slab.`,
+    image: input.image,
+    thumb: input.image,
+    holo: true,
+    hue: 200,
+  };
 }
 
 /**

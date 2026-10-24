@@ -16,11 +16,10 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useDisconnect } from "wagmi";
 import { BRAND } from "@/lib/brand";
-import { LISTINGS } from "@/lib/catalog";
 import { shortHash } from "@/lib/chain/config";
 import { useResetDemo } from "@/lib/chain/useResetDemo";
 import { usd } from "@/lib/format";
-import { useStore } from "@/lib/store";
+import { useStore, useMarketInventory } from "@/lib/store";
 import { Avatar, Button, inputClass } from "../ui/primitives";
 import { Logo } from "./Logo";
 
@@ -180,6 +179,7 @@ function GlobalSearch() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const boxRef = useRef<HTMLDivElement>(null);
+  const inventory = useMarketInventory();
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -190,7 +190,7 @@ function GlobalSearch() {
   }, []);
 
   const results = q.trim().length >= 2
-    ? LISTINGS.filter((l) => l.title.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 6)
+    ? inventory.filter((l) => l.title.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 6)
     : [];
 
   return (
