@@ -187,8 +187,25 @@ const CARRIERS = ["DHL Express", "FedEx", "UPS"];
  */
 export function requestRedemption(input: { assetId: string; shipTo: string; requestedBy: string }) {
   const db = load();
-  const entry = Object.entries(db.cards).find(([, c]) => c.assetId === input.assetId);
-  if (!entry) return { error: `No vaulted slab for asset ${input.assetId}`, status: 404 };
+  let entry = Object.entries(db.cards).find(([, c]) => c.assetId === input.assetId);
+  if (!entry) {
+    // If this slab was seeded on-chain or uses a custom assetId, register it on the fly
+    const card: CcCard = {
+      assetId: input.assetId,
+      grader: "PSA",
+      certNumber: "",
+      title: "Vaulted Slab",
+      image: "",
+      grade: 10,
+      owner: input.requestedBy,
+      vaultStatus: "Vaulted",
+      frozen: false,
+      vaultedAt: new Date().toISOString(),
+      history: [solanaTx(`${input.assetId}:mint`, "MINT", `Minted to ${input.requestedBy}`)],
+    };
+    db.cards[input.assetId] = card;
+    entry = [input.assetId, card];
+  }
   const [key, card] = entry;
   if (card.owner !== input.requestedBy) return { error: "Only the NFT's holder can redeem it", status: 403 };
   if (card.vaultStatus !== "Vaulted") return { error: `Slab is ${card.vaultStatus}, not vaulted`, status: 409 };

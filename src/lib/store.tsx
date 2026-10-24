@@ -630,10 +630,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             overrides: mergedOverrides,
             negotiations: mergedNegotiations,
           };
-          // If switching to an on-chain account, filter out vault items that belong to other addresses
+          // If switching to an on-chain account, filter out vault items that belong to other addresses or lack tokens
           if (address) {
             prev.vault = next.vault.filter(
-              (v) => !v.token || v.token.owner.toLowerCase() === address.toLowerCase(),
+              (v) => v.token && v.token.owner.toLowerCase() === address.toLowerCase(),
             );
           }
           prev.slabs.forEach(registerListing);
