@@ -8,7 +8,7 @@
  */
 import { defineChain, formatUnits, parseUnits, type Address, type Chain, type Hash } from "viem";
 import { hardhat, polygonAmoy } from "viem/chains";
-import { accountRegistryAbi, deployments, mockUSDCAbi, slabVaultAbi, tradeEscrowAbi } from "./generated";
+import { accountRegistryAbi, deployments, mockUSDCAbi, slabMarketAbi, slabVaultAbi, tradeEscrowAbi } from "./generated";
 
 export const CHAIN_KEY = process.env.NEXT_PUBLIC_CHAIN === "amoy" ? "amoy" : "local";
 export const IS_LOCAL = CHAIN_KEY === "local";
@@ -21,7 +21,7 @@ export const chain: Chain = defineChain({
   ...(rpcOverride ? { rpcUrls: { default: { http: [rpcOverride] } } } : {}),
 });
 
-type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; TradeEscrow: Address; fromBlock: number };
+type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; TradeEscrow: Address; SlabMarket?: Address; fromBlock: number };
 const deployment = (deployments as Record<string, Deployment>)[String(chain.id)];
 
 /** False until `npm run deploy:local` (or deploy:amoy) has exported addresses for this chain. */
@@ -35,6 +35,7 @@ export const contracts = {
   accounts: { address: deployment?.AccountRegistry ?? ZERO, abi: accountRegistryAbi },
   slabVault: { address: deployment?.SlabVault ?? ZERO, abi: slabVaultAbi },
   tradeEscrow: { address: deployment?.TradeEscrow ?? ZERO, abi: tradeEscrowAbi },
+  slabMarket: { address: deployment?.SlabMarket ?? ZERO, abi: slabMarketAbi },
 } as const;
 
 export type ContractName = keyof typeof contracts;
@@ -44,6 +45,7 @@ export const CONTRACT_LABEL: Record<ContractName, string> = {
   accounts: "AccountRegistry",
   slabVault: "SlabVault",
   tradeEscrow: "TradeEscrow",
+  slabMarket: "SlabMarket",
 };
 
 /** Block the contracts were deployed at: event queries start here instead of at genesis. */
@@ -92,4 +94,5 @@ export function explorerAddress(address: Address): string | null {
   return IS_LOCAL ? null : `${polygonAmoy.blockExplorers.default.url}/address/${address}`;
 }
 
-export const shortHash = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`;
+export const shortHash = (h?: string | null) =>
+  h && typeof h === "string" && h.length >= 10 ? `${h.slice(0, 6)}…${h.slice(-4)}` : (h ?? "");

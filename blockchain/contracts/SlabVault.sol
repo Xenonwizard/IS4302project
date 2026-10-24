@@ -140,6 +140,10 @@ contract SlabVault is ERC721, AccessControl {
     mapping(address => bytes32) public encryptionKey;
     /// @notice The custodian's address (Collector Crypt). Forwarded parcel details are encrypted to its key.
     address public custodian;
+    /// @notice The approved marketplace contract allowed to settle card sales.
+    address public marketplace;
+    /// @notice Whether a slab is currently listed on the marketplace (Rule 5 sale restriction).
+    mapping(uint256 => bool) public isListed;
 
     event SubmissionRequested(
         uint256 indexed submissionId,
@@ -177,6 +181,8 @@ contract SlabVault is ERC721, AccessControl {
     event SlabDelivered(uint256 indexed tokenId, address indexed owner);
     event SlabReportedLost(uint256 indexed tokenId, address indexed owner, string trackingNumber, string details);
     event LostReportResolved(uint256 indexed tokenId, address indexed owner, Custody outcome);
+    event MarketplaceSet(address indexed marketplace);
+    event ListingRestrictionUpdated(uint256 indexed tokenId, bool restricted);
 
     error AccountNotActive(address account);
     error CertAlreadyTokenised(uint256 tokenId);
@@ -185,6 +191,8 @@ contract SlabVault is ERC721, AccessControl {
     error NotSlabOwner(uint256 tokenId);
     error WrongCustody(uint256 tokenId, Custody current);
     error SlabLocked(uint256 tokenId, Custody current);
+    error SlabIsListed(uint256 tokenId);
+    error OnlyMarketplace();
     error SelfTransfer(uint256 tokenId);
     error EmptyField();
     error NoEncryptionKey(address account);
@@ -345,6 +353,7 @@ contract SlabVault is ERC721, AccessControl {
      */
     function requestRedemption(uint256 tokenId, bytes32 shippingHash) external {
         if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
+        if (isListed[tokenId]) revert SlabIsListed(tokenId);
         _moveCustody(tokenId, Custody.Vaulted, Custody.RedemptionRequested);
         _slabs[tokenId].shippingHash = shippingHash;
         vaultedCount[msg.sender] -= 1;
@@ -477,6 +486,29 @@ contract SlabVault is ERC721, AccessControl {
         return super.supportsInterface(interfaceId);
     }
 
+    /* ----------------------------- marketplace ------------------------------ */
+
+    function setMarketplace(address marketplace_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        marketplace = marketplace_;
+        emit MarketplaceSet(marketplace_);
+    }
+
+    function setListingRestriction(uint256 tokenId, bool restricted) external {
+        if (msg.sender != marketplace) revert OnlyMarketplace();
+        _requireOwned(tokenId);
+        isListed[tokenId] = restricted;
+        emit ListingRestrictionUpdated(tokenId, restricted);
+    }
+
+    function isRestricted(uint256 tokenId) external view returns (bool) {
+        return isListed[tokenId];
+    }
+
+    function settleMarketTransfer(address from, address to, uint256 tokenId) external {
+        if (msg.sender != marketplace) revert OnlyMarketplace();
+        _transfer(from, to, tokenId);
+    }
+
     /* ------------------------------- internals ------------------------------- */
 
     /**
@@ -490,6 +522,7 @@ contract SlabVault is ERC721, AccessControl {
         if (to != address(0) && to != tradeEscrow && !accounts.isActive(to)) revert AccountNotActive(to);
         if (from != address(0)) {
             if (to == from) revert SelfTransfer(tokenId);
+            if (isListed[tokenId] && msg.sender != marketplace) revert SlabIsListed(tokenId);
             Custody c = _slabs[tokenId].custody;
             if (c != Custody.Vaulted) revert SlabLocked(tokenId, c);
             vaultedCount[from] -= 1;

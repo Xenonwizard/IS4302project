@@ -14,9 +14,9 @@ const NO_WALLET_TIMEOUT_MS = 8000;
  * handle, and when the wallet disconnects (or switches to another address) it signs out.
  */
 export function ChainSessionSync() {
-  const { ready, user, login, logout } = useStore();
+  const { ready, user, login, logout, syncChainBalance } = useStore();
   const { status: connection } = useAccount();
-  const { address, isConnected, status, handle, loaded } = useOnchainAccount();
+  const { address, isConnected, status, handle, loaded, walletUsdc, custodyBalance } = useOnchainAccount();
   /** wagmi starts every page load "disconnected" until it reconnects, so only a real drop counts */
   const seenConnected = useRef(false);
   // Runs before the effect below (effects run in order), so a drop in this render is seen.
@@ -25,15 +25,23 @@ export function ChainSessionSync() {
   }, [isConnected]);
 
   useEffect(() => {
+    if (isConnected && address && loaded) {
+      syncChainBalance(walletUsdc + custodyBalance);
+    }
+  }, [isConnected, address, loaded, walletUsdc, custodyBalance, syncChainBalance]);
+
+  useEffect(() => {
     if (!ready || connection === "connecting" || connection === "reconnecting") return;
     // Someone using the off-chain demo login is left alone.
     if (user && !user.address) return;
     if (isConnected && address && loaded && status === "Active") {
-      if (user?.address !== address || user.username !== handle) login(handle, undefined, address);
+      if (user?.address?.toLowerCase() !== address.toLowerCase() || user.username !== handle) {
+        login(handle, undefined, address);
+      }
       return;
     }
     if (!user?.address) return;
-    if (isConnected && loaded && (user.address !== address || status !== "Active")) {
+    if (isConnected && loaded && (!address || user.address.toLowerCase() !== address.toLowerCase() || status !== "Active")) {
       logout(); // switched to another address, or the account was closed
     } else if (connection === "disconnected") {
       if (seenConnected.current) logout();

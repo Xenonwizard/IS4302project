@@ -30,6 +30,12 @@ Windows and Linux. With nvm, run `nvm use` in the project folder: `.nvmrc` picks
 
 ```bash
 npm run setup     # once, and again after pulling: installs the app and blockchain/ dependencies
+npm run dev:all   # local blockchain + the app together in one terminal
+```
+
+Or run them in separate terminals:
+
+```bash
 npm run chain     # terminal 1: local blockchain + deploys the contracts. Leave it running.
 npm run dev       # terminal 2: the app
 ```

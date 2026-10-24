@@ -1,10 +1,10 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
-import { CUSTODY, DEPLOY_BLOCK, chain, contracts } from "@/lib/chain/config";
+import { CUSTODY, DEPLOY_BLOCK, chain, contracts, fromUsdcUnits } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useStore, type ChainSlab } from "@/lib/store";
 import type { Grader } from "@/lib/types";
@@ -12,8 +12,9 @@ import type { Grader } from "@/lib/types";
 /**
  * Keeps the Vault's tokenised slabs in step with the chain. It reads every ERC-721 `Transfer` into
  * this wallet (eth_getLogs, filtered on the indexed `to` topic), keeps the tokens `ownerOf` still
- * says are ours, and reads each one's `slabOf`. A slab another collector sent you appears in your
- * Vault; one you sent away disappears from it. No server involved: ownership is whatever SlabVault says.
+ * says are ours, and reads each one's `slabOf` and its SlabMarket listing. A slab another collector sent
+ * you appears in your Vault; one you sent away disappears from it. No server involved: ownership is
+ * whatever SlabVault says.
  *
  * Two kinds of token are left out or kept on purpose:
  *   - a token minted at submission that Collector Crypt hasn't vaulted yet (no custodianRef): it
@@ -21,40 +22,53 @@ import type { Grader } from "@/lib/types";
  *   - a slab of yours locked in one of your open trade offers is held by TradeEscrow, but it is
  *     still yours until the other side accepts, so it stays in your Vault (marked "In offer").
  *
- * It also subscribes to SlabVault's `Transfer` events to and from this wallet (useWatchContractEvent,
- * which polls eth_getFilterChanges), so a slab someone sends you shows up within seconds.
+ * It also subscribes to SlabVault's `Transfer` events and SlabMarket's listing events for this wallet
+ * (useWatchContractEvent, which polls eth_getFilterChanges), so a slab someone sends you, or a
+ * listing change, shows up within seconds.
  */
 export function ChainVaultSync() {
   const { user, ready, vault, syncChainSlabs } = useStore();
   const { address } = useOnchainAccount();
   const client = usePublicClient();
-  const enabled = Boolean(ready && client && address && user?.address === address);
+  const addrLower = address?.toLowerCase();
+  const enabled = Boolean(ready && client && address && user?.address?.toLowerCase() === addrLower);
   const queryClient = useQueryClient();
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", address] });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", addrLower] });
   useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, enabled, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, enabled, onLogs: refresh });
-  // Tokens the Vault already lists: each gets an explicit ownerOf check.
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", args: { seller: address }, enabled, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", args: { seller: address }, enabled, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, onLogs: refresh });
+
+  // Tokens the Vault already lists: keep ref updated to avoid re-triggering queryKey
   const knownIds = vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])).sort().join(",");
+  const knownIdsRef = useRef(knownIds);
+  knownIdsRef.current = knownIds;
 
   const { data } = useQuery({
-    queryKey: ["owned-slabs", address, knownIds],
+    queryKey: ["owned-slabs", addrLower],
     enabled,
-    refetchInterval: 8000,
+    refetchInterval: 5000,
     queryFn: async (): Promise<{ owned: ChainSlab[]; ownedByOthers: string[] }> => {
+      const vaultCode = await client!.getBytecode({ address: contracts.slabVault.address }).catch(() => null);
+      if (!vaultCode || vaultCode === "0x") return { owned: [], ownedByOthers: [] };
+
       const incoming = await client!.getContractEvents({
         ...contracts.slabVault,
         eventName: "Transfer",
         args: { to: address },
         fromBlock: DEPLOY_BLOCK,
-      });
+      }).catch(() => []);
       const firstSeen = new Map<bigint, boolean>(); // tokenId → minted to us (from the zero address)
       for (const e of incoming) {
         const id = e.args.tokenId!;
         if (!firstSeen.has(id)) firstSeen.set(id, e.args.from === zeroAddress);
       }
-      const known = knownIds ? knownIds.split(",").map(BigInt) : [];
+      const known = knownIdsRef.current ? knownIdsRef.current.split(",").map(BigInt) : [];
       const ids = [...new Set([...firstSeen.keys(), ...known])];
-      const owners = await Promise.all(ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] })));
+      const owners = await Promise.all(
+        ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] }).catch(() => null)),
+      );
       // Held by TradeEscrow: still ours if it's in an offer we made.
       const escrowed = await Promise.all(
         ids.map(async (id, i) => {
@@ -64,32 +78,48 @@ export function ChainVaultSync() {
           return offer.maker === address;
         }),
       );
-      const isMine = (i: number) => owners[i] === address || escrowed[i];
+      const isMine = (i: number) => owners[i]?.toLowerCase() === addrLower || escrowed[i];
       const candidates = ids.filter((_, i) => isMine(i));
-      const ownedByOthers = ids.filter((_, i) => !isMine(i)).map(String);
-      const read = await Promise.all(candidates.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] })));
+      const ownedByOthers = ids.filter((_, i) => owners[i] && !isMine(i)).map(String);
+      const [read, marketListings] = await Promise.all([
+        Promise.all(candidates.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),
+        Promise.all(
+          candidates.map((id) =>
+            client!.readContract({ ...contracts.slabMarket, functionName: "getListing", args: [id] }).catch(() => null),
+          ),
+        ),
+      ]);
       // Never vaulted yet: shown by the submission tracker instead.
-      const mine = candidates.filter((_, i) => read[i].custodianRef !== "");
-      const slabs = read.filter((s) => s.custodianRef !== "");
-      const owned = mine.map((id, i) => ({
-        token: {
-          chainId: chain.id,
-          contract: contracts.slabVault.address,
-          tokenId: id.toString(),
-          owner: address!,
-          mintTx: "",
-          custodianRef: slabs[i].custodianRef,
-          declaredValueCents: Number(slabs[i].declaredValueCents),
-          evidenceHash: slabs[i].evidenceHash,
-        },
-        grader: slabs[i].grader as Grader,
-        certNumber: slabs[i].certNumber,
-        custody: CUSTODY[slabs[i].custody],
-        via: firstSeen.get(id) === false ? ("Transfer" as const) : ("Submission" as const),
-        carrier: slabs[i].carrier,
-        trackingNumber: slabs[i].trackingNumber,
-        redemptionRef: slabs[i].redemptionRef,
-      }));
+      const keep = candidates.map((_, i) => read[i].custodianRef !== "");
+      const owned = candidates.flatMap((id, i) => {
+        if (!keep[i]) return [];
+        const s = read[i];
+        const mListing = marketListings[i];
+        const isListedOnChain = Boolean(mListing && mListing.seller.toLowerCase() === addrLower && mListing.price > BigInt(0));
+        return [
+          {
+            token: {
+              chainId: chain.id,
+              contract: contracts.slabVault.address,
+              tokenId: id.toString(),
+              owner: address!,
+              mintTx: "",
+              custodianRef: s.custodianRef,
+              declaredValueCents: Number(s.declaredValueCents),
+              evidenceHash: s.evidenceHash,
+            },
+            grader: s.grader as Grader,
+            certNumber: s.certNumber,
+            custody: CUSTODY[s.custody],
+            via: firstSeen.get(id) === false ? ("Transfer" as const) : ("Submission" as const),
+            carrier: s.carrier,
+            trackingNumber: s.trackingNumber,
+            redemptionRef: s.redemptionRef,
+            isListed: isListedOnChain,
+            listedPrice: isListedOnChain && mListing ? fromUsdcUnits(mListing.price) : undefined,
+          },
+        ];
+      });
       return { owned, ownedByOthers };
     },
   });

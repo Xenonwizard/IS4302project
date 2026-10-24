@@ -48,8 +48,8 @@ export function OfferModal({
             { label: "Market", value: listing.fmv },
           ]}
           submitLabel={(value) => `${editing ? "Send new offer" : "Send offer"} · ${usd(value, { cents: true })}`}
-          onSubmit={(bid) => {
-            const id = makeOffer(listing.id, bid);
+          onSubmit={(bid, available) => {
+            const id = makeOffer(listing.id, bid, available);
             if (!id) return false;
             onClose();
             if (!editing) router.push(`/trades/${id}`);

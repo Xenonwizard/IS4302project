@@ -24,8 +24,10 @@ import {
   systemMessage,
   type BotAction,
 } from "./negotiation";
-import { hashString } from "./rng";
+import { hashString, hexId } from "./rng";
+import { contracts } from "./chain/config";
 import type {
+  ActivityEvent,
   ChatMessage,
   Grader,
   LedgerEntry,
@@ -33,6 +35,7 @@ import type {
   LostItem,
   LostReport,
   Negotiation,
+  Sale,
   SlabToken,
   TradeBid,
   VaultItem,
@@ -42,7 +45,7 @@ import type {
 const STORAGE_KEY = "pokechain.state.v3";
 
 /** Demo credit every new wallet starts with. */
-const WELCOME_CREDIT = 2500;
+const WELCOME_CREDIT = 50000;
 
 /** The demo account, which starts with a few slabs already vaulted. */
 const DEMO_USER = "demotester";
@@ -67,8 +70,12 @@ export interface Toast {
 export interface ListingOverride {
   price?: number;
   owner?: string;
+  ownerAddress?: string;
+  listedAt?: string;
   soldTo?: string;
   delisted?: boolean;
+  activity?: ActivityEvent[];
+  sales?: Sale[];
 }
 
 interface PersistShape {
@@ -111,6 +118,8 @@ export interface ChainSlab {
   carrier?: string;
   trackingNumber?: string;
   redemptionRef?: string;
+  isListed?: boolean;
+  listedPrice?: number;
 }
 
 export interface SlabSubmission {
@@ -136,8 +145,11 @@ interface StoreValue extends PersistShape {
   submitSlab: (input: SlabSubmission, token?: SlabToken) => Listing | null;
   listFromVault: (id: string, price: number) => void;
   delist: (id: string) => void;
+  buyNow: (listingId: string, txHash?: string) => boolean;
   requestShipping: (id: string) => void;
   /* blockchain: account and slab onboarding / offboarding */
+  /** syncs connected on-chain USDC balance */
+  syncChainBalance: (balance: number) => void;
   /** mirrors an on-chain USDC deposit (+) or withdrawal (−) into the wallet history */
   recordChainCash: (amount: number, label: string, txHash: string) => void;
   /** a slab already in the vault has been minted on-chain */
@@ -147,8 +159,9 @@ interface StoreValue extends PersistShape {
    * (e.g. a transfer from another collector) and drops tokens it no longer owns.
    */
   syncChainSlabs: (owned: ChainSlab[], ownedByOthers: string[]) => void;
+  syncMarketListings: (listings: { listing: Listing; price: number; seller: string }[]) => void;
   /** the transfer to another collector confirmed: the slab leaves this vault and its chats close */
-  handOver: (listingId: string, toHandle: string) => void;
+  handOver: (listingId: string, toHandle: string, txHash?: string) => void;
   /** the slab has left the vault: unlisted, its chats closed, moved to the Withdrawn tab */
   withdrawSlab: (listingId: string, withdrawal: Withdrawal) => void;
   updateWithdrawal: (listingId: string, patch: Partial<Withdrawal>) => void;
@@ -156,10 +169,10 @@ interface StoreValue extends PersistShape {
   offboard: () => void;
   /* negotiations */
   /** sends an offer in the buyer's chat with the seller; returns the chat id */
-  makeOffer: (listingId: string, bid: TradeBid) => string | null;
+  makeOffer: (listingId: string, bid: TradeBid, availableFunds?: number) => string | null;
   sendMessage: (negotiationId: string, text: string) => void;
   /** seller side: accept or decline the buyer's pending offer */
-  respondToOffer: (negotiationId: string, offerId: string, accept: boolean) => void;
+  respondToOffer: (negotiationId: string, offerId: string, accept: boolean, txHash?: string) => void;
   /** buyer side: take back a pending offer */
   withdrawOffer: (negotiationId: string, offerId: string) => void;
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
@@ -258,6 +271,8 @@ function settleDeal(
   prev: PersistShape,
   negId: string,
   offerId: string,
+  availableFunds?: number,
+  txHash?: string,
 ): { next: PersistShape; error?: string } {
   const me = prev.user?.username;
   const n = prev.negotiations[negId];
@@ -271,8 +286,25 @@ function settleDeal(
   let vault = prev.vault;
   let ledger = prev.ledger;
 
+  const sellerVaultItem = prev.vault.find((v) => v.listingId === listing.id);
+  const token: SlabToken | undefined =
+    sellerVaultItem?.token ||
+    (listing.tokenId
+      ? {
+          chainId: 31337,
+          contract: listing.contract || contracts.slabVault.address,
+          tokenId: listing.tokenId,
+          owner: n.buyer,
+          mintTx: "",
+          custodianRef: "",
+        }
+      : undefined);
+
   if (n.buyer === me) {
-    if (cash > ledgerBalance(prev.ledger)) {
+    const effectiveFunds = prev.user?.address
+      ? Math.max(availableFunds ?? 0, ledgerBalance(prev.ledger))
+      : ledgerBalance(prev.ledger);
+    if (cash > effectiveFunds) {
       return { next: prev, error: `Your wallet cannot cover the ${usd(cash, { cents: true })} cash.` };
     }
     const vaulted = (id: string) => prev.vault.some((v) => v.listingId === id && v.status === "Vaulted");
@@ -281,10 +313,16 @@ function settleDeal(
     }
     vault = vault.filter((v) => !slabIds.includes(v.listingId));
     vault = [
-      { listingId: listing.id, acquiredAt: now, via: slabIds.length ? "Trade" : "Purchase", status: "Vaulted" },
+      {
+        listingId: listing.id,
+        acquiredAt: now,
+        via: slabIds.length ? "Trade" : "Purchase",
+        status: "Vaulted",
+        token,
+      },
       ...vault,
     ];
-    if (cash > 0) {
+    if (cash > 0 && !prev.user?.address) {
       ledger = [
         ledgerEntry(-cash, `Bought ${listing.shortName}${slabIds.length ? " (cash part of trade)" : ""}`, listing.id),
         ...ledger,
@@ -299,7 +337,7 @@ function settleDeal(
       ...slabIds.map<VaultItem>((id) => ({ listingId: id, acquiredAt: now, via: "Trade", status: "Vaulted" })),
       ...vault,
     ];
-    if (cash > 0) {
+    if (cash > 0 && !prev.user?.address) {
       ledger = [
         ledgerEntry(-sellerFee(cash), `Seller fee (${BRAND.sellerFee * 100}%) on ${listing.shortName}`, listing.id),
         ledgerEntry(cash, `Sold ${listing.shortName}${slabIds.length ? " (cash part of trade)" : ""}`, listing.id),
@@ -309,7 +347,22 @@ function settleDeal(
   }
 
   const overrides = { ...prev.overrides };
-  overrides[listing.id] = { ...overrides[listing.id], owner: n.buyer, soldTo: n.buyer, delisted: true };
+  const newActivity: ActivityEvent = {
+    kind: cash > 0 ? "Sale" : "Transfer",
+    from: n.seller,
+    to: n.buyer,
+    price: cash > 0 ? cash : undefined,
+    at: now,
+    txHash: txHash || `0x${hexId(hashString(now + n.id), 8)}`,
+  };
+  const existingActivity = overrides[listing.id]?.activity || listing.activity || [];
+  overrides[listing.id] = {
+    ...overrides[listing.id],
+    owner: n.buyer,
+    soldTo: n.buyer,
+    delisted: true,
+    activity: [newActivity, ...existingActivity],
+  };
   for (const id of slabIds) overrides[id] = { ...overrides[id], owner: n.seller, delisted: true };
 
   const negotiations = { ...prev.negotiations };
@@ -483,9 +536,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state, ready]);
 
+  const recentToasts = useRef<Map<string, number>>(new Map());
+
   const pushToast = useCallback((t: Omit<Toast, "id">) => {
+    const key = `${t.title}::${t.body || ""}`;
+    const now = Date.now();
+    const last = recentToasts.current.get(key) || 0;
+    if (now - last < 4000) return; // Deduplicate identical toasts within 4s
+    recentToasts.current.set(key, now);
+
     const id = ++toastSeq.current;
-    setToasts((prev) => [...prev, { ...t, id }]);
+    setToasts((prev) => {
+      const filtered = prev.filter((p) => p.title !== t.title || p.body !== t.body);
+      return [...filtered.slice(-2), { ...t, id }];
+    });
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((x) => x.id !== id));
     }, 4200);
@@ -495,7 +559,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
-  const balance = useMemo(() => ledgerBalance(state.ledger), [state.ledger]);
+  const [chainBalance, setChainBalance] = useState<number>(0);
+  const syncChainBalance = useCallback((bal: number) => {
+    setChainBalance(bal);
+  }, []);
+
+  const balance = useMemo(() => {
+    if (state.user?.address) {
+      return cents(Math.max(chainBalance, ledgerBalance(state.ledger)));
+    }
+    return ledgerBalance(state.ledger);
+  }, [state.user?.address, chainBalance, state.ledger]);
 
   const login = useCallback(
     (username: string, email?: string, address?: string) => {
@@ -504,7 +578,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         let prev = current;
         if (current.owner && current.owner !== username) {
           stashUser(current);
-          prev = loadUser(username);
+          const next = loadUser(username);
+          // Preserve marketplace listings & overrides so cards listed by other users remain visible
+          const mergedSlabsMap = new Map([...next.slabs, ...current.slabs].map((s) => [s.id, s]));
+          const mergedOverrides = { ...next.overrides, ...current.overrides };
+          const mergedNegotiations = { ...next.negotiations, ...current.negotiations };
+          prev = {
+            ...next,
+            slabs: Array.from(mergedSlabsMap.values()),
+            overrides: mergedOverrides,
+            negotiations: mergedNegotiations,
+          };
           prev.slabs.forEach(registerListing);
         }
         const fresh = !prev.ledger.length && !prev.vault.length;
@@ -565,7 +649,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (listing: Listing): Listing => {
       const o = state.overrides[listing.id];
       if (!o) return listing;
-      return { ...listing, price: o.price ?? listing.price, owner: o.owner ?? listing.owner };
+      const combinedActivity = o.activity
+        ? [...o.activity, ...(listing.activity ?? []).filter((a) => !o.activity!.some((oa) => oa.txHash === a.txHash))]
+        : listing.activity;
+      const combinedSales = o.sales
+        ? [...o.sales, ...(listing.sales ?? [])]
+        : listing.sales;
+      return {
+        ...listing,
+        price: o.price ?? listing.price,
+        owner: o.owner ?? listing.owner,
+        ownerAddress: o.ownerAddress ?? listing.ownerAddress,
+        listedAt: o.listedAt ?? listing.listedAt,
+        activity: combinedActivity,
+        sales: combinedSales,
+      };
     },
     [state.overrides],
   );
@@ -576,8 +674,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const isListed = useCallback(
-    (id: string) => !state.overrides[id]?.delisted,
-    [state.overrides],
+    (id: string) => {
+      const o = state.overrides[id];
+      if (o?.delisted !== undefined) return !o.delisted;
+      const slab = state.slabs.find((s) => s.id === id);
+      if (slab?.tokenId) {
+        const matchingSlabListed = state.slabs.some(
+          (s) => s.tokenId === slab.tokenId && state.overrides[s.id]?.delisted === false,
+        );
+        if (matchingSlabListed) return true;
+      }
+      // Submitted and tokenized slabs are unlisted by default unless explicitly listed
+      if (id.startsWith("sub-") || id.startsWith("token-")) return false;
+      // Catalog demo cards are listed by default
+      return true;
+    },
+    [state.overrides, state.slabs],
   );
 
   const toggleWatch = useCallback((id: string) => {
@@ -637,9 +749,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const listFromVault = useCallback(
     (id: string, price: number) => {
+      const now = new Date().toISOString();
       setState((prev) => ({
         ...prev,
-        overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], price, delisted: false } },
+        overrides: {
+          ...prev.overrides,
+          [id]: {
+            ...prev.overrides[id],
+            price,
+            delisted: false,
+            listedAt: now,
+          },
+        },
         vault: prev.vault.map((v) =>
           v.listingId === id ? { ...v, status: "Listed", listedPrice: price } : v,
         ),
@@ -677,6 +798,116 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         };
       });
       pushToast({ title: "Listing removed", body: "Open offers on it were declined." });
+    },
+    [pushToast],
+  );
+
+  const buyNow = useCallback(
+    (listingId: string, txHash?: string): boolean => {
+      const snapshot = latest.current;
+      const user = snapshot.user;
+      if (!user) {
+        pushToast({ title: "Please sign in", body: "Sign in to buy slabs.", tone: "error" });
+        return false;
+      }
+      const listing = current(snapshot, listingId);
+      if (!listing) return false;
+      if (listing.owner === user.username) {
+        pushToast({ title: "Cannot purchase your own slab", tone: "error" });
+        return false;
+      }
+      const price = listing.price;
+      const me = user.username;
+      const now = new Date().toISOString();
+
+      if (!user.address && price > ledgerBalance(snapshot.ledger)) {
+        pushToast({ title: "Insufficient funds", body: "Top up your wallet balance first.", tone: "error" });
+        return false;
+      }
+
+      setState((prev) => {
+        const vault = prev.vault;
+        let ledger = prev.ledger;
+
+        if (!user.address) {
+          ledger = [
+            ledgerEntry(-price, `Bought ${listing.shortName} from @${listing.owner}`, listing.id),
+            ...ledger,
+          ];
+        }
+
+        const newVaultItem: VaultItem = {
+          listingId: listing.id,
+          acquiredAt: now,
+          via: "Purchase",
+          status: "Vaulted",
+          token: listing.tokenId && listing.contract
+            ? {
+                chainId: 31337,
+                contract: listing.contract,
+                tokenId: listing.tokenId,
+                owner: user.address ?? user.username,
+                mintTx: txHash ?? "",
+                custodianRef: "",
+              }
+            : undefined,
+        };
+
+        const overrides = { ...prev.overrides };
+        const saleTx = txHash || `0x${hexId(hashString(now + listing.id), 20)}`;
+        const saleEvent: ActivityEvent = {
+          kind: "Sale",
+          price,
+          from: listing.owner,
+          to: me,
+          at: now,
+          txHash: saleTx,
+        };
+        const prevActivity = overrides[listing.id]?.activity ?? listing.activity ?? [];
+        const prevSales = overrides[listing.id]?.sales ?? listing.sales ?? [];
+
+        overrides[listing.id] = {
+          ...overrides[listing.id],
+          owner: me,
+          soldTo: me,
+          delisted: true,
+          activity: [saleEvent, ...prevActivity.filter((e) => e.txHash !== saleTx)],
+          sales: [{ date: now, price }, ...prevSales],
+        };
+
+        const updatedSlabs = prev.slabs.map((s) => {
+          if (s.id !== listing.id) return s;
+          return {
+            ...s,
+            owner: me,
+            ownerAddress: user.address ?? s.ownerAddress,
+            activity: [saleEvent, ...(s.activity ?? []).filter((e) => e.txHash !== saleTx)],
+            sales: [{ date: now, price }, ...(s.sales ?? [])],
+          };
+        });
+
+        const negotiations = closeSellerChats(
+          { ...prev, negotiations: prev.negotiations },
+          listing.id,
+          `Sold to @${me} for ${usd(price)}.`,
+        );
+
+        return {
+          ...prev,
+          negotiations,
+          vault: [newVaultItem, ...vault.filter((v) => v.listingId !== listing.id)],
+          ledger,
+          slabs: updatedSlabs,
+          overrides,
+        };
+      });
+
+      pushToast({
+        title: "Purchase successful!",
+        body: `${listing.shortName} is now in your Vault.`,
+        tone: "success",
+      });
+      return true;
     },
     [pushToast],
   );
@@ -719,33 +950,57 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Only drop a token when ownerOf positively names someone else, so a read that started
       // before a fresh mint can never make that slab vanish.
       const others = new Set(ownedByOthers);
+      const ownedMap = new Map(owned.map((o) => [o.token.tokenId, o]));
       const known = new Set(snapshot.vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])));
       const gone = snapshot.vault.filter((v) => v.token && others.has(v.token.tokenId));
       // Saved from an earlier chain (restarted since): the token id now belongs to a different cert.
-      const onChain = new Map(owned.map((o) => [o.token.tokenId, o]));
       const stale = snapshot.vault.filter((v) => {
-        const o = v.token && onChain.get(v.token.tokenId);
+        const o = v.token && ownedMap.get(v.token.tokenId);
         const l = o && getListing(v.listingId);
         return Boolean(o) && (!l || l.grader !== o!.grader || l.certNumber !== o!.certNumber);
       });
       const staleTokens = new Set(stale.map((v) => v.token!.tokenId));
       const arrived = owned.filter((o) => !known.has(o.token.tokenId) || staleTokens.has(o.token.tokenId));
-      if (!gone.length && !arrived.length) return;
+
+      let updatedExisting = false;
+      for (const v of snapshot.vault) {
+        if (!v.token) continue;
+        const o = ownedMap.get(v.token.tokenId);
+        if (!o) continue;
+        const newStatus = o.custody !== "Vaulted" ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+        if (v.status !== newStatus || v.listedPrice !== o.listedPrice) {
+          updatedExisting = true;
+          break;
+        }
+      }
+
+      if (!gone.length && !arrived.length && !stale.length && !updatedExisting) return;
 
       const added: { listing: Listing; item: VaultItem }[] = [];
       for (const o of arrived) {
         const made = makeSubmittedListing({ grader: o.grader, certNumber: o.certNumber, owner: me.username, nowMs: Date.now() });
         if (!made) continue;
-        const listing = withToken(made, o.token);
+        const existingSlab = snapshot.slabs.find((s) => s.id === made.id || s.tokenId === o.token.tokenId);
+        const existingOverrides = snapshot.overrides[made.id];
+        const preservedActivity = existingOverrides?.activity ?? existingSlab?.activity;
+        const baseWithToken = withToken(made, o.token);
+        const listing = {
+          ...baseWithToken,
+          price: o.isListed && o.listedPrice ? o.listedPrice : (existingOverrides?.price ?? baseWithToken.price),
+          activity: preservedActivity ?? baseWithToken.activity,
+          sales: existingOverrides?.sales ?? existingSlab?.sales ?? baseWithToken.sales,
+        };
         registerListing(listing);
         const withdrawn = o.custody !== "Vaulted";
+        const status: VaultItem["status"] = withdrawn ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
         added.push({
           listing,
           item: {
             listingId: listing.id,
             acquiredAt: new Date().toISOString(),
             via: o.via,
-            status: withdrawn ? "Withdrawn" : "Vaulted",
+            status,
+            listedPrice: o.listedPrice,
             token: o.token,
             withdrawal: withdrawn
               ? {
@@ -769,15 +1024,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         for (const id of goneIds) {
           negotiations = closeSellerChats({ ...prev, negotiations }, id, "The seller no longer owns this slab.");
         }
+
+        const updatedVault = prev.vault
+          .filter((v) => !goneIds.has(v.listingId) && !addIds.has(v.listingId))
+          .map((v) => {
+            if (!v.token) return v;
+            const o = ownedMap.get(v.token.tokenId);
+            if (!o) return v;
+            const status: VaultItem["status"] = o.custody !== "Vaulted" ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+            return { ...v, status, listedPrice: o.listedPrice };
+          });
+
+        const newOverrides = { ...prev.overrides };
+        for (const id of goneIds) {
+          newOverrides[id] = { ...newOverrides[id], delisted: true };
+        }
+        for (const a of added) {
+          if (a.item.status === "Listed") {
+            newOverrides[a.listing.id] = { ...newOverrides[a.listing.id], price: a.item.listedPrice, delisted: false };
+          } else {
+            newOverrides[a.listing.id] = { ...newOverrides[a.listing.id], delisted: true };
+          }
+        }
+        for (const v of updatedVault) {
+          if (v.token && ownedMap.has(v.token.tokenId)) {
+            const o = ownedMap.get(v.token.tokenId)!;
+            if (o.isListed) {
+              newOverrides[v.listingId] = { ...newOverrides[v.listingId], price: o.listedPrice, delisted: false };
+            }
+          }
+        }
+
         return {
           ...prev,
           negotiations,
           slabs: [...added.map((a) => a.listing), ...prev.slabs.filter((l) => !addIds.has(l.id))],
-          vault: [...added.map((a) => a.item), ...prev.vault.filter((v) => !goneIds.has(v.listingId) && !addIds.has(v.listingId))],
-          overrides: {
-            ...prev.overrides,
-            ...Object.fromEntries([...goneIds, ...addIds].map((id) => [id, { ...prev.overrides[id], delisted: true }])),
-          },
+          vault: [...added.map((a) => a.item), ...updatedVault],
+          overrides: newOverrides,
         };
       });
       for (const a of added) {
@@ -789,14 +1072,111 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
+  const syncMarketListings = useCallback(
+    (activeListings: { listing: Listing; price: number; seller: string }[]) => {
+      setState((prev) => {
+        for (const a of activeListings) {
+          registerListing(a.listing);
+        }
+
+        const newOverrides = { ...prev.overrides };
+        const activeIds = new Set(activeListings.map((a) => a.listing.id));
+        const activeTokenIds = new Set(
+          activeListings.flatMap((a) => (a.listing.tokenId ? [a.listing.tokenId] : []))
+        );
+
+        for (const a of activeListings) {
+          newOverrides[a.listing.id] = {
+            ...newOverrides[a.listing.id],
+            price: a.price,
+            owner: a.seller || newOverrides[a.listing.id]?.owner,
+            delisted: false,
+          };
+          if (a.listing.tokenId) {
+            for (const s of prev.slabs) {
+              if (s.tokenId === a.listing.tokenId) {
+                newOverrides[s.id] = {
+                  ...newOverrides[s.id],
+                  price: a.price,
+                  owner: a.seller || newOverrides[s.id]?.owner,
+                  delisted: false,
+                };
+              }
+            }
+          }
+        }
+
+        // Delist any on-chain tokens that were previously listed but are no longer active
+        if (activeListings.length > 0) {
+          for (const s of prev.slabs) {
+            if (s.tokenId && !activeTokenIds.has(s.tokenId) && !activeIds.has(s.id)) {
+              newOverrides[s.id] = {
+                ...newOverrides[s.id],
+                delisted: true,
+              };
+            }
+          }
+        }
+
+        const newSlabsMap = new Map(prev.slabs.map((s) => [s.id, s]));
+        for (const a of activeListings) {
+          if (!newSlabsMap.has(a.listing.id)) {
+            newSlabsMap.set(a.listing.id, a.listing);
+          } else {
+            const existing = newSlabsMap.get(a.listing.id)!;
+            newSlabsMap.set(a.listing.id, {
+              ...existing,
+              price: a.price,
+              owner: a.seller || existing.owner,
+              ownerAddress: a.listing.ownerAddress || existing.ownerAddress,
+              tokenId: a.listing.tokenId || existing.tokenId,
+              listedAt: a.listing.listedAt || existing.listedAt,
+            });
+          }
+        }
+
+        return {
+          ...prev,
+          slabs: Array.from(newSlabsMap.values()),
+          overrides: newOverrides,
+        };
+      });
+    },
+    [],
+  );
+
   const handOver = useCallback(
-    (listingId: string, toHandle: string) => {
-      setState((prev) => ({
-        ...prev,
-        negotiations: closeSellerChats(prev, listingId, `The slab was transferred to @${toHandle}.`),
-        overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
-        vault: prev.vault.filter((v) => v.listingId !== listingId),
-      }));
+    (listingId: string, toHandle: string, txHash?: string) => {
+      setState((prev) => {
+        const fromHandle = prev.user?.username ?? "you";
+        const now = new Date().toISOString();
+        const transferTx = txHash || `0x${hexId(Date.now(), 20)}`;
+        const transferEvent: ActivityEvent = {
+          kind: "Transfer",
+          from: fromHandle,
+          to: toHandle,
+          at: now,
+          txHash: transferTx,
+        };
+
+        const existingOverrides = prev.overrides[listingId];
+        const prevActivity = existingOverrides?.activity ?? [];
+
+        return {
+          ...prev,
+          negotiations: closeSellerChats(prev, listingId, `The slab was transferred to @${toHandle}.`),
+          overrides: {
+            ...prev.overrides,
+            [listingId]: {
+              ...existingOverrides,
+              delisted: true,
+              owner: toHandle,
+              activity: [transferEvent, ...prevActivity.filter((e) => e.txHash !== transferTx)],
+            },
+          },
+          vault: prev.vault.filter((v) => v.listingId !== listingId),
+        };
+      });
     },
     [],
   );
@@ -835,12 +1215,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   /* ---------------- negotiations ---------------- */
 
+  const syncNegotiationToServer = (n: Negotiation) => {
+    void fetch("/api/negotiations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ negotiation: n }),
+    }).catch(() => null);
+  };
+
   const makeOffer = useCallback(
-    (listingId: string, bid: TradeBid): string | null => {
+    (listingId: string, bid: TradeBid, availableFunds?: number): string | null => {
       const user = state.user;
       const listing = current(state, listingId);
       if (!user || !listing) return null;
-      if (bid.cash > balance) {
+      const effective = availableFunds !== undefined ? availableFunds : balance;
+      if (bid.cash > effective) {
         pushToast({ title: "Not enough in your wallet", body: "Lower the cash part or top up first.", tone: "error" });
         return null;
       }
@@ -848,6 +1237,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const id = negotiationId(listingId, me);
       const now = new Date().toISOString();
       const offer: ChatMessage = { id: messageId(), from: me, at: now, kind: "offer", offer: bid, status: "pending" };
+      let updatedNegotiation: Negotiation | null = null;
       setState((prev) => {
         const existing = prev.negotiations[id];
         const n: Negotiation =
@@ -864,8 +1254,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 ],
               }
             : { id, listingId, seller: listing.owner, buyer: me, status: "open", createdAt: now, messages: [offer] };
+        updatedNegotiation = n;
         return { ...prev, negotiations: { ...prev.negotiations, [id]: n } };
       });
+      if (updatedNegotiation) syncNegotiationToServer(updatedNegotiation);
       pushToast({ title: "Offer sent", body: `${listing.owner} will reply in your chat.`, tone: "success" });
       return id;
     },
@@ -873,42 +1265,237 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const sendMessage = useCallback((negId: string, text: string) => {
+    const me = latest.current.user?.username;
+    if (!me) return;
+    const chat = latest.current.negotiations[negId];
+    if (!chat || chat.status !== "open") return;
+
+    // Guard against duplicate send
+    const last = chat.messages.at(-1);
+    if (last && last.from === me && last.text === text && Date.now() - Date.parse(last.at) < 2000) {
+      return;
+    }
+
+    const newMsg: ChatMessage = {
+      id: messageId(),
+      from: me,
+      at: new Date().toISOString(),
+      kind: "text",
+      text,
+    };
+
+    let updatedNegotiation: Negotiation | null = null;
     setState((prev) => {
-      const me = prev.user?.username;
-      if (!me || prev.negotiations[negId]?.status !== "open") return prev;
-      return append(prev, negId, { id: messageId(), from: me, at: new Date().toISOString(), kind: "text", text });
+      const currentChat = prev.negotiations[negId];
+      if (!currentChat || currentChat.status !== "open") return prev;
+      if (currentChat.messages.some((m) => m.id === newMsg.id)) return prev;
+      const updated = {
+        ...currentChat,
+        messages: [...currentChat.messages, newMsg],
+      };
+      updatedNegotiation = updated;
+      return {
+        ...prev,
+        negotiations: { ...prev.negotiations, [negId]: updated },
+      };
     });
+
+    if (updatedNegotiation) {
+      syncNegotiationToServer(updatedNegotiation);
+    }
   }, []);
 
   const respondToOffer = useCallback(
-    (negId: string, offerId: string, accept: boolean) => {
+    (negId: string, offerId: string, accept: boolean, txHash?: string) => {
       const snapshot = latest.current;
       const me = snapshot.user?.username;
       if (!me) return;
       if (accept) {
-        const { error } = settleDeal(snapshot, negId, offerId);
+        const { error } = settleDeal(snapshot, negId, offerId, balance, txHash);
         if (error) {
           pushToast({ title: "Could not accept", body: error, tone: "error" });
           return;
         }
-        setState((prev) => settleDeal(prev, negId, offerId).next);
+        setState((prev) => {
+          const res = settleDeal(prev, negId, offerId, balance, txHash).next;
+          const updated = res.negotiations[negId];
+          if (updated) syncNegotiationToServer(updated);
+          return res;
+        });
         pushToast({ title: "Offer accepted", body: "See your Vault and Wallet for the update.", tone: "success" });
       } else {
-        setState((prev) => markOffer(prev, negId, offerId, "declined", `${me} declined the offer.`, me));
+        setState((prev) => {
+          const res = markOffer(prev, negId, offerId, "declined", `${me} declined the offer.`, me);
+          const updated = res.negotiations[negId];
+          if (updated) syncNegotiationToServer(updated);
+          return res;
+        });
       }
     },
-    [pushToast],
+    [pushToast, balance],
   );
 
   const withdrawOffer = useCallback((negId: string, offerId: string) => {
     setState((prev) => {
       const me = prev.user?.username;
       if (!me) return prev;
-      return markOffer(prev, negId, offerId, "withdrawn", `${me} cancelled the offer.`, me);
+      const res = markOffer(prev, negId, offerId, "withdrawn", `${me} cancelled the offer.`, me);
+      const updated = res.negotiations[negId];
+      if (updated) syncNegotiationToServer(updated);
+      return res;
     });
   }, []);
 
-  /* The simulated other party answers whatever the user last did in a chat. */
+  /* Periodic poll to sync negotiations across accounts/sessions */
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/negotiations");
+        if (!res.ok) return;
+        const data = (await res.json()) as { negotiations?: Record<string, Negotiation> };
+        if (!data?.negotiations || !active) return;
+
+        setState((prev) => {
+          let changed = false;
+          const merged = { ...prev.negotiations };
+          let newVault = prev.vault;
+          const newOverrides = { ...prev.overrides };
+
+          for (const [id, incoming] of Object.entries(data.negotiations!)) {
+            const existing = merged[id];
+            if (!existing) {
+              merged[id] = incoming;
+              changed = true;
+              if (prev.user && incoming.seller === prev.user.username && incoming.status === "open") {
+                const pending = incoming.messages.find((m) => m.kind === "offer" && m.status === "pending");
+                if (pending && pending.from !== prev.user.username) {
+                  pushToast({ title: `New offer from @${incoming.buyer}`, body: "Check Negotiation rooms." });
+                }
+              }
+            } else {
+              const existingMsgs = existing.messages?.length || 0;
+              const incomingMsgs = incoming.messages?.length || 0;
+              if (existing.status !== incoming.status || incomingMsgs !== existingMsgs) {
+                merged[id] = {
+                  ...existing,
+                  ...incoming,
+                  messages: incoming.messages,
+                };
+                changed = true;
+              }
+            }
+
+            if (incoming.status === "sold") {
+              const lastMsg = incoming.messages.at(-1);
+              const acceptedOffer = incoming.messages.find(
+                (m) => m.kind === "offer" && m.status === "accepted"
+              );
+              const offerAmount = acceptedOffer?.offer?.cash ?? 0;
+              const soldAt = lastMsg?.at || new Date().toISOString();
+              const existingOverrides = newOverrides[incoming.listingId] || {};
+              // Only apply when ownership hasn't transferred to the buyer yet.
+              // Once the buyer owns the slab and may have listed it, do not force delisting.
+              if (existingOverrides.owner !== incoming.buyer) {
+                const baseListing = getListing(incoming.listingId) || prev.slabs.find((s) => s.id === incoming.listingId);
+                const existingActivity = existingOverrides.activity || baseListing?.activity || [];
+                const alreadyHasSale = existingActivity.some(
+                  (a) => a.kind === "Sale" && a.to === incoming.buyer && a.from === incoming.seller
+                );
+                const saleActivity: ActivityEvent = {
+                  kind: "Sale",
+                  from: incoming.seller,
+                  to: incoming.buyer,
+                  price: offerAmount > 0 ? offerAmount : undefined,
+                  at: soldAt,
+                  txHash: `0x${hexId(hashString(soldAt + incoming.id), 8)}`,
+                };
+                const updatedActivity = alreadyHasSale ? existingActivity : [saleActivity, ...existingActivity];
+                newOverrides[incoming.listingId] = {
+                  ...existingOverrides,
+                  owner: incoming.buyer,
+                  soldTo: incoming.buyer,
+                  delisted: true,
+                  activity: updatedActivity,
+                };
+                changed = true;
+              }
+            }
+
+            if (prev.user && incoming.buyer === prev.user.username && incoming.status === "sold") {
+              const existingItem = newVault.find((v) => v.listingId === incoming.listingId);
+              const baseListing = getListing(incoming.listingId) || prev.slabs.find((s) => s.id === incoming.listingId);
+              const tokenId = baseListing?.tokenId;
+              const token: SlabToken | undefined = tokenId
+                ? {
+                    chainId: 31337,
+                    contract: baseListing?.contract || contracts.slabVault.address,
+                    tokenId,
+                    owner: prev.user.address || "",
+                    mintTx: "",
+                    custodianRef: "",
+                  }
+                : undefined;
+
+              // Only manage newVault here for off-chain users (without a connected wallet).
+              // For on-chain users, ChainVaultSync is the single source of truth for token ownership.
+              if (!prev.user.address && !tokenId) {
+                if (!existingItem) {
+                  newVault = [
+                    {
+                      listingId: incoming.listingId,
+                      acquiredAt: incoming.messages.at(-1)?.at || new Date().toISOString(),
+                      via: "Trade",
+                      status: "Vaulted",
+                      token,
+                    },
+                    ...newVault,
+                  ];
+                  changed = true;
+                } else if (!existingItem.token && token) {
+                  newVault = newVault.map((item) =>
+                    item.listingId === incoming.listingId ? { ...item, token } : item,
+                  );
+                  changed = true;
+                }
+              }
+            }
+
+            if (prev.user && incoming.seller === prev.user.username && incoming.status === "sold") {
+              const item = newVault.find((v) => v.listingId === incoming.listingId);
+              // Only remove here if user is not on-chain or item has no token.
+              // For on-chain users, ChainVaultSync is the authoritative source for token ownership.
+              if (item && !prev.user.address && !item.token) {
+                newVault = newVault.filter((v) => v.listingId !== incoming.listingId);
+                changed = true;
+              }
+            }
+          }
+
+          if (!changed) return prev;
+          return {
+            ...prev,
+            negotiations: merged,
+            vault: newVault,
+            overrides: newOverrides,
+          };
+        });
+      } catch {
+        /* ignore polling errors */
+      }
+    };
+
+    void poll();
+    const interval = setInterval(poll, 2500);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [ready, pushToast]);
+
+  /* The simulated other party answers whatever the user last did in a chat (dummy catalog handles only) */
   const answered = useRef(new Set<string>());
   useEffect(() => {
     const me = state.user?.username;
@@ -917,6 +1504,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const last = n.messages.at(-1);
       if (n.status !== "open" || !last || answered.current.has(last.id)) continue;
       if (last.from !== me && last.by !== me) continue;
+
+      const other = n.buyer === me ? n.seller : n.buyer;
+      const isRealAccount =
+        other === "test1" ||
+        other === "test2" ||
+        other.toLowerCase().startsWith("test") ||
+        other === "ash" ||
+        other === "misty" ||
+        other === "brock";
+      if (isRealAccount) continue;
+
       answered.current.add(last.id);
       window.setTimeout(() => {
         const snapshot = latest.current;
@@ -1073,6 +1671,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ...state,
     ready,
     balance,
+    syncChainBalance,
     login,
     logout,
     requireAuth,
@@ -1083,10 +1682,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     submitSlab,
     listFromVault,
     delist,
+    buyNow,
     requestShipping,
     recordChainCash,
     attachToken,
     syncChainSlabs,
+    syncMarketListings,
     handOver,
     withdrawSlab,
     updateWithdrawal,
@@ -1118,9 +1719,18 @@ export function useStore(): StoreValue {
 
 /** Marketplace inventory = catalog plus submitted slabs, minus anything off the market. */
 export function useMarketInventory(): Listing[] {
-  const { overrides, resolve, slabs } = useStore();
-  return useMemo(
-    () => [...slabs, ...LISTINGS].filter((l) => !overrides[l.id]?.delisted).map(resolve),
-    [slabs, overrides, resolve],
-  );
+  const { isListed, resolve, slabs } = useStore();
+  return useMemo(() => {
+    const map = new Map<string, Listing>();
+    for (const l of [...slabs, ...LISTINGS]) {
+      if (isListed(l.id)) {
+        const item = resolve(l);
+        const key = item.tokenId ? `token-${item.tokenId}` : item.id;
+        if (!map.has(key) || l.tokenId) {
+          map.set(key, item);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [slabs, isListed, resolve]);
 }

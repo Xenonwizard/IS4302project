@@ -12,18 +12,25 @@ import {
   Play,
   Share2,
   ShieldCheck,
+  ShoppingCart,
   Tag,
   Truck,
 } from "lucide-react";
 import Image from "next/image";
 import { useMemo, useState } from "react";
-import { contracts } from "@/lib/chain/config";
 import { BRAND } from "@/lib/brand";
 import { GRADERS, GRADE_STEPS } from "@/lib/pools";
 import { population, salesFor } from "@/lib/catalog";
 import { shortDate, truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
-import type { Grader, Listing } from "@/lib/types";
+import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
+import { DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
+import { zeroAddress } from "viem";
+import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ActivityEvent, Grader, Listing } from "@/lib/types";
+import { CopyText } from "../chain/ChainConsole";
 import { TokenRecord } from "../chain/TokenRecord";
 import { OfferModal } from "../modals/OfferModal";
 import { CardBack } from "../slab/CardBack";
@@ -41,32 +48,389 @@ import {
 
 export function AssetDetail({ listing: base }: { listing: Listing }) {
   const {
+    user,
+    balance,
     resolve,
     isOwned,
     isWatched,
     toggleWatch,
     requireAuth,
-    comments,
-    addComment,
     pushToast,
     isListed,
+    delist,
+    buyNow,
     negotiations,
+    slabs,
+    vault,
   } = useStore();
 
-  const listing = resolve(base);
+  const baseResolved = resolve(base);
+  const resolvedTokenId =
+    baseResolved.tokenId ||
+    slabs.find((s) => s.id === baseResolved.id)?.tokenId ||
+    vault.find((v) => v.listingId === baseResolved.id)?.token?.tokenId;
+  const listing = useMemo(
+    () => ({ ...baseResolved, tokenId: resolvedTokenId || baseResolved.tokenId }),
+    [baseResolved, resolvedTokenId],
+  );
   // A slab minted through SlabVault: its facts come from the chain, not the catalogue.
   const onChainTokenId =
-    listing.contract.toLowerCase() === contracts.slabVault.address.toLowerCase() ? listing.tokenId : null;
-  const owned = isOwned(listing.id);
-  const listed = isListed(listing.id);
+    resolvedTokenId ||
+    (listing.contract?.toLowerCase() === contracts.slabVault.address.toLowerCase() ? listing.tokenId : null);
 
+  const { buyCard, cancelListing } = useMarketChain();
+  const acct = useOnchainAccount();
+  const client = usePublicClient();
+  const queryClient = useQueryClient();
+
+  const tokenIdBigInt = resolvedTokenId ? BigInt(resolvedTokenId) : null;
+  const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
+
+  const { data: onChainMarketListing } = useQuery({
+    queryKey: ["token-market-listing", resolvedTokenId],
+    enabled: enabledOnChain,
+    refetchInterval: 3000,
+    queryFn: async () => {
+      if (!client || tokenIdBigInt === null) return null;
+      try {
+        const l = await client.readContract({
+          ...contracts.slabMarket,
+          functionName: "getListing",
+          args: [tokenIdBigInt],
+        });
+        if (!l || l.seller === zeroAddress || l.price === BigInt(0)) return null;
+        return {
+          seller: l.seller,
+          price: fromUsdcUnits(l.price),
+          listedAt: Number(l.listedAt),
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  const { data: onChainOwner } = useQuery({
+    queryKey: ["token-owner", resolvedTokenId],
+    enabled: enabledOnChain,
+    refetchInterval: 3000,
+    queryFn: async () => {
+      if (!client || tokenIdBigInt === null) return null;
+      try {
+        const ownerAddr = await client.readContract({
+          ...contracts.slabVault,
+          functionName: "ownerOf",
+          args: [tokenIdBigInt],
+        });
+        if (!ownerAddr || ownerAddr === zeroAddress) return null;
+        const ownerAcct = await client
+          .readContract({
+            ...contracts.accounts,
+            functionName: "accountOf",
+            args: [ownerAddr],
+          })
+          .catch(() => null);
+        return {
+          address: ownerAddr,
+          handle: ownerAcct?.handle || shortHash(ownerAddr),
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  const currentOwner = enabledOnChain && onChainOwner?.handle
+    ? onChainOwner.handle
+    : listing.owner;
+
+  const currentOwnerAddress = enabledOnChain && onChainOwner?.address
+    ? onChainOwner.address
+    : listing.ownerAddress;
+
+  const owned = enabledOnChain && onChainOwner && user?.address
+    ? onChainOwner.address.toLowerCase() === user.address.toLowerCase()
+    : isOwned(listing.id);
+
+  const listed = enabledOnChain
+    ? Boolean(onChainMarketListing)
+    : isListed(listing.id);
+
+  const displayPrice = enabledOnChain && onChainMarketListing
+    ? onChainMarketListing.price
+    : (listed || !owned ? listing.price : listing.fmv);
+
+  const effectiveListing = useMemo(
+    () => ({
+      ...listing,
+      owner: currentOwner,
+      ownerAddress: currentOwnerAddress,
+      price: displayPrice,
+    }),
+    [listing, currentOwner, currentOwnerAddress, displayPrice],
+  );
+
+  const refreshActivity = () => {
+    if (resolvedTokenId) {
+      void queryClient.invalidateQueries({ queryKey: ["token-activity", resolvedTokenId] });
+      void queryClient.invalidateQueries({ queryKey: ["token-market-listing", resolvedTokenId] });
+      void queryClient.invalidateQueries({ queryKey: ["token-owner", resolvedTokenId] });
+      void queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
+    }
+  };
+
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardPurchased",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardListed",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
+  useWatchContractEvent({
+    ...contracts.slabVault,
+    eventName: "Transfer",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
+  useWatchContractEvent({
+    ...contracts.slabVault,
+    eventName: "SlabVaulted",
+    enabled: enabledOnChain,
+    onLogs: refreshActivity,
+  });
+
+  const { data: onChainEvents = [] } = useQuery({
+    queryKey: ["token-activity", listing.tokenId],
+    enabled: enabledOnChain,
+    refetchInterval: 5000,
+    queryFn: async (): Promise<ActivityEvent[]> => {
+      if (!client || tokenIdBigInt === null) return [];
+      try {
+        const [marketCode, vaultCode] = await Promise.all([
+          client.getBytecode({ address: contracts.slabMarket.address }).catch(() => null),
+          client.getBytecode({ address: contracts.slabVault.address }).catch(() => null),
+        ]);
+        if (!marketCode || marketCode === "0x" || !vaultCode || vaultCode === "0x") return [];
+
+        const from = { fromBlock: DEPLOY_BLOCK };
+        const [sales, listings, transfers, mints] = await Promise.all([
+          client
+            .getContractEvents({
+              ...contracts.slabMarket,
+              eventName: "CardPurchased",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
+          client
+            .getContractEvents({
+              ...contracts.slabMarket,
+              eventName: "CardListed",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
+          client
+            .getContractEvents({
+              ...contracts.slabVault,
+              eventName: "Transfer",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
+          client
+            .getContractEvents({
+              ...contracts.slabVault,
+              eventName: "SlabVaulted",
+              args: { tokenId: tokenIdBigInt },
+              ...from,
+            })
+            .catch(() => []),
+        ]);
+
+        const events: ActivityEvent[] = [];
+        const saleTxHashes = new Set(sales.map((s) => s.transactionHash));
+
+        for (const log of sales) {
+          const a = log.args as { tokenId?: bigint; seller?: string; buyer?: string; price?: bigint; fee?: bigint; settledAt?: bigint };
+          if (!a?.buyer) continue;
+          const [sellerAcct, buyerAcct] = await Promise.all([
+            a.seller
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.seller as `0x${string}`] }).catch(() => null)
+              : null,
+            a.buyer
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.buyer as `0x${string}`] }).catch(() => null)
+              : null,
+          ]);
+
+          const fromName = sellerAcct?.handle || shortHash(a.seller);
+          const toName = buyerAcct?.handle || shortHash(a.buyer);
+          const at = a.settledAt ? new Date(Number(a.settledAt) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Sale",
+            price: fromUsdcUnits(a.price ?? BigInt(0)),
+            from: fromName,
+            to: toName,
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
+        for (const log of listings) {
+          const a = log.args as { tokenId?: bigint; seller?: string; price?: bigint; listedAt?: bigint };
+          if (!a?.seller) continue;
+          const sellerAcct = await client
+            .readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.seller as `0x${string}`] })
+            .catch(() => null);
+          const fromName = sellerAcct?.handle || shortHash(a.seller);
+          const at = a.listedAt ? new Date(Number(a.listedAt) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Listed",
+            price: fromUsdcUnits(a.price ?? BigInt(0)),
+            from: fromName,
+            to: "Marketplace",
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
+        for (const log of transfers) {
+          const a = log.args as { from?: string; to?: string; tokenId?: bigint };
+          // If from is 0x0, it's the mint. If txHash was a sale, it's already shown as Sale.
+          if (!a?.from || a.from === zeroAddress || saleTxHashes.has(log.transactionHash)) continue;
+
+          const [fromAcct, toAcct] = await Promise.all([
+            a.from
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.from as `0x${string}`] }).catch(() => null)
+              : null,
+            a.to
+              ? client.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.to as `0x${string}`] }).catch(() => null)
+              : null,
+          ]);
+
+          const fromName = fromAcct?.handle || shortHash(a.from);
+          const toName = toAcct?.handle || shortHash(a.to);
+          const block = await client.getBlock({ blockNumber: log.blockNumber }).catch(() => null);
+          const at = block?.timestamp ? new Date(Number(block.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Transfer",
+            from: fromName,
+            to: toName,
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
+        for (const log of mints) {
+          const a = log.args as { owner?: string; certNumber?: string };
+          if (!a?.owner) continue;
+          const ownerAcct = await client
+            .readContract({ ...contracts.accounts, functionName: "accountOf", args: [a.owner as `0x${string}`] })
+            .catch(() => null);
+          const ownerName = ownerAcct?.handle || shortHash(a.owner);
+          const block = await client.getBlock({ blockNumber: log.blockNumber }).catch(() => null);
+          const at = block?.timestamp ? new Date(Number(block.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+          events.push({
+            kind: "Mint",
+            from: "0x0000...0000",
+            to: ownerName,
+            at,
+            txHash: log.transactionHash ?? "",
+          });
+        }
+
+        return events;
+      } catch {
+        return [];
+      }
+    },
+  });
+
+  const allActivity = useMemo(() => {
+    // If we have real on-chain events, filter out synthetic initial Mint from catalog
+    // But keep Sale events which have the negotiated deal price
+    const baseActivity = onChainEvents.length
+      ? (listing.activity ?? []).filter((a) => {
+          if (a.kind === "Mint") return false;
+          if (a.kind === "Sale" && a.price) return true;
+          return !onChainEvents.some((oe) => oe.txHash === a.txHash);
+        })
+      : (listing.activity ?? []);
+
+    const saleTxHashes = new Set(baseActivity.filter((b) => b.kind === "Sale").map((b) => b.txHash));
+    const filteredOnChain = onChainEvents.filter((oe) => !(oe.kind === "Transfer" && saleTxHashes.has(oe.txHash)));
+
+    const combined = [...filteredOnChain, ...baseActivity];
+    const seen = new Set<string>();
+    const deduped: ActivityEvent[] = [];
+    for (const item of combined) {
+      const key = `${item.kind}-${item.txHash}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(item);
+      }
+    }
+    return deduped.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  }, [onChainEvents, listing.activity]);
+
+  const [buyOpen, setBuyOpen] = useState(false);
+  const [buyBusy, setBuyBusy] = useState(false);
+  const [delisting, setDelisting] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
   const [view, setView] = useState<"slab" | "front" | "back">("slab");
   const [spin, setSpin] = useState(false);
-  const [draft, setDraft] = useState("");
 
-  const localComments = comments[listing.id] ?? [];
-  const allComments = [...localComments, ...listing.comments];
+  const handleBuy = async () => {
+    setBuyBusy(true);
+    try {
+      let txHash = "";
+      if (user?.address && listing.tokenId) {
+        txHash = await buyCard(listing.tokenId, displayPrice);
+      }
+      buyNow(listing.id, txHash);
+      setBuyOpen(false);
+      refreshActivity();
+    } catch (err) {
+      pushToast({
+        title: "Purchase failed",
+        body: (err as Error).message,
+        tone: "error",
+      });
+    } finally {
+      setBuyBusy(false);
+    }
+  };
+
+  const handleDelist = async () => {
+    setDelisting(true);
+    try {
+      if (user?.address && listing.tokenId) {
+        await cancelListing(listing.tokenId);
+      }
+      delist(listing.id);
+    } catch (err) {
+      pushToast({
+        title: "Delist failed",
+        body: (err as Error).message,
+        tone: "error",
+      });
+    } finally {
+      setDelisting(false);
+    }
+  };
+
   const openChats = Object.values(negotiations).filter(
     (n) => n.listingId === listing.id && n.status === "open",
   ).length;
@@ -133,59 +497,11 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </div>
           </div>
 
-          {/* comments */}
-          <section className="mt-6">
-            <h2 className="mb-3 text-base font-bold">Comments</h2>
-            <div className="rounded-card border border-hairline bg-surface p-4">
-              <div className="flex gap-2">
-                <input
-                  className={inputClass}
-                  placeholder="Add a comment…"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                />
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    if (!draft.trim()) return;
-                    if (!requireAuth()) return;
-                    addComment(listing.id, draft.trim());
-                    setDraft("");
-                  }}
-                >
-                  Post
-                </Button>
-              </div>
-              {allComments.length ? (
-                <ul className="mt-4 space-y-4">
-                  {allComments.map((c) => (
-                    <li key={c.id} className="flex gap-3">
-                      <Avatar name={c.user} size={28} />
-                      <div className="min-w-0">
-                        <p className="text-[13px] font-semibold">
-                          {c.user}{" "}
-                          <span className="font-normal text-dim">
-                            · <TimeAgo value={c.at} />
-                          </span>
-                        </p>
-                        <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{c.text}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="py-8 text-center text-[13px] text-dim">
-                  No comments yet. Be the first to comment!
-                </p>
-              )}
-            </div>
-          </section>
-
           {/* activity */}
           <section className="mt-6">
             <h2 className="mb-3 text-base font-bold">Activity history</h2>
             <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-              {listing.activity.map((e, i) => (
+              {allActivity.map((e, i) => (
                 <li key={`${e.txHash}-${i}`} className="flex items-center gap-4 p-4">
                   <Badge tone={e.kind === "Mint" ? "accent" : e.kind === "Sale" ? "good" : "neutral"}>
                     {e.kind}
@@ -201,8 +517,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                     <TimeAgo value={e.at} />
                   </span>
                   <span className="hidden shrink-0 items-center gap-1 text-[12px] text-dim sm:flex">
-                    {truncMiddle(e.txHash, 6, 4)}
-                    <ExternalLink size={12} />
+                    <CopyText text={e.txHash} title={truncMiddle(e.txHash, 6, 4)} />
                   </span>
                 </li>
               ))}
@@ -250,11 +565,11 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             <span className="flex items-center gap-2 text-muted">
               Owned by
               <Link
-                href={`/profile/${listing.owner}`}
+                href={`/profile/${currentOwner}`}
                 className="flex items-center gap-1.5 font-semibold text-accent hover:underline"
               >
-                <Avatar name={listing.owner} size={18} />
-                {listing.owner}
+                <Avatar name={currentOwner} size={18} />
+                {currentOwner}
               </Link>
             </span>
           </div>
@@ -299,7 +614,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                     {listed ? "Asking" : owned ? (onChainTokenId ? "Declared value (on-chain)" : "Market value") : "Last asked"}
                   </p>
                   <p className="mt-1 text-[30px] font-bold leading-none">
-                    {usd(listed || !owned ? listing.price : listing.fmv, { cents: Boolean(onChainTokenId) })}
+                    {usd(displayPrice, { cents: Boolean(onChainTokenId) })}
                   </p>
                 </div>
               </div>
@@ -307,33 +622,60 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               {owned ? (
                 <div className="mt-4 grid gap-2">
                   {listed ? (
-                    <Link href={`/trades?listing=${listing.id}`}>
-                      <Button size="lg" className="w-full">
-                        <MessagesSquare size={16} />
-                        Offers on this slab{openChats ? ` (${openChats})` : ""}
+                    <>
+                      <Link href={`/trades?listing=${listing.id}`}>
+                        <Button size="lg" className="w-full">
+                          <MessagesSquare size={16} />
+                          Offers on this slab{openChats ? ` (${openChats})` : ""}
+                        </Button>
+                      </Link>
+                      <Button
+                        size="lg"
+                        variant="secondary"
+                        className="w-full"
+                        disabled={delisting}
+                        onClick={handleDelist}
+                      >
+                        {delisting ? "Delisting..." : "Delist from Marketplace"}
                       </Button>
-                    </Link>
+                    </>
                   ) : (
-                    <p className="text-[12px] text-muted">
-                      List this slab from your Vault to put it on the marketplace and receive offers.
-                    </p>
+                    <>
+                      <p className="text-[12px] text-muted">
+                        List this slab from your Vault to put it on the marketplace and receive offers.
+                      </p>
+                      <Link href="/vault">
+                        <Button size="lg" className="w-full">
+                          <Tag size={16} />
+                          List it from your Vault
+                        </Button>
+                      </Link>
+                    </>
                   )}
-                  <Link href={listed ? "/vault?tab=listed" : "/vault"}>
-                    <Button size="lg" variant={listed ? "secondary" : "primary"} className="w-full">
-                      {listed ? null : <Tag size={16} />}
-                      {listed ? "Manage listing" : "List it from your Vault"}
-                    </Button>
-                  </Link>
                 </div>
               ) : listed ? (
-                <Button
-                  size="lg"
-                  className="mt-4 w-full"
-                  onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
-                >
-                  <Gavel size={16} />
-                  Make an offer
-                </Button>
+                <div className="mt-4 grid gap-2">
+                  <Button
+                    size="lg"
+                    className="w-full"
+                    onClick={() => requireAuth(() => setBuyOpen(true)) && setBuyOpen(true)}
+                  >
+                    <ShoppingCart size={16} />
+                    Buy now for {usd(displayPrice)}
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
+                  >
+                    <Gavel size={16} />
+                    Make an offer
+                  </Button>
+                  <p className="text-center text-[11px] text-dim">
+                    0% platform fee · Atomic on-chain settlement
+                  </p>
+                </div>
               ) : (
                 <p className="mt-4 text-[12px] text-muted">This slab is not for sale right now.</p>
               )}
@@ -386,11 +728,84 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
           {onChainTokenId ? <TokenRecord tokenId={onChainTokenId} /> : null}
           <PriceHistory listing={listing} />
-          <Details listing={listing} />
+          <Details listing={effectiveListing} />
         </div>
       </div>
 
-      <OfferModal listing={listing} open={offerOpen} onClose={() => setOfferOpen(false)} />
+      {/* Buy Confirmation Modal */}
+      <Modal open={buyOpen} onClose={() => !buyBusy && setBuyOpen(false)} title="Confirm Purchase">
+        <div className="p-5">
+          <div className="flex gap-4">
+            <div className="w-20 shrink-0">
+              <Slab listing={listing} flat />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[14px] font-bold leading-snug">{listing.title}</p>
+              <p className="mt-1 text-[12px] text-muted">
+                {listing.grader} Cert #{listing.certNumber}
+              </p>
+              <p className="mt-1 text-[12px] text-muted">Seller: @{currentOwner}</p>
+            </div>
+          </div>
+
+          <dl className="mt-5 space-y-2.5 rounded-2xl bg-surface-2 p-4 text-[13px]">
+            <div className="flex justify-between">
+              <dt className="text-muted">Item price</dt>
+              <dd className="font-semibold">{usd(displayPrice, { cents: true })}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-muted">Pokéchain fee (Rule 2)</dt>
+              <dd className="font-semibold text-good">0% ($0.00)</dd>
+            </div>
+            <div className="h-px bg-hairline" />
+            <div className="flex justify-between">
+              <dt className="text-muted">Total payment</dt>
+              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} USDC</dd>
+            </div>
+          </dl>
+
+          <div className="mt-4 flex items-center justify-between rounded-xl border border-hairline p-3 text-[12px]">
+            <span className="text-muted">Your available balance:</span>
+            <span className="font-bold">
+              {user?.address ? `${usd(acct.walletUsdc, { cents: true })} USDC` : usd(balance, { cents: true })}
+            </span>
+          </div>
+
+          {user?.address && acct.walletUsdc < displayPrice ? (
+            <p className="mt-3 text-[12px] text-bad">
+              You need {usd(displayPrice - acct.walletUsdc, { cents: true })} more USDC. Top up or mint test USDC in your wallet.
+            </p>
+          ) : !user?.address && balance < displayPrice ? (
+            <p className="mt-3 text-[12px] text-bad">
+              Your demo balance is insufficient. Top up in your account menu.
+            </p>
+          ) : null}
+
+          <div className="mt-5 flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              disabled={buyBusy}
+              onClick={() => setBuyOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              className="flex-1"
+              disabled={
+                buyBusy ||
+                (user?.address ? acct.walletUsdc < displayPrice : balance < displayPrice)
+              }
+              onClick={handleBuy}
+            >
+              {buyBusy ? "Settling atomically..." : `Pay ${usd(displayPrice, { cents: true })}`}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <OfferModal listing={effectiveListing} open={offerOpen} onClose={() => setOfferOpen(false)} />
     </div>
   );
 }

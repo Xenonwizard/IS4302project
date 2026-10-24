@@ -5,12 +5,14 @@ import {Test} from "forge-std/Test.sol";
 import {MockUSDC} from "../contracts/MockUSDC.sol";
 import {AccountRegistry, ISlabVaultCustody} from "../contracts/AccountRegistry.sol";
 import {SlabVault, IAccountStatus} from "../contracts/SlabVault.sol";
+import {SlabMarket} from "../contracts/SlabMarket.sol";
 
 /// Unit and fuzz tests for account and slab onboarding / offboarding. Run with `npm test`.
 contract PokechainTest is Test {
     MockUSDC usdc;
     AccountRegistry accounts;
     SlabVault vault;
+    SlabMarket market;
 
     address operator = makeAddr("operator");
     address alice = makeAddr("alice");
@@ -33,6 +35,8 @@ contract PokechainTest is Test {
         vault.setCustodian(collectorCrypt);
         vm.prank(collectorCrypt);
         vault.setEncryptionKey(CC_KEY);
+        market = new SlabMarket(vault, usdc, accounts);
+        vault.setMarketplace(address(market));
 
         vm.prank(alice);
         usdc.faucet(1_000 * USD);
@@ -581,6 +585,246 @@ contract PokechainTest is Test {
         uint256 tokenId = _mint(alice, "12345678");
         string memory uri = vault.tokenURI(tokenId);
         assertEq(bytes(uri)[0], bytes1("d")); // data:application/json;base64,...
+    }
+
+    /* ----------------------------- marketplace ----------------------------- */
+
+    function test_ListVaultedSlab() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.expectEmit(true, true, false, true);
+        emit SlabMarket.CardListed(tokenId, alice, 150 * USD, uint64(block.timestamp));
+
+        vm.prank(alice);
+        market.list(tokenId, 150 * USD);
+
+        assertTrue(market.isListed(tokenId));
+        assertTrue(vault.isRestricted(tokenId));
+
+        SlabMarket.Listing memory l = market.getListing(tokenId);
+        assertEq(l.seller, alice);
+        assertEq(l.price, 150 * USD);
+    }
+
+    function test_GetActiveListings() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        assertEq(market.getActiveListings().length, 0);
+
+        vm.prank(alice);
+        market.list(tokenId, 150 * USD);
+
+        SlabMarket.ActiveListing[] memory active = market.getActiveListings();
+        assertEq(active.length, 1);
+        assertEq(active[0].tokenId, tokenId);
+        assertEq(active[0].seller, alice);
+        assertEq(active[0].sellerHandle, "alice");
+        assertEq(active[0].price, 150 * USD);
+    }
+
+    function test_CannotListIfNotOwner() public {
+        _register(alice, "alice");
+        _register(bob, "bob");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(SlabMarket.NotSlabOwner.selector, tokenId));
+        market.list(tokenId, 100 * USD);
+    }
+
+    function test_CannotListNonVaultedSlab() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        vault.requestRedemption(tokenId, bytes32(0));
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(SlabMarket.NotVaulted.selector, tokenId, SlabVault.Custody.RedemptionRequested)
+        );
+        market.list(tokenId, 100 * USD);
+    }
+
+    function test_CanUpdateListingPrice() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        market.list(tokenId, 100 * USD);
+        assertEq(market.getListing(tokenId).price, 100 * USD);
+
+        // Owner can update price
+        vm.prank(alice);
+        market.list(tokenId, 200 * USD);
+        assertEq(market.getListing(tokenId).price, 200 * USD);
+    }
+
+    function test_CannotTransferWhileListed() public {
+        _register(alice, "alice");
+        _register(bob, "bob");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        market.list(tokenId, 100 * USD);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.SlabIsListed.selector, tokenId));
+        vault.safeTransferFrom(alice, bob, tokenId);
+    }
+
+    function test_CannotRedeemWhileListed() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        market.list(tokenId, 100 * USD);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.SlabIsListed.selector, tokenId));
+        vault.requestRedemption(tokenId, bytes32(0));
+    }
+
+    function test_CancelListingReleasesRestrictions() public {
+        _register(alice, "alice");
+        _register(bob, "bob");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        market.list(tokenId, 100 * USD);
+        assertTrue(vault.isRestricted(tokenId));
+
+        vm.expectEmit(true, true, false, true);
+        emit SlabMarket.ListingCancelled(tokenId, alice, uint64(block.timestamp));
+        vm.prank(alice);
+        market.cancelListing(tokenId);
+
+        assertFalse(market.isListed(tokenId));
+        assertFalse(vault.isRestricted(tokenId));
+
+        // Now direct transfer and redemption work again
+        vm.prank(alice);
+        vault.safeTransferFrom(alice, bob, tokenId);
+        assertEq(vault.ownerOf(tokenId), bob);
+    }
+
+    function test_AtomicBuySettlement() public {
+        _register(alice, "alice");
+        _register(bob, "bob");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(bob);
+        usdc.faucet(500 * USD);
+
+        vm.prank(alice);
+        market.list(tokenId, 200 * USD);
+
+        uint256 aliceUsdcBefore = usdc.balanceOf(alice);
+        uint256 bobUsdcBefore = usdc.balanceOf(bob);
+
+        vm.startPrank(bob);
+        usdc.approve(address(market), 200 * USD);
+
+        vm.expectEmit(true, true, true, true);
+        emit SlabMarket.CardPurchased(tokenId, alice, bob, 200 * USD, 0, uint64(block.timestamp));
+        market.buy(tokenId);
+        vm.stopPrank();
+
+        // 1. NFT ownership transferred to bob
+        assertEq(vault.ownerOf(tokenId), bob);
+        assertEq(vault.vaultedCount(bob), 1);
+        assertEq(vault.vaultedCount(alice), 0);
+        assertFalse(market.isListed(tokenId));
+        assertFalse(vault.isRestricted(tokenId));
+
+        // 2. Exact payment settled: 0% platform fee
+        assertEq(usdc.balanceOf(bob), bobUsdcBefore - 200 * USD);
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + 200 * USD);
+
+        // 3. Physical card remains vaulted (Rule 4)
+        assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Vaulted));
+
+        // 4. Recorded in completed-sales history (Rule 6)
+        assertEq(market.totalSales(), 1);
+        SlabMarket.SaleRecord[] memory tokenSales = market.getSalesForToken(tokenId);
+        assertEq(tokenSales.length, 1);
+        assertEq(tokenSales[0].seller, alice);
+        assertEq(tokenSales[0].buyer, bob);
+        assertEq(tokenSales[0].price, 200 * USD);
+        assertEq(tokenSales[0].fee, 0);
+    }
+
+    function test_CannotBuyIfNotActiveAccount() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        market.list(tokenId, 100 * USD);
+
+        vm.startPrank(bob);
+        usdc.faucet(100 * USD);
+        usdc.approve(address(market), 100 * USD);
+        vm.expectRevert(abi.encodeWithSelector(SlabMarket.AccountNotActive.selector, bob));
+        market.buy(tokenId);
+        vm.stopPrank();
+    }
+
+    function test_CannotBuyIfInsufficientUSDC() public {
+        _register(alice, "alice");
+        _register(bob, "bob");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        market.list(tokenId, 100 * USD);
+
+        // Bob has 0 USDC
+        vm.startPrank(bob);
+        usdc.approve(address(market), 100 * USD);
+        vm.expectRevert();
+        market.buy(tokenId);
+        vm.stopPrank();
+
+        // Token still belongs to alice and is still listed
+        assertEq(vault.ownerOf(tokenId), alice);
+        assertTrue(market.isListed(tokenId));
+    }
+
+    function test_CannotSelfBuy() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+
+        vm.prank(alice);
+        market.list(tokenId, 100 * USD);
+
+        vm.startPrank(alice);
+        usdc.approve(address(market), 100 * USD);
+        vm.expectRevert(abi.encodeWithSelector(SlabMarket.SelfPurchase.selector, tokenId));
+        market.buy(tokenId);
+        vm.stopPrank();
+    }
+
+    function testFuzz_ListingAndBuyingPrices(uint256 price) public {
+        vm.assume(price > 0 && price <= 10_000 * USD);
+
+        _register(alice, "alice");
+        _register(bob, "bob");
+        uint256 tokenId = _mint(alice, "fuzz_cert");
+
+        vm.prank(alice);
+        market.list(tokenId, price);
+
+        vm.prank(bob);
+        usdc.faucet(price);
+
+        vm.startPrank(bob);
+        usdc.approve(address(market), price);
+        market.buy(tokenId);
+        vm.stopPrank();
+
+        assertEq(vault.ownerOf(tokenId), bob);
+        assertEq(usdc.balanceOf(alice), 1_000 * USD + price);
     }
 
     /// What the collector declared in the form is part of the NFT's own metadata.
