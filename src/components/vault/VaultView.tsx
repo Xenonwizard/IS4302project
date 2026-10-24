@@ -10,6 +10,7 @@ import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useStore } from "@/lib/store";
+import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import type { Listing, VaultItem } from "@/lib/types";
 import { PendingSubmissions } from "../chain/PendingSubmissions";
@@ -70,12 +71,13 @@ export function VaultView() {
   const allItems = useMemo(
     () =>
       vault
+        .filter((v) => !IS_DEPLOYED || !user?.address || Boolean(v.token))
         .map((v) => {
           const listing = getListing(v.listingId);
           return listing ? { entry: v, listing: resolve(listing) } : null;
         })
         .filter((x): x is { entry: VaultItem; listing: Listing } => Boolean(x)),
-    [vault, resolve],
+    [vault, resolve, user?.address],
   );
   // Withdrawn slabs have left the vault but keep their token, so they get their own tab.
   const items = allItems.filter((i) => i.entry.status !== "Withdrawn");
