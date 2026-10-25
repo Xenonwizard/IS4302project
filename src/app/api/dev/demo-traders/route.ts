@@ -7,9 +7,10 @@
  *   @misty  test2 wallet (#2)           2 Articunos + 1 Charizard-GX, $1,000 PokeCredits in custody
  *
  * On the seeded demo chain these wallets already have accounts (test1 / test2), so they keep their own
- * handles and only get the slabs. Every slab goes through the real on-chain onboarding: requestSubmission (the NFT is minted,
- * pending), markReceived, markForwarded (encrypted to Collector Crypt), Collector Crypt's mock
- * intake, then the Solana check and confirmVaulted. Running it twice only fills in what's missing.
+ * handles and only get the slabs. Every slab goes through the real on-chain onboarding: requestSubmission
+ * (request id = cert number), markReceived (mints the locked NFT), markForwarded (encrypted to Collector
+ * Crypt), Collector Crypt's mock intake, then the Solana check and confirmVaulted. Running it twice only
+ * fills in what's missing.
  */
 import { createWalletClient, http, type Address } from "viem";
 import { IS_LOCAL, chain, contracts, toUsdcUnits } from "@/lib/chain/config";
@@ -66,13 +67,14 @@ export async function POST(request: Request) {
         if ("error" in evidence) throw new Error(evidence.error);
         const receipt = await send("slabVault", "requestSubmission", ["PSA", cert, evidence.evidenceHash, "Drop-off", ""]);
         if (receipt.status !== "success") throw new Error(`requestSubmission for ${cert} reverted`);
-        const id = await publicClient.readContract({ ...contracts.slabVault, functionName: "tokenOfCert", args: [key] });
+        // The PSA cert number is the submission id; the NFT gets its own token id when Pokechain receives it.
+        const id = BigInt(cert);
         await receiveSubmission(id);
         await forwardSubmission(id);
         intake({ grader: "PSA", certNumber: cert, owner: POKECHAIN_ESCROW, depositorRef: `pokechain-submission-${id}` });
         const minted = await mintSubmission(origin, id);
         if (minted.result !== "minted") throw new Error(`Collector Crypt check for ${cert}: ${minted.result}`);
-        done.push(`@${handle} token #${id} (PSA ${cert}) vaulted`);
+        done.push(`@${handle} token #${minted.tokenId} (PSA ${cert}) vaulted`);
       }
     }
     return Response.json({ ok: true, done, traders: TRADERS.map(({ address }) => ({ address })) });

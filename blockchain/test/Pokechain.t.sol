@@ -71,7 +71,7 @@ contract PokechainTest is Test {
         uint256 sid = _submitAndForward(who, cert);
         vm.prank(operator);
         vault.confirmVaulted(sid, "Charizard PSA 10", "https://images.pokemontcg.io/base1/4_hires.png", "CCsol1111");
-        tokenId = sid;
+        tokenId = vault.submissionOf(sid).tokenId;
     }
 
     /* ------------------------ account onboarding ------------------------ */
@@ -230,80 +230,76 @@ contract PokechainTest is Test {
         assertEq(vault.tokenOfCert(vault.certKey("PSA", "12345678")), tokenId);
     }
 
-    /// The NFT exists from the moment the slab is posted, so a parcel lost on the way is traceable.
-    function test_SubmissionMintsPendingLockedNft() public {
+    function test_SubmissionUsesTheCertAsItsRequestIdAndDoesNotMint() public {
         _register(alice, "alice");
-        _register(bob, "bob");
         vm.prank(alice);
-        uint256 tokenId = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
-
-        assertEq(vault.ownerOf(tokenId), alice);
-        assertEq(vault.vaultedCount(alice), 0); // not in the vault yet
-        SlabVault.Slab memory s = vault.slabOf(tokenId);
-        assertEq(uint8(s.custody), uint8(SlabVault.Custody.PostedToPokechain));
-        assertEq(s.trackingNumber, "RR1SG");
-
-        // Locked until Collector Crypt has it.
-        vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(SlabVault.SlabLocked.selector, tokenId, SlabVault.Custody.PostedToPokechain)
-        );
-        vault.transferFrom(alice, bob, tokenId);
+        uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
+        assertEq(sid, 12345678);
+        SlabVault.Submission memory sub = vault.submissionOf(sid);
+        assertEq(sub.tokenId, 0);
+        assertEq(uint8(sub.status), uint8(SlabVault.SubmissionStatus.Pending));
+        assertEq(vault.vaultedCount(alice), 0);
     }
 
     function test_PendingNftFollowsEachInboundStep() public {
         _register(alice, "alice");
         vm.prank(alice);
-        uint256 tokenId = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
+        uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
         vm.prank(operator);
-        vault.markReceived(tokenId);
+        vault.markReceived(sid);
+        uint256 tokenId = vault.submissionOf(sid).tokenId;
         assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.AtPokechain));
         vm.prank(operator);
-        vault.markForwarded(tokenId, CIPHERTEXT, keccak256(abi.encodePacked(SALT, PLAINTEXT)));
+        vault.markForwarded(sid, CIPHERTEXT, keccak256(abi.encodePacked(SALT, PLAINTEXT)));
         assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.SentToCustodian));
         vm.prank(operator);
-        vault.confirmVaulted(tokenId, "Charizard PSA 10", "img", "CCsol1111");
+        vault.confirmVaulted(sid, "Charizard PSA 10", "img", "CCsol1111");
         assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Vaulted));
         assertEq(vault.vaultedCount(alice), 1);
         assertEq(vault.slabOf(tokenId).trackingNumber, ""); // inbound tracking lives on the submission
     }
 
-    /// Lost on the way to Pokechain: reported against the pending token, then found at the warehouse.
-    function test_ReportLostOnTheWayInAndFound() public {
+    function test_ReceivedNftCanBeReportedLostAndFound() public {
         _register(alice, "alice");
         vm.prank(alice);
-        uint256 tokenId = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
+        uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
+        vm.prank(operator);
+        vault.markReceived(sid);
+        uint256 tokenId = vault.submissionOf(sid).tokenId;
         vm.prank(alice);
         vault.reportLost(tokenId, "SingPost shows no scan after 7 days");
         assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Lost));
 
         vm.prank(operator);
         vault.resolveLostReport(tokenId, SlabVault.Custody.AtPokechain);
-        assertEq(uint8(vault.submissionOf(tokenId).status), uint8(SlabVault.SubmissionStatus.ReceivedByPokechain));
+        assertEq(uint8(vault.submissionOf(sid).status), uint8(SlabVault.SubmissionStatus.ReceivedByPokechain));
         // Onboarding carries on from the warehouse.
         vm.startPrank(operator);
-        vault.markForwarded(tokenId, CIPHERTEXT, keccak256(abi.encodePacked(SALT, PLAINTEXT)));
-        vault.confirmVaulted(tokenId, "Charizard PSA 10", "img", "CCsol1111");
+        vault.markForwarded(sid, CIPHERTEXT, keccak256(abi.encodePacked(SALT, PLAINTEXT)));
+        vault.confirmVaulted(sid, "Charizard PSA 10", "img", "CCsol1111");
         vm.stopPrank();
         assertEq(vault.vaultedCount(alice), 1);
     }
 
-    function test_CannotReportLostOnceAtPokechain() public {
+    function test_ReceivedNftIsLockedUntilVaulted() public {
         _register(alice, "alice");
+        _register(bob, "bob");
         vm.prank(alice);
-        uint256 tokenId = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
+        uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
         vm.prank(operator);
-        vault.markReceived(tokenId);
+        vault.markReceived(sid);
+        uint256 tokenId = vault.submissionOf(sid).tokenId;
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(SlabVault.WrongCustody.selector, tokenId, SlabVault.Custody.AtPokechain));
-        vault.reportLost(tokenId, "");
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.SlabLocked.selector, tokenId, SlabVault.Custody.AtPokechain));
+        vault.transferFrom(alice, bob, tokenId);
     }
 
     function test_RejectedTokenStaysAsRecord() public {
         _register(alice, "alice");
-        uint256 tokenId = _submitAndForward(alice, "12345678");
+        uint256 sid = _submitAndForward(alice, "12345678");
         vm.prank(operator);
-        vault.rejectSubmission(tokenId, "cracked case");
+        vault.rejectSubmission(sid, "cracked case");
+        uint256 tokenId = vault.submissionOf(sid).tokenId;
         assertEq(vault.ownerOf(tokenId), alice); // not burned
         assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Rejected));
     }
@@ -369,7 +365,7 @@ contract PokechainTest is Test {
         uint256 tokenId = _mint(alice, "12345678");
         SlabVault.Slab memory slab = vault.slabOf(tokenId);
         assertEq(slab.evidenceHash, EVIDENCE);
-        assertEq(vault.submissionOf(1).inboundTracking, "RR1SG");
+        assertEq(vault.submissionOf(12345678).inboundTracking, "RR1SG");
     }
 
     function test_InboundTrailIsRecorded() public {
@@ -378,7 +374,7 @@ contract PokechainTest is Test {
         uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
 
         vm.expectEmit(true, true, false, false);
-        emit SlabVault.SubmissionReceived(sid, alice);
+        emit SlabVault.SubmissionReceived(sid, 1, alice);
         vm.prank(operator);
         vault.markReceived(sid);
 
@@ -471,8 +467,9 @@ contract PokechainTest is Test {
         vm.prank(operator);
         vault.rejectSubmission(sid, "Collector Crypt found the slab was cracked");
         assertEq(uint8(vault.submissionOf(sid).status), uint8(SlabVault.SubmissionStatus.Rejected));
-        // The cert is free to be submitted again.
+        // The rejected request remains the permanent record for this cert number.
         vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.CertAlreadyTokenised.selector, sid));
         vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
     }
 
@@ -487,9 +484,9 @@ contract PokechainTest is Test {
     function test_SameCertCannotBeTokenisedTwice() public {
         _register(alice, "alice");
         _register(bob, "bob");
-        uint256 tokenId = _mint(alice, "12345678");
+        _mint(alice, "12345678");
         vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(SlabVault.CertAlreadyTokenised.selector, tokenId));
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.CertAlreadyTokenised.selector, 12345678));
         vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
     }
 
@@ -831,7 +828,7 @@ contract PokechainTest is Test {
 
         _register(alice, "alice");
         _register(bob, "bob");
-        uint256 tokenId = _mint(alice, "fuzz_cert");
+        uint256 tokenId = _mint(alice, "98765432");
 
         vm.prank(alice);
         market.list(tokenId, price);

@@ -151,6 +151,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const owned = enabledOnChain && onChainOwner && user?.address
     ? onChainOwner.address.toLowerCase() === user.address.toLowerCase()
     : isOwned(listing.id);
+  const vaultEntry = vault.find((entry) => entry.listingId === listing.id || entry.token?.tokenId === resolvedTokenId);
+  const awaitingVaulting = owned && vaultEntry?.status === "Awaiting vaulting";
 
   const listed = enabledOnChain
     ? onChainMarketListing !== undefined
@@ -503,7 +505,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <div className="flex items-center justify-between gap-3">
             <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
               <ShieldCheck size={13} className="text-good" />
-              Vaulted and insured
+              {awaitingVaulting ? "Awaiting vaulting" : "Vaulted and insured"}
             </Badge>
             <div className="flex items-center gap-2">
               <button
@@ -572,17 +574,27 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="min-w-0">
                 <p className="text-[12px] font-semibold text-muted">{listed ? "Listed for" : "Listing status"}</p>
                 <p className="mt-1 text-[30px] font-bold leading-tight">
-                  {listed ? usd(displayPrice, { cents: Boolean(onChainTokenId) }) : "Not listed"}
+                  {listed ? usd(displayPrice, { cents: Boolean(onChainTokenId) }) : awaitingVaulting ? "Awaiting vaulting" : "Not listed"}
                 </p>
                 {!listed ? (
                   <p className="mt-2 text-[12px] leading-relaxed text-muted">
-                    {owned ? "Held in your vault and ready to list." : "This slab is not for sale right now."}
+                    {awaitingVaulting
+                      ? "Received at Pokechain and waiting for Collector Crypt to vault it. The NFT stays locked until then; the only action is reporting it lost from your Vault."
+                      : owned
+                        ? "Held in your vault and ready to list."
+                        : "This slab is not for sale right now."}
                   </p>
                 ) : null}
               </div>
 
               <div className="grid min-w-0 gap-2">
-                {owned ? listed ? (
+                {awaitingVaulting ? (
+                  <Link href="/vault">
+                    <Button size="lg" variant="secondary" className="w-full">
+                      Open Vault
+                    </Button>
+                  </Link>
+                ) : owned ? listed ? (
                   <>
                     <Link href={`/trades?listing=${listing.id}`}>
                       <Button size="lg" className="w-full">

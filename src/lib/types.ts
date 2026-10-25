@@ -109,7 +109,8 @@ export interface VaultItem {
   listingId: string;
   acquiredAt: string;
   via: "Purchase" | "Trade" | "Submission" | "Transfer";
-  status: "Vaulted" | "Shipping requested" | "Listed" | "Withdrawn";
+  /** A received NFT is visible immediately, but remains locked until Collector Crypt vaults it. */
+  status: "Awaiting vaulting" | "Vaulted" | "Shipping requested" | "Listed" | "Withdrawn";
   listedPrice?: number;
   token?: SlabToken;
   withdrawal?: Withdrawal;

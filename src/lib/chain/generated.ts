@@ -2,12 +2,12 @@
 
 export const deployments = {
   "31337": {
-    "MockUSDC": "0x59b670e9fA9D0A427751Af201D676719a970857b",
-    "AccountRegistry": "0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1",
-    "SlabVault": "0x322813Fd9A801c5507c9de605d63CEA4f2CE6c44",
-    "TradeEscrow": "0x09635F643e140090A9A8Dcd712eD6285858ceBef",
-    "SlabMarket": "0x4A679253410272dd5232B3Ff7cF5dbB88f295319",
-    "fromBlock": 46
+    "MockUSDC": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "AccountRegistry": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "SlabVault": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    "TradeEscrow": "0x0165878A594ca255338adfa4d48449f69242Eb8F",
+    "SlabMarket": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+    "fromBlock": 1
   }
 } as const;
 
@@ -1410,6 +1410,11 @@ export const slabVaultAbi = [
   },
   {
     "inputs": [],
+    "name": "InvalidCertNumber",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "MissingEvidence",
     "type": "error"
   },
@@ -1948,6 +1953,12 @@ export const slabVaultAbi = [
       },
       {
         "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
         "internalType": "address",
         "name": "owner",
         "type": "address"
@@ -2179,7 +2190,7 @@ export const slabVaultAbi = [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "tokenId",
+        "name": "submissionId",
         "type": "uint256"
       },
       {
@@ -3040,6 +3051,44 @@ export const slabVaultAbi = [
         "internalType": "struct SlabVault.Submission",
         "name": "",
         "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "submissionOfCert",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "submissionOfToken",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
