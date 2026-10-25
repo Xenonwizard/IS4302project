@@ -6,6 +6,7 @@ import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { CUSTODY, DEPLOY_BLOCK, chain, contracts, fromUsdcUnits } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
+import { certPreview } from "@/lib/catalog";
 import { useStore, type ChainSlab } from "@/lib/store";
 import type { Grader } from "@/lib/types";
 
@@ -16,9 +17,9 @@ import type { Grader } from "@/lib/types";
  * you appears in your Vault; one you sent away disappears from it. No server involved: ownership is
  * whatever SlabVault says.
  *
- * Two kinds of token are left out or kept on purpose:
- *   - a token minted at submission that Collector Crypt hasn't vaulted yet (no custodianRef): it
- *     lives in the submission tracker until it is Vaulted;
+ * Two kinds of token are treated specially:
+ *   - a token minted when Pokechain receives a slab stays visible as "Awaiting vaulting" until
+ *     Collector Crypt confirms custody; it is locked, so normal vault actions are unavailable;
  *   - a slab of yours locked in one of your open trade offers is held by TradeEscrow, but it is
  *     still yours until the other side accepts, so it stays in your Vault (marked "In offer").
  *
@@ -36,6 +37,8 @@ export function ChainVaultSync() {
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", addrLower] });
   useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  // Vaulting doesn't move the token, so watch for it too: the slab unlocks in the Vault straight away.
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "SlabVaulted", args: { owner: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", args: { seller: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", args: { seller: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
   useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
@@ -93,13 +96,13 @@ export function ChainVaultSync() {
           ),
         ),
       ]);
-      // Never vaulted yet: shown by the submission tracker instead.
-      const keep = candidates.map((_, i) => read[i].custodianRef !== "");
       const owned = candidates.flatMap((id, i) => {
-        if (!keep[i]) return [];
         const s = read[i];
         const mListing = marketListings[i];
         const isListedOnChain = Boolean(mListing && mListing.seller.toLowerCase() === addrLower && mListing.price > BigInt(0));
+        // `title` and `image` are recorded on-chain when Collector Crypt vaults the slab.
+        // Before then, show the same cert-registry preview the final step will verify.
+        const preview = certPreview(s.grader as Grader, s.certNumber);
         return [
           {
             token: {
@@ -111,8 +114,8 @@ export function ChainVaultSync() {
               custodianRef: s.custodianRef,
               evidenceHash: s.evidenceHash,
             },
-            title: s.title,
-            image: s.image,
+            title: s.title || preview?.title,
+            image: s.image || preview?.image,
             grader: s.grader as Grader,
             certNumber: s.certNumber,
             custody: CUSTODY[s.custody],

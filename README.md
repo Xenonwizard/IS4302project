@@ -55,6 +55,24 @@ chat, and **Accept**, **Counter** or **Decline**. (Cash in a trade comes from yo
 deposit some in **Wallet** first. A slab you have listed for sale can't go into an offer until you
 cancel the listing.)
 
+**Intake demo (two tabs).** Tab 1: log in with the **test1 wallet** → **Submit** → enter a PSA cert (e.g.
+`4324324`), photos and declarations → **Upload evidence and submit on-chain**. A request appears under **Your slab
+requests**, waiting for Pokechain; no NFT exists yet. Tab 2: open http://localhost:3000/intake (same browser, so
+the same wallet), type the same cert, and click **Received at Pokechain** (mints the NFT, locked) → **Forwarded to
+Collector Crypt** → **Vaulted at Collector Crypt**. Tab 1 moves on at each click without a reload, and the slab
+lands in the Vault, unlocked. Each step also has a curl command on the intake page (the cert number is the
+`submissionId`); running it from a terminal moves both tabs on the same way:
+
+```bash
+curl -X POST http://localhost:3000/api/chain/receive -H 'content-type: application/json' -d '{"submissionId":"4324324"}'
+```
+```bash
+curl -X POST http://localhost:3000/api/chain/forward -H 'content-type: application/json' -d '{"submissionId":"4324324"}'
+```
+```bash
+curl -X POST http://localhost:3000/api/chain/vault -H 'content-type: application/json' -d '{"submissionId":"4324324"}'
+```
+
 **Chain log** (bottom left) → **Reset chain + demo data** puts the seeded demo back. To sign up a new
 account instead, use MetaMask or reset to an empty chain with `curl -X POST "localhost:3000/api/dev/reset?clean=1"`.
 `docs/postman/` has the Postman collection that plays Pokechain's warehouse, Collector Crypt and the
@@ -82,9 +100,9 @@ and resets to an empty chain first, except the seeded-demo test). `test:unit` al
 
 | Role | Sees | Can do |
 | --- | --- | --- |
-| **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (NFT minted at once), report a parcel lost on the way in or out, trade slabs + cash with another collector in a chat (offer, accept, counter, decline, withdraw; prices negotiated using Pokechain records), transfer, withdraw a slab, trace it |
-| **Pokechain operator** (server key, simulated warehouse) | The submission tracker buttons, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, ship redemptions, close lost reports. No power over trades |
-| **Collector Crypt** (simulated custodian) | **/collector-crypt** | Publish its encryption key, read incoming parcels by decrypting them, vault slabs (Postman) |
+| **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (the NFT is minted when Pokechain receives the slab), watch each request move on live, report a parcel lost on the way in or out, trade slabs + cash with another collector in a chat (offer, accept, counter, decline, withdraw; prices negotiated using Pokechain records), transfer, withdraw a slab, trace it |
+| **Pokechain operator** (server key, simulated warehouse) | **/intake** (the card processing simulator), curl, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, ship redemptions, close lost reports. No power over trades |
+| **Collector Crypt** (simulated custodian) | **/collector-crypt**, **/intake** (Vaulted step) | Publish its encryption key, read incoming parcels by decrypting them, vault slabs |
 | **Anyone** | **/trace/[tokenId]**, the chain itself | Verify a slab's history, evidence and custody without trusting Pokechain |
 
 ### Real vs simulated
