@@ -183,13 +183,13 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
         label: "Simulate: parcel turns up at Pokechain",
         icon: <Warehouse size={13} />,
         action: () => run(() => resolveLost(id, "at-pokechain")),
+        tech: <><Fn>SlabVault.reportLost({id})</Fn>; found: <Fn>SlabVault.resolveLostReport({id}, AtPokechain)</Fn>.</>,
         curl: `curl -X POST ${origin}/api/chain/resolve-lost -H 'content-type: application/json' -d '{"tokenId":"${id}","outcome":"at-pokechain"}'`,
         note: (
           <>
-            You reported this parcel lost with <Fn>SlabVault.reportLost({id})</Fn>, so the token&apos;s custody is{" "}
-            <b className="text-white">Lost</b> and anyone can see when and with which tracking number. If the carrier finds
-            it, the operator calls <Fn>SlabVault.resolveLostReport({id}, AtPokechain)</Fn> and onboarding carries on from
-            Pokechain&apos;s warehouse.
+            You reported this parcel lost, so its token is marked <b className="text-white">Lost</b> and anyone can see
+            when, and with which tracking number. If the carrier finds it, Pokechain marks it as arrived and the steps
+            carry on from its warehouse.
           </>
         ),
       }
@@ -205,12 +205,12 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
                 onDone(null);
               }
             }),
+          tech: <><Fn>SlabVault.markReceived({id})</Fn> (or <Fn>rejectSubmission</Fn>), after checking the stored evidence still hashes to <Fn>evidenceHash</Fn>.</>,
           curl: `curl -X POST ${origin}/api/chain/receive -H 'content-type: application/json' -d '{"submissionId":"${id}"}'`,
           note: (
             <>
-              Ship the slab to Pokechain. When it arrives, staff compare it with your photos, and the server checks the
-              stored evidence still hashes to the <Fn>evidenceHash</Fn> on-chain. Then the operator calls{" "}
-              <Fn>SlabVault.markReceived({id})</Fn>, or <Fn>rejectSubmission</Fn> if the cert or evidence doesn&apos;t
+              Ship the slab to Pokechain. When it arrives, staff compare it with your photos and check they still match
+              the fingerprint on the chain. Then they mark it received, or reject it if the cert or photos don&apos;t
               check out.
             </>
           ),
@@ -220,13 +220,12 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
             label: "Simulate: forward to Collector Crypt",
             icon: <Truck size={13} />,
             action: () => run(() => forward(id)),
+            tech: <><Fn>SlabVault.markForwarded({id}, ciphertext, commitment)</Fn>, encrypted to the key in <Fn>SlabVault.encryptionKey(custodian)</Fn>.</>,
             curl: `curl -X POST ${origin}/api/chain/forward -H 'content-type: application/json' -d '{"submissionId":"${id}"}'`,
             note: (
               <>
-                Pokechain ships it on to Collector Crypt. The parcel details (carrier, tracking number) are encrypted to
-                Collector Crypt&apos;s public key, read from <Fn>SlabVault.encryptionKey(custodian)</Fn>. Only the
-                ciphertext and a salted commitment go on-chain in <Fn>SlabVault.markForwarded({id}, ciphertext, commitment)</Fn>.
-                Everyone sees that it happened; only Collector Crypt can read the details.
+                Pokechain ships it on to Collector Crypt. The carrier and tracking number are recorded on the chain in a
+                locked form: everyone can see the parcel was sent, but only Collector Crypt can read the details.
               </>
             ),
           }
@@ -238,13 +237,13 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
                 await simulateVault(sub.grader, sub.certNumber, id);
                 await mint();
               }),
+            tech: <>Solana <Fn>getAsset</Fn> (held by Pokechain&apos;s escrow, in CC&apos;s collection, same cert, Vaulted), then <Fn>SlabVault.confirmVaulted({id})</Fn>.</>,
             curl: `curl -X POST ${origin}/api/collector-crypt/intake -H 'content-type: application/json' -d '{"grader":"${sub.grader}","certNumber":"${sub.certNumber}","depositorRef":"pokechain-submission-${id}"}'`,
             note: (
               <>
-                When Collector Crypt vaults it, CC mints the slab&apos;s Solana NFT straight to Pokechain&apos;s escrow
-                wallet. This page polls CC; then the operator calls Solana <Fn>getAsset</Fn>. It checks the NFT is
-                held by our escrow, sits in CC&apos;s collection, has the same cert and is Vaulted, and then runs{" "}
-                <Fn>SlabVault.confirmVaulted({id})</Fn> with CC&apos;s asset id. Your token is unlocked for trading.
+                When Collector Crypt vaults it, it creates its own record of the slab (a Solana NFT) and gives it to
+                Pokechain to hold. Pokechain checks that record matches your slab, then unlocks your token, and you can
+                trade it.
               </>
             ),
           };
@@ -354,7 +353,7 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
         ) : null}
       </div>
       <div className="mt-3">
-        <OnChainNote title="This step">{next.note}</OnChainNote>
+        <OnChainNote title="This step" tech={next.tech}>{next.note}</OnChainNote>
       </div>
     </div>
   );

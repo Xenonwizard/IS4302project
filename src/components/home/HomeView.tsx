@@ -4,7 +4,6 @@ import Link from "next/link";
 import { MessagesSquare, ShieldCheck, Truck } from "lucide-react";
 import { useMemo } from "react";
 import { HeroCarousel } from "@/components/home/HeroCarousel";
-import { HomeLiveActivity } from "@/components/home/HomeLiveActivity";
 import { Rail } from "@/components/home/Rail";
 import { BRAND } from "@/lib/brand";
 import { useMarketInventory } from "@/lib/store";
@@ -45,7 +44,6 @@ export function HomeView() {
     <div className="space-y-8 px-4 py-5 lg:px-6">
       <HeroCarousel listings={highestValue} />
 
-      <HomeLiveActivity />
 
       <Rail
         title="Most watched"

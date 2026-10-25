@@ -20,6 +20,7 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   UserRejectedRequestError,
+  decodeErrorResult,
   type ContractFunctionArgs,
   type ContractFunctionName,
   type TransactionReceipt,
@@ -57,7 +58,7 @@ const ERROR_TEXT: Record<string, string> = {
   SelfTransfer: "You can't transfer a slab to yourself.",
   FaucetLimit: "The faucet mints at most 100,000 USDC at a time.",
   ERC20InsufficientBalance: "Your wallet doesn't hold enough USDC.",
-  SlabIsListed: "This slab is currently listed on the marketplace. Delist it first.",
+  SlabIsListed: "That slab is listed for sale on the marketplace, so it can't move until the listing is cancelled.",
   NotListed: "This slab is not listed on the marketplace.",
   AlreadyListed: "This slab is already listed for sale.",
   SelfPurchase: "You cannot purchase your own listed slab.",
@@ -79,12 +80,26 @@ const ERROR_TEXT: Record<string, string> = {
   NotMaker: "Only the collector who made the offer can withdraw it.",
 };
 
+function errorNameFromAnyAbi(raw: `0x${string}` | undefined): string | undefined {
+  if (!raw) return undefined;
+  for (const c of Object.values(contracts)) {
+    try {
+      return decodeErrorResult({ abi: c.abi, data: raw }).errorName;
+    } catch {
+      /* not this contract's error */
+    }
+  }
+  return undefined;
+}
+
 export function describeError(e: unknown): string {
   if (e instanceof BaseError) {
     if (e.walk((x) => x instanceof UserRejectedRequestError)) return "You rejected the request in your wallet.";
     const revert = e.walk((x) => x instanceof ContractFunctionRevertedError);
     if (revert instanceof ContractFunctionRevertedError) {
-      const name = revert.data?.errorName;
+      // A contract that calls another (TradeEscrow → SlabVault) bubbles up an error the called ABI doesn't
+      // list, so look its selector up in every contract's ABI.
+      const name = revert.data?.errorName ?? errorNameFromAnyAbi(revert.raw);
       if (name) return ERROR_TEXT[name] ?? `Reverted with ${name}`;
       return revert.reason ?? revert.shortMessage;
     }

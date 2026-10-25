@@ -86,13 +86,14 @@ async function ashOffersFromChat(page: Page) {
   await expect(page.getByText("Would you swap my Pikachus for them?")).toBeVisible();
 
   await page.getByRole("button", { name: "Make a trade offer" }).click();
-  await expect(page.getByText("Pick slabs or add cash and the balance appears here.")).toBeVisible();
+  // The chat is about her Articuno #5, so the offer starts with it picked.
+  await expect(page.getByRole("button", { name: /Articuno.*#5$/ })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Send offer" }).click();
-  await expect(page.getByText("Add at least one of your slabs")).toBeVisible(); // empty offers are refused
+  await expect(page.getByText("Add at least one of your slabs")).toBeVisible(); // giving nothing is refused
 
   for (const id of [1, 2, 3]) await page.getByRole("button", { name: new RegExp(`Pikachu.*#${id}$`) }).click();
   await page.getByLabel("You give: cash").fill("50");
-  for (const id of [5, 6]) await page.getByRole("button", { name: new RegExp(`Articuno.*#${id}$`) }).click();
+  await page.getByRole("button", { name: /Articuno.*#6$/ }).click();
 
   // Everything at market: 3 Pikachus ($104.96 + $8.00 + $207.22) + $50 for 2 Articunos ($1,057.00 + $445.05).
   const balance = page.getByTestId("trade-balance");
@@ -233,7 +234,7 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
 
   // His Charizard (market $1,207) for her listed Articuno (market $1,057): ash is giving more, and the panel says so.
   await page.getByRole("button", { name: /Charizard.*#4$/ }).click();
-  await page.getByRole("button", { name: /Articuno.*#5$/ }).click();
+  await expect(page.getByRole("button", { name: /Articuno.*#5$/ })).toHaveAttribute("aria-pressed", "true"); // the listed slab
   await expect(page.getByText("Listed for sale: it is delisted if they accept")).toBeVisible();
   await expect(page.getByTestId("trade-balance").getByTestId("trade-net")).toHaveText("−$150.00");
   await page.getByRole("button", { name: "Send offer" }).click();
@@ -253,31 +254,52 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
   expect(await ownerOf(5)).toBe(ASH);
 });
 
-test("seeded demo: test1 and test2 swap their seeded slabs in a chat", async ({ page, browser, request }) => {
+test("seeded demo: an offer on a listed slab, a counter that includes your own listed slab, then Sold", async ({ page, browser, request }) => {
   // What `npm run chain` and the Reset button give you: accounts, slabs and listings already on-chain.
   await resetSeeded(request);
+  expect(await isListed(3)).toBe(true); // test2's Dark Dragonite is for sale
+
+  // test1 opens a chat about it: the new offer starts with that slab already picked.
   await logIn(page, 1, "test1");
   await page.goto("/trades");
   await page.getByRole("button", { name: "Chat with @test2" }).click();
   await page.getByRole("button", { name: "Make a trade offer" }).click();
-  // test1's Alakazam is listed for sale, so it can't be locked in an offer; the Charizard can.
-  await expect(page.getByText("Listed for sale: cancel the listing first")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Dark Dragonite.*#3$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/Stated value is (above|below) market/).first()).toBeVisible(); // no percentage
   await page.getByRole("button", { name: /Charizard.*#2$/ }).click();
-  await page.getByRole("button", { name: /Shining Celebi.*#4$/ }).click();
-  await expect(page.getByTestId("trade-verdict")).toBeVisible();
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
 
+  // test2 counters: keeps their own listed Dragonite in it and also asks for test1's listed Alakazam. This
+  // used to revert (SlabIsListed); now test2's listing is cancelled first, then the counter goes through.
   const other = await browser.newContext();
   const test2 = await other.newPage();
+  const problems: string[] = [];
+  test2.on("console", (m) => {
+    if (m.type() === "error") problems.push(m.text());
+  });
   await logIn(test2, 2, "test2");
   await test2.goto("/trades");
   await test2.getByRole("link", { name: /test1/ }).first().click();
-  await test2.getByRole("button", { name: "Accept trade" }).click();
-  await expect(test2.getByTestId("trade-status")).toHaveText("Accepted");
+  await test2.getByRole("button", { name: "Counter" }).click();
+  await expect(test2.getByText("Listed for sale: the listing is cancelled when you send")).toBeVisible();
+  await test2.getByRole("button", { name: /Alakazam.*#1$/ }).click();
+  await test2.getByRole("button", { name: "Send counter-offer" }).click();
+  await expect(test2.getByTestId("trade-card").last().getByTestId("trade-status")).toHaveText("Waiting for them");
+  expect(await isListed(3)).toBe(false);
+  expect(await ownerOf(3)).toBe(deployments["31337"].TradeEscrow);
   await other.close();
-  expect(await ownerOf(2)).toBe(TEST2);
-  expect(await ownerOf(4)).toBe(TEST1);
+  expect(problems, problems.join("\n")).toEqual([]);
+
+  // test1 accepts: their listed Alakazam is delisted first, then everything swaps. The Dragonite shows as sold.
+  await page.getByTestId("trade-card").last().getByRole("button", { name: "Accept trade" }).click();
+  await expect(page.getByTestId("trade-card").last().getByTestId("trade-status")).toHaveText("Accepted");
+  await expect(page.getByTestId("sold-banner")).toContainText("Traded from @test2 to @test1");
+  for (const id of [1, 2]) expect(await ownerOf(id)).toBe(TEST2);
+  expect(await ownerOf(3)).toBe(TEST1);
+  expect(await isListed(1)).toBe(false);
+  await page.goto("/asset/token-3");
+  await expect(page.getByTestId("sold-banner")).toBeVisible();
 });
 
 test("Collector Crypt: reads the forwarded parcel; the chain only holds ciphertext", async ({ page, request }) => {

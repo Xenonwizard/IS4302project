@@ -10,6 +10,7 @@
  *   useCollectors()             every active account (AccountOpened events + isActive), to trade with
  *   useTradeActions()           createOffer / accept / decline / withdraw / counter, from the user's wallet
  *   useHandleAddress(handle)    the wallet behind a handle (AccountRegistry.handleOwner), to trade with from a chat
+ *   useTradedSlabs()            every slab that changed hands in an accepted trade (OfferAccepted events), for "Sold"
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
@@ -221,6 +222,44 @@ export function useHandleAddress(handle: string | undefined) {
     queryFn: async (): Promise<Address | null> => {
       const owner = await client!.readContract({ ...contracts.accounts, functionName: "handleOwner", args: [keccak256(toBytes(clean!))] });
       return owner === zeroAddress ? null : owner;
+    },
+  });
+}
+
+export interface TradedSlab {
+  offerId: string;
+  fromHandle: string;
+  toHandle: string;
+  /** unix seconds the trade settled */
+  at: number;
+}
+
+/**
+ * The latest accepted trade each slab went through, read from TradeEscrow's OfferAccepted events: the
+ * maker's slabs went to the taker and the taker's to the maker. Used to mark a slab as sold.
+ */
+export function useTradedSlabs() {
+  const client = usePublicClient();
+  useTradeEvents(true);
+  return useQuery({
+    queryKey: ["trade-offers", "traded-slabs"],
+    enabled: Boolean(client),
+    refetchInterval: 10_000,
+    queryFn: async (): Promise<Record<string, TradedSlab>> => {
+      const logs = await client!.getContractEvents({ ...contracts.tradeEscrow, eventName: "OfferAccepted", fromBlock: DEPLOY_BLOCK });
+      const offers = await Promise.all(logs.map((l) => client!.readContract({ ...contracts.tradeEscrow, functionName: "offerOf", args: [l.args.offerId!] })));
+      const addrs = [...new Set(offers.flatMap((o) => [o.maker, o.taker]))];
+      const records = await Promise.all(addrs.map((a) => client!.readContract({ ...contracts.accounts, functionName: "accountOf", args: [a] })));
+      const handle = new Map(addrs.map((a, i) => [a, records[i].handle]));
+      const out: Record<string, TradedSlab> = {};
+      // Events come oldest first, so a later trade of the same slab overwrites an earlier one.
+      logs.forEach((l, i) => {
+        const o = offers[i];
+        const base = { offerId: l.args.offerId!.toString(), at: Number(o.closedAt) };
+        for (const t of o.makerSlabs) out[t.toString()] = { ...base, fromHandle: handle.get(o.maker) ?? "", toHandle: handle.get(o.taker) ?? "" };
+        for (const t of o.takerSlabs) out[t.toString()] = { ...base, fromHandle: handle.get(o.taker) ?? "", toHandle: handle.get(o.maker) ?? "" };
+      });
+      return out;
     },
   });
 }

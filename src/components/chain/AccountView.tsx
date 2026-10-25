@@ -126,12 +126,17 @@ function CloseAccount({ acct }: { acct: Acct }) {
         </li>
       </ul>
       <div className="mt-3">
-        <OnChainNote>
-          Calls <Fn>AccountRegistry.closeAccount()</Fn>. It reverts with <Fn>SlabsStillVaulted</Fn> if{" "}
-          <Fn>SlabVault.vaultedCount</Fn> is above zero. Otherwise it pays the whole custody balance back to
-          your wallet, marks the account <b className="text-white">Closed</b> and emits{" "}
-          <Fn>AccountClosed</Fn>. Nothing is deleted. Your handle stays reserved, every past event stays
-          readable, and the tokens of slabs you withdrew are still yours.
+        <OnChainNote
+          tech={
+            <>
+              <Fn>AccountRegistry.closeAccount()</Fn>: reverts with <Fn>SlabsStillVaulted</Fn> while <Fn>SlabVault.vaultedCount</Fn> is above
+              zero, otherwise pays out and emits <Fn>AccountClosed</Fn>.
+            </>
+          }
+        >
+          You can only close the account once no slabs are left in the vault (withdraw or transfer them first). Closing pays
+          your whole balance back to your wallet and marks the account <b className="text-white">Closed</b>. Nothing is
+          deleted: your handle stays yours, your history stays readable, and you keep the tokens of slabs you withdrew.
         </OnChainNote>
       </div>
       <div className="mt-3 flex gap-2">

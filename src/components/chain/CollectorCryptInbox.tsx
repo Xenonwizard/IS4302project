@@ -75,18 +75,25 @@ export function CollectorCryptInbox() {
             </p>
           )}
 
-          <OnChainNote title="How the hand-off works">
-            1. Collector Crypt publishes an X25519 public key on-chain with <Fn>SlabVault.setEncryptionKey</Fn>; its
-            private key never leaves its server.
+          <OnChainNote
+            title="How the hand-off works"
+            tech={
+              <>
+                Key: <Fn>SlabVault.setEncryptionKey</Fn> (X25519). Forward: <Fn>markForwarded(id, ciphertext, commitment)</Fn>, encrypted with
+                X25519 + XChaCha20-Poly1305. Read: <Fn>SubmissionForwarded</Fn> events filtered on Collector Crypt&apos;s address. Dispute:{" "}
+                <Fn>verifyForwardCommitment</Fn>.
+              </>
+            }
+          >
+            1. Collector Crypt puts a public &quot;lock&quot; on the chain; only it holds the key that opens it.
             <br />
-            2. When forwarding, Pokechain reads that key from <Fn>encryptionKey(custodian)</Fn>, encrypts the parcel details
-            to it (X25519 + XChaCha20-Poly1305), and calls <Fn>markForwarded(id, ciphertext, commitment)</Fn>.
+            2. When Pokechain sends a parcel on, it locks the carrier and tracking number with that lock and records the
+            locked message on the chain.
             <br />
-            3. Collector Crypt filters <Fn>SubmissionForwarded</Fn> events on its own address (an indexed topic) and
-            decrypts them. The transaction is signed by Pokechain&apos;s operator, so it knows who sent it and when.
+            3. Collector Crypt picks up messages addressed to it and unlocks them. Everyone can see a parcel was sent, by
+            whom and when, but only Collector Crypt can read the details.
             <br />
-            4. In a dispute, Pokechain reveals the message and salt, and <Fn>verifyForwardCommitment</Fn> checks them
-            against the commitment, inside the contract.
+            4. If there is a dispute, Pokechain can reveal the message and the contract checks it matches what was recorded.
           </OnChainNote>
         </>
       ) : null}

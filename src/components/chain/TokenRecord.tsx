@@ -59,7 +59,8 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
     enabled: Boolean(slab?.evidenceHash),
     queryFn: async () => {
       const res = await fetch(`/api/evidence/${slab!.evidenceHash}`, { cache: "no-store" });
-      return res.ok ? ((await res.json()) as { manifest: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
+      const body = res.ok ? ((await res.json()) as { manifest?: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
+      return body?.manifest ? (body as { manifest: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
     },
   });
 

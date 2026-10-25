@@ -25,6 +25,7 @@ import { Avatar, Badge, Button, TimeAgo, inputClass } from "../ui/primitives";
 import { INBOX_URL_KEY } from "./NegotiationsInbox";
 import { ReportLostModal, reportItemLabel } from "./ReportLostModal";
 import { TradeBuilder, type CounterOf } from "./TradeBuilder";
+import { SoldBanner } from "./SoldBanner";
 import { TradeCard } from "./TradeCard";
 
 const exact = (n: number) => usd(n, { cents: true });
@@ -260,6 +261,10 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
             </div>
           </header>
 
+          {/* the slab this chat is about, once it has gone to someone in a trade */}
+          <div className="border-b border-hairline px-4 py-2 empty:hidden">
+            <SoldBanner tokenId={listing.tokenId} from={n.seller} />
+          </div>
           {/* the listing and the offer on the table */}
           <div className="flex flex-wrap items-center gap-3 border-b border-hairline bg-surface-2/50 px-4 py-3">
             <Link href={`/asset/${listing.id}`} className="w-10 shrink-0">
@@ -414,6 +419,8 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
           them={{ address: otherAddress, handle: other }}
           cash={wallet.custodyBalance}
           counterOf={builder?.counter}
+          // A new offer starts with the slab this chat is about, on whichever side owns it.
+          preselect={listing.tokenId ? (iAmBuyer ? { mine: [], theirs: [listing.tokenId] } : { mine: [listing.tokenId], theirs: [] }) : undefined}
         />
       ) : (
         <OfferModal listing={listing} open={editOpen} onClose={() => setEditOpen(false)} editing />

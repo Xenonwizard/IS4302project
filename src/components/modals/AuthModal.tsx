@@ -168,11 +168,10 @@ function Onboarding() {
               {busy === "register" ? "Confirm in your wallet…" : "Open account"}
             </Button>
           </form>
-          <OnChainNote>
-            Calls <Fn>AccountRegistry.register(handle)</Fn>. The contract checks the handle (3 to 20
-            characters of a-z, 0-9 or _) and that nobody has claimed it. It then stores your account
-            as <b className="text-white">Active</b> and emits <Fn>AccountOpened</Fn>. The handle
-            stays reserved to your address, even after you close the account.
+          <OnChainNote tech={<><Fn>AccountRegistry.register(handle)</Fn>, which emits <Fn>AccountOpened</Fn>.</>}>
+            Your handle is saved on the chain against your wallet address, and your account becomes{" "}
+            <b className="text-white">Active</b>. A handle is 3 to 20 characters of a-z, 0-9 or _, and nobody else
+            can take it, even after you close your account.
           </OnChainNote>
         </Step>
       </ol>

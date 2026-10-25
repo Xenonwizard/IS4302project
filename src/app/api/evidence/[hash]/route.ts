@@ -8,6 +8,8 @@ export async function GET(_request: Request, ctx: { params: Promise<{ hash: stri
   const { hash } = await ctx.params;
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return Response.json({ error: "Not a 32-byte hash" }, { status: 400 });
   const ev = loadEvidence(hash);
-  if (!ev) return Response.json({ error: `No evidence stored for ${hash}` }, { status: 404 });
+  // Seeded demo slabs were created on-chain without an intake form, so "nothing stored" is a normal
+  // answer, not a failed request (a 404 would show up as an error in every browser console).
+  if (!ev) return Response.json({ found: false, error: `No intake evidence stored for ${hash}` });
   return Response.json(ev);
 }

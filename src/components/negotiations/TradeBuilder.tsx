@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import type { Address } from "viem";
 import { newOfferId, useTradeActions, useTradeSlabs, type TradeSlab } from "@/lib/chain/trades";
 import { valuedSlab } from "@/lib/chain/slabValue";
+import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { ChatTrade, ChatTradeSide, ChatTradeSlab } from "@/lib/types";
@@ -36,6 +37,7 @@ export function TradeBuilder({
   them,
   cash,
   counterOf,
+  preselect,
 }: {
   open: boolean;
   onClose: () => void;
@@ -45,11 +47,13 @@ export function TradeBuilder({
   /** USDC in my Pokechain account, the cash I can put in an offer */
   cash: number;
   counterOf?: CounterOf;
+  /** a new offer starts with these picked, e.g. the slab the chat is about */
+  preselect?: { mine: string[]; theirs: string[] };
 }) {
   return (
     <Modal open={open} onClose={onClose} title={counterOf ? `Counter offer #${counterOf.offerId}` : `Trade offer to @${them.handle}`} width="max-w-5xl">
       {/* remounted per open so the fields start from the right place */}
-      <Form key={counterOf?.offerId ?? "new"} onClose={onClose} negotiationId={negotiationId} me={me} them={them} cash={cash} counterOf={counterOf} />
+      <Form key={counterOf?.offerId ?? "new"} onClose={onClose} negotiationId={negotiationId} me={me} them={them} cash={cash} counterOf={counterOf} preselect={preselect} />
     </Modal>
   );
 }
@@ -61,6 +65,7 @@ function Form({
   them,
   cash,
   counterOf,
+  preselect,
 }: {
   onClose: () => void;
   negotiationId: string;
@@ -68,14 +73,16 @@ function Form({
   them: { address: Address; handle: string };
   cash: number;
   counterOf?: CounterOf;
+  preselect?: { mine: string[]; theirs: string[] };
 }) {
   const { create, counter } = useTradeActions();
   const { pushToast, postTrade } = useStore();
+  const { cancelListing } = useMarketChain();
   const { data: mine = [] } = useTradeSlabs(me.address);
   const { data: theirs = [] } = useTradeSlabs(them.address);
 
-  const [give, setGive] = useState<string[]>(counterOf?.mySide.slabs.map((s) => s.tokenId) ?? []);
-  const [get, setGet] = useState<string[]>(counterOf?.theirSide.slabs.map((s) => s.tokenId) ?? []);
+  const [give, setGive] = useState<string[]>(counterOf?.mySide.slabs.map((s) => s.tokenId) ?? preselect?.mine ?? []);
+  const [get, setGet] = useState<string[]>(counterOf?.theirSide.slabs.map((s) => s.tokenId) ?? preselect?.theirs ?? []);
   const [basis, setBasis] = useState<Record<string, ValueBasis>>(() =>
     Object.fromEntries([...(counterOf?.mySide.slabs ?? []), ...(counterOf?.theirSide.slabs ?? [])].map((s) => [s.tokenId, s.basis])),
   );
@@ -110,9 +117,9 @@ function Form({
     const problem =
       !Number.isFinite(myCash) || !Number.isFinite(theirCash) || myCash < 0 || theirCash < 0
         ? "Cash amounts must be numbers of 0 or more."
-        : !give.length && !myCash
+        : !giveSide.slabs.length && !myCash
           ? "Add at least one of your slabs, or some cash, to what you give."
-          : !get.length && !theirCash
+          : !getSide.slabs.length && !theirCash
             ? `Pick at least one of @${them.handle}'s slabs, or ask for cash.`
             : give.length > 10 || get.length > 10
               ? "At most 10 slabs on each side."
@@ -123,7 +130,9 @@ function Form({
     if (problem) return;
     setBusy(true);
     try {
-      const terms = { mySlabs: give, myCash, theirSlabs: get, theirCash };
+      // A listed slab can't be locked in escrow, so its sale is cancelled first (its own transaction).
+      for (const x of mine) if (give.includes(x.tokenId) && x.listed) await cancelListing(x.tokenId);
+      const terms = { mySlabs: giveSide.slabs.map((x) => x.tokenId), myCash, theirSlabs: getSide.slabs.map((x) => x.tokenId), theirCash };
       const receipt = counterOf ? await counter(counterOf.offerId, terms) : await create(them.address, them.handle, terms, negotiationId);
       const offerId = newOfferId(receipt);
       if (!offerId) throw new Error("The offer went through, but its id could not be read from the chain.");
@@ -164,7 +173,7 @@ function Form({
           onCash={setGiveCash}
           hint={`You have ${exact(cash)} in your Pokechain account`}
           empty="You have no vaulted slabs to offer. Slabs in another open offer are locked there."
-          lockListed="Listed for sale: cancel the listing first"
+          listedNote="Listed for sale: the listing is cancelled when you send"
         />
         <Column
           title={`You get from @${them.handle}`}
@@ -192,18 +201,26 @@ function Form({
         </Button>
       </div>
 
-      <OnChainNote>
-        {counterOf ? (
-          <>
-            <Fn>TradeEscrow.counter(#{counterOf.offerId}, …)</Fn> refunds their offer and, in the same transaction, makes yours: your slabs and cash move into escrow.
-          </>
-        ) : (
-          <>
-            <Fn>TradeEscrow.createOffer(@{them.handle}, yourSlabs, yourCash, theirSlabs, theirCash, chat)</Fn> moves your slabs into escrow and your
-            cash into its custody balance. Nothing of theirs moves until they accept; then <Fn>accept</Fn> swaps both sides in one transaction.
-            The market and stated values are for the two of you to weigh the deal; the contract only moves what the offer names.
-          </>
-        )}
+      <OnChainNote
+        tech={
+          counterOf ? (
+            <>
+              <Fn>TradeEscrow.counter(#{counterOf.offerId}, mySlabs, myCash, theirSlabs, theirCash)</Fn> closes their offer (refunding it) and opens
+              yours in one transaction. A listed slab of yours goes through <Fn>SlabMarket.cancelListing</Fn> first.
+            </>
+          ) : (
+            <>
+              <Fn>TradeEscrow.createOffer(@{them.handle}, yourSlabs, yourCash, theirSlabs, theirCash, chat)</Fn>, after{" "}
+              <Fn>SlabMarket.cancelListing</Fn> for any listed slab of yours. They answer with <Fn>accept</Fn>, <Fn>counter</Fn> or{" "}
+              <Fn>decline</Fn>; you can <Fn>withdraw</Fn>.
+            </>
+          )
+        }
+      >
+        {counterOf
+          ? "Their offer is cancelled and they get their slabs and cash back. Your counter-offer takes its place: your slabs and cash are held by the trade contract until they answer."
+          : `Your slabs and cash are held by the trade contract, so you can't sell or move them while the offer is open. Nothing of @${them.handle}'s moves until they accept. When they do, everything swaps in one go, or nothing does. If one of your slabs is listed for sale, its listing is cancelled first.`}{" "}
+        The market and stated values only help you two weigh the deal; the contract moves exactly what the offer lists.
       </OnChainNote>
     </div>
   );
@@ -220,7 +237,6 @@ function Column({
   onCash,
   hint,
   empty,
-  lockListed,
   listedNote,
 }: {
   title: string;
@@ -233,30 +249,24 @@ function Column({
   onCash: (v: string) => void;
   hint: string;
   empty: string;
-  /** set on my column: a listed slab of mine can't go into an offer */
-  lockListed?: string;
-  /** set on their column: a listed slab of theirs can still be asked for */
-  listedNote?: string;
+  /** what happens to a slab that is listed for sale if it goes into the trade */
+  listedNote: string;
 }) {
   return (
     <div className="rounded-xl bg-[#101014] p-3">
       <p className="mb-2 text-[11.5px] font-bold uppercase tracking-wide text-muted">{title}</p>
       <div className="flex max-h-[330px] flex-wrap gap-2 overflow-y-auto">
         {slabs.length ? (
-          slabs.map((s) => {
-            const locked = Boolean(lockListed && s.listed);
-            return (
-              <SlabTile
-                key={s.tokenId}
-                slab={face(s)}
-                selected={selected.includes(s.tokenId)}
-                disabled={locked}
-                note={locked ? lockListed : s.listed ? listedNote : undefined}
-                onClick={() => onToggle(s.tokenId)}
-                onBasis={(b) => onBasis(s.tokenId, b)}
-              />
-            );
-          })
+          slabs.map((s) => (
+            <SlabTile
+              key={s.tokenId}
+              slab={face(s)}
+              selected={selected.includes(s.tokenId)}
+              note={s.listed ? listedNote : undefined}
+              onClick={() => onToggle(s.tokenId)}
+              onBasis={(b) => onBasis(s.tokenId, b)}
+            />
+          ))
         ) : (
           <p className="text-[12px] text-dim">{empty}</p>
         )}

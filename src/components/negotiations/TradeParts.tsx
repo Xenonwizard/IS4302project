@@ -9,7 +9,6 @@ import {
   balance,
   slabWorth,
   statedFlag,
-  statedVsMarket,
   type Balance,
   type ValueBasis,
   type ValuedSlab,
@@ -112,7 +111,7 @@ export function SlabTile({
       {flag ? (
         <p className="mt-1 flex items-start gap-1 text-[10.5px] leading-snug text-warn">
           <AlertTriangle size={11} className="mt-px shrink-0" />
-          Stated value is {pct(Math.abs(statedVsMarket(slab)))} {flag === "high" ? "above" : "below"} market
+          Stated value is {flag === "high" ? "above" : "below"} market
         </p>
       ) : null}
     </div>

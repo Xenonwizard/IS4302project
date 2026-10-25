@@ -341,16 +341,22 @@ export function SlabIntakeForm() {
       </Section>
 
       {/* what goes on-chain */}
-      <OnChainNote title="What goes on-chain">
-        <Fn>
-          SlabVault.requestSubmission({grader}, {cert || "…"}, {valueCents || "…"}, {lastHash && stage !== "idle" ? shortHash(lastHash) : "evidenceHash"},{" "}
-          {method === "courier" ? carrier : "Drop-off"}, {method === "courier" ? tracking || "…" : '""'})
-        </Fn>
-        <br />
-        The photos, condition notes and declarations are stored by Pokechain, not on the chain. The chain records their
-        fingerprint, <Fn>evidenceHash</Fn> = keccak256 of a manifest listing each photo&apos;s keccak256. Change one pixel, the
-        value or a note and the hash no longer matches. That&apos;s how a later lost or damage claim can prove exactly what you
-        declared today. The declared value (in cents) and inbound tracking number are recorded as-is.
+      <OnChainNote
+        title="What goes on-chain"
+        tech={
+          <>
+            <Fn>
+              SlabVault.requestSubmission({grader}, {cert || "…"}, {valueCents || "…"}, {lastHash && stage !== "idle" ? shortHash(lastHash) : "evidenceHash"},{" "}
+              {method === "courier" ? carrier : "Drop-off"}, {method === "courier" ? tracking || "…" : '""'})
+            </Fn>
+            . <Fn>evidenceHash</Fn> is the keccak256 of a manifest that lists each photo&apos;s keccak256.
+          </>
+        }
+      >
+        Your slab gets its token straight away, locked until it reaches the vault. The chain records the grader, cert number,
+        the value you declare and the tracking number. Your photos and notes are kept by Pokechain, but the chain keeps a
+        fingerprint of them: change one pixel or one word later and the fingerprint no longer matches. So if the parcel is
+        lost or damaged, you can prove exactly what you sent today.
       </OnChainNote>
 
       {missing.length ? <p className="text-[12.5px] text-muted">Still needed: {missing.join(", ")}.</p> : null}

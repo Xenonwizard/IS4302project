@@ -170,30 +170,31 @@ export function OnChainFunds() {
         ) : null}
 
         <div className="mt-3">
-          <OnChainNote>
-            {mode === "withdraw" ? (
-              <>
-                Calls <Fn>AccountRegistry.withdraw(amount)</Fn>. The contract lowers your custody balance
-                first, then sends the USDC (checks-effects-interactions, plus a <Fn>nonReentrant</Fn> guard),
-                and emits <Fn>Withdrawn</Fn>. It works even after the account is closed, so funds can&apos;t get stuck.
-              </>
-            ) : usePermit ? (
-              <>
-                1. Your wallet signs an EIP-712 <Fn>Permit</Fn> message. It costs no gas and nothing is sent.
-                <br />
-                2. <Fn>AccountRegistry.depositWithPermit(amount, deadline, v, r, s)</Fn> hands that signature
-                to <Fn>MockUSDC.permit</Fn>, which sets the allowance. It then pulls the USDC with{" "}
-                <Fn>transferFrom</Fn>, all in one transaction.
-              </>
-            ) : (
-              <>
-                1. <Fn>MockUSDC.approve(AccountRegistry, amount)</Fn> lets the registry move your USDC.
-                <br />
-                2. <Fn>AccountRegistry.deposit(amount)</Fn> pulls it in with <Fn>transferFrom</Fn> and
-                credits your custody balance. Two transactions and two gas fees. Tick the permit box to
-                see the one-step way.
-              </>
-            )}
+          <OnChainNote
+            tech={
+              mode === "withdraw" ? (
+                <>
+                  <Fn>AccountRegistry.withdraw(amount)</Fn>: lowers the balance before sending (checks-effects-interactions) behind a{" "}
+                  <Fn>nonReentrant</Fn> guard; emits <Fn>Withdrawn</Fn>.
+                </>
+              ) : usePermit ? (
+                <>
+                  An EIP-712 <Fn>Permit</Fn> signature, then <Fn>AccountRegistry.depositWithPermit(amount, deadline, v, r, s)</Fn>, which calls{" "}
+                  <Fn>MockUSDC.permit</Fn> and <Fn>transferFrom</Fn>.
+                </>
+              ) : (
+                <>
+                  <Fn>MockUSDC.approve(AccountRegistry, amount)</Fn>, then <Fn>AccountRegistry.deposit(amount)</Fn>, which calls{" "}
+                  <Fn>transferFrom</Fn>.
+                </>
+              )
+            }
+          >
+            {mode === "withdraw"
+              ? "The USDC goes from your Pokechain account back to your wallet. It works even after you close the account, so your money can't get stuck."
+              : usePermit
+                ? "You sign a one-off permission in your wallet (free, nothing is sent), then one transaction moves the USDC into your Pokechain account."
+                : "Two steps: first you allow Pokechain to take that amount of USDC, then it moves it into your Pokechain account. That's two transactions and two small fees; tick the permit box to do it in one."}
           </OnChainNote>
         </div>
       </div>
