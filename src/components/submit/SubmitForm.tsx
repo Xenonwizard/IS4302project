@@ -135,14 +135,7 @@ export function SubmitForm() {
 
       {user?.address ? (
         <div className="mt-5">
-          <PendingSubmissions
-            onMinted={(listing) => {
-              if (listing) {
-                setVaulted(listing);
-                setChoice(null);
-              }
-            }}
-          />
+          <PendingSubmissions />
         </div>
       ) : null}
 

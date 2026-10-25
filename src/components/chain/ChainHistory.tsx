@@ -53,7 +53,7 @@ export function ChainHistory({ address }: { address: Address }) {
             client!.getContractEvents({ ...contracts.slabVault, eventName, args: { owner: address }, ...from }),
           ),
         ),
-        // ERC-721 ownership changes between collectors (mints are covered by SubmissionRequested)
+        // ERC-721 ownership changes between collectors (mints are covered by SubmissionReceived)
         client!.getContractEvents({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, ...from }),
         client!.getContractEvents({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, ...from }),
       ]);
@@ -72,9 +72,9 @@ export function ChainHistory({ address }: { address: Address }) {
         const a = log.args as Record<string, unknown>;
         const detail =
           log.eventName === "SubmissionRequested"
-            ? `NFT #${a.submissionId} minted, pending · ${a.grader} ${a.certNumber}`
+            ? `request #${a.submissionId} · ${a.grader} ${a.certNumber}`
             : log.eventName === "SubmissionReceived"
-              ? `submission #${a.submissionId} · at Pokechain's warehouse`
+              ? `submission #${a.submissionId} · token #${a.tokenId} minted at Pokechain`
               : log.eventName === "SubmissionForwarded"
                 ? `submission #${a.submissionId} · forwarded to Collector Crypt, parcel details encrypted for it`
                 : log.eventName === "SubmissionRejected"

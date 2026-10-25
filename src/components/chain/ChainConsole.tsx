@@ -53,7 +53,7 @@ function useDemoTraders() {
 }
 
 /** Floating button + drawer listing every blockchain call the app has made. */
-export function ChainConsole() {
+export function ChainConsole({ presentationOnly = false }: { presentationOnly?: boolean }) {
   const { entries, open, setOpen, clear } = useChainLog();
   const { request: requestReset, armed, resetting } = useResetDemo();
   const { load: loadTraders, loading: loadingTraders } = useDemoTraders();
@@ -75,7 +75,7 @@ export function ChainConsole() {
         onClose={() => setOpen(false)}
         title="Chain log"
         side="left"
-        footer={
+        footer={presentationOnly ? undefined :
           <div className="flex items-center justify-between text-[11px] text-dim">
             <span>
               {chain.name} · chain id {chain.id}
@@ -109,7 +109,7 @@ export function ChainConsole() {
           </div>
         }
       >
-        <Contracts />
+        {!presentationOnly ? <Contracts /> : null}
         {entries.length ? (
           <ul className="divide-y divide-[rgba(255,255,255,0.08)]">
             {entries.map((e) => (
@@ -118,7 +118,7 @@ export function ChainConsole() {
           </ul>
         ) : (
           <p className="px-5 py-10 text-center text-[13px] text-muted">
-            Nothing yet. Open an account, deposit PokeCredits or vault a slab, and every contract call shows up here.
+            {presentationOnly ? "Nothing yet. Simulator actions appear here." : "Nothing yet. Open an account, deposit PokeCredits or vault a slab, and every contract call shows up here."}
           </p>
         )}
       </Drawer>

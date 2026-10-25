@@ -260,6 +260,8 @@ async function seed() {
     "function register(string handle) external",
     "function isActive(address account) external view returns (bool)",
     "function accountOf(address account) external view returns ((string handle, uint8 status, uint256 registeredAt, uint256 closedAt, uint256 custodyBalance))",
+    "function balanceOf(address owner) external view returns (uint256)",
+    "function deposit(uint256 amount) external",
   ]);
 
   const usdcAbi = parseAbi([
@@ -414,13 +416,32 @@ async function seed() {
     if (slab.saleTo && tokenId > 0n) {
       if (priorSales.length === 0) {
         const buyer = getWallet(slab.saleTo);
-        const approveHash = await buyer.writeContract({
-          address: mockUSDCAddress,
-          abi: usdcAbi,
-          functionName: "approve",
-          args: [slabMarketAddress, parseUnits(String(slab.listPriceUsdc), 6)],
+        // SlabMarket.buy pays from the buyer's Pokechain account (AccountRegistry custody balance),
+        // so top it up from their wallet USDC first.
+        const price = parseUnits(String(slab.listPriceUsdc), 6);
+        const custody = await publicClient.readContract({
+          address: accountRegistryAddress,
+          abi: registryAbi,
+          functionName: "balanceOf",
+          args: [slab.saleTo],
         });
-        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        if (custody < price) {
+          const shortfall = price - custody;
+          const approveHash = await buyer.writeContract({
+            address: mockUSDCAddress,
+            abi: usdcAbi,
+            functionName: "approve",
+            args: [accountRegistryAddress, shortfall],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+          const depositHash = await buyer.writeContract({
+            address: accountRegistryAddress,
+            abi: registryAbi,
+            functionName: "deposit",
+            args: [shortfall],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: depositHash });
+        }
         const buyHash = await buyer.writeContract({
           address: slabMarketAddress,
           abi: marketAbi,

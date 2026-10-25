@@ -26,6 +26,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { certPreview, getListing } from "../catalog";
 import { requestShipment, verifyCustody, type CheckStep } from "../collectorCrypt/client";
+import { intake, POKECHAIN_ESCROW } from "../collectorCrypt/store";
 import { publishKeyIfNeeded, ccPublicKey } from "../collectorCrypt/keys";
 import { loadEvidence } from "../evidence/store";
 import { commit, randomSalt, seal } from "../sealed/envelope";
@@ -122,7 +123,8 @@ export async function receiveSubmission(submissionId: bigint) {
   }
   const hash = await wallet.writeContract({ ...contracts.slabVault, functionName: "markReceived", args: [submissionId] });
   const tx = await receiptOf("SlabVault.markReceived", [submissionId.toString()], hash, wallet.account.address);
-  return { result: "received" as const, checks, tx };
+  const received = await publicClient.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [submissionId] });
+  return { result: "received" as const, tokenId: received.tokenId.toString(), checks, tx };
 }
 
 /**
@@ -206,7 +208,7 @@ export async function disputeForward(submissionId: bigint) {
 /**
  * Slab onboarding, step 4. Once Collector Crypt has vaulted the slab, checks CC's API and the
  * Solana NFT (DAS getAsset: held by Pokechain's escrow, CC collection, same cert, Vaulted), then
- * confirms the Polygon token (minted pending at submission) as Vaulted with CC's asset id, which
+ * confirms the Polygon token (minted when Pokechain received it) as Vaulted with CC's asset id, which
  * unlocks it for trading. If CC hasn't vaulted it yet, nothing happens.
  * `listingId` is passed when tokenising a slab already in the user's vault, to keep its title and image.
  */
@@ -242,6 +244,22 @@ export async function mintSubmission(origin: string, submissionId: bigint, listi
     checks: custody.checks,
     tx,
   };
+}
+
+/**
+ * The single operations-page action for the final hand-off: Collector Crypt records and vaults
+ * the physical slab, then Pokechain verifies that record and unlocks the already-minted NFT.
+ */
+export async function vaultSubmission(origin: string, submissionId: bigint, listingId?: string) {
+  const sub = await submissionAt(submissionId, 3);
+  const result = intake({
+    grader: sub.grader as Grader,
+    certNumber: sub.certNumber,
+    owner: POKECHAIN_ESCROW,
+    depositorRef: `pokechain-submission-${submissionId}`,
+  });
+  if ("error" in result) throw new Error(result.error);
+  return mintSubmission(origin, submissionId, listingId);
 }
 
 /**

@@ -8,7 +8,6 @@ import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
-import { PendingSubmissions } from "./PendingSubmissions";
 
 /**
  * Slab offboarding: the slab leaves the vault, the token stays.
@@ -126,7 +125,7 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
       ) : !entry?.token ? (
         <>
           {submitted ? (
-            <PendingSubmissions />
+            <p className="text-[13px] text-muted">The intake request is waiting for Pokechain to receive the slab before an NFT is minted.</p>
           ) : (
             <>
               <Button className="w-full" onClick={tokenise} disabled={busy}>

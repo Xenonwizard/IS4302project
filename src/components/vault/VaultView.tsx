@@ -14,6 +14,7 @@ import { useEscrowedByMe } from "@/lib/chain/trades";
 import { useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useSlabChain } from "@/lib/chain/useSlabChain";
 import type { Listing, VaultItem } from "@/lib/types";
 import { PendingSubmissions } from "../chain/PendingSubmissions";
 import { RedeemModal } from "../chain/RedeemModal";
@@ -24,10 +25,11 @@ import { Badge, Button, Modal, TimeAgo } from "../ui/primitives";
 import { ListForSaleForm } from "./ListForSaleForm";
 import { Empty, LoginPrompt } from "./shared";
 
-type Tab = "all" | "listed" | "unlisted" | "withdrawn";
+type Tab = "all" | "awaiting" | "listed" | "unlisted" | "withdrawn";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "awaiting", label: "Awaiting vaulting" },
   { value: "listed", label: "Listed" },
   { value: "unlisted", label: "Unlisted" },
   { value: "withdrawn", label: "Withdrawn" },
@@ -47,8 +49,18 @@ export function VaultView() {
     pushToast,
   } = useStore();
   const { cancelListing } = useMarketChain();
+  const { reportLost } = useSlabChain();
   const [delistingId, setDelistingId] = useState<string | null>(null);
   const [gridSize, setGridSize] = useState<"medium" | "small">("medium");
+
+  const handleReportLost = async (tokenId: string) => {
+    try {
+      await reportLost(tokenId, "Reported from the awaiting-vaulting card");
+      pushToast({ title: "Loss report filed", body: "The token is locked while Pokechain investigates.", tone: "success" });
+    } catch (err) {
+      pushToast({ title: "Could not report the slab lost", body: (err as Error).message, tone: "error" });
+    }
+  };
 
   const handleDelist = async (listingId: string, tokenId?: string) => {
     setDelistingId(listingId);
@@ -89,10 +101,12 @@ export function VaultView() {
   const withdrawn = allItems.filter((i) => i.entry.status === "Withdrawn");
 
   const totalValue = items.reduce((sum, i) => sum + (i.entry.status === "Listed" ? i.entry.listedPrice ?? i.listing.price : 0), 0);
+  const awaiting = items.filter((i) => i.entry.status === "Awaiting vaulting");
   const listed = items.filter((i) => i.entry.status === "Listed");
-  const unlisted = items.filter((i) => i.entry.status !== "Listed");
+  const unlisted = items.filter((i) => i.entry.status === "Vaulted");
   const counts: Record<Tab, number> = {
     all: items.length,
+    awaiting: awaiting.length,
     listed: listed.length,
     unlisted: unlisted.length,
     withdrawn: withdrawn.length,
@@ -167,7 +181,7 @@ export function VaultView() {
       </div>
 
       <div className="mt-5">
-        {tab === "all" || tab === "unlisted" ? (
+        {tab === "all" || tab === "awaiting" || tab === "unlisted" ? (
           <div className="mb-3 flex justify-end">
             <div className="flex h-10 items-center rounded-xl border border-hairline bg-surface p-1" role="group" aria-label="Vault grid size">
               <button
@@ -197,15 +211,15 @@ export function VaultView() {
             </div>
           </div>
         ) : null}
-        {tab === "all" || tab === "unlisted" ? (
-          (tab === "all" ? items : unlisted).length ? (
+        {tab === "all" || tab === "awaiting" || tab === "unlisted" ? (
+          (tab === "all" ? items : tab === "awaiting" ? awaiting : unlisted).length ? (
             <div className={clsx(
               "grid gap-3",
               gridSize === "small"
                 ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9"
                 : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
             )}>
-              {(tab === "all" ? items : unlisted).map(({ entry, listing }, index) => {
+              {(tab === "all" ? items : tab === "awaiting" ? awaiting : unlisted).map(({ entry, listing }, index) => {
                 const shouldAnimate = index < 12;
                 return (
                   <div
@@ -221,6 +235,7 @@ export function VaultView() {
                       onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
                       onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                       onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
+                      onReportLost={entry.status === "Awaiting vaulting" && entry.token ? () => void handleReportLost(entry.token!.tokenId) : undefined}
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
                     />
                   </div>
@@ -234,11 +249,17 @@ export function VaultView() {
               body="Vault a graded slab you own, or win one with an offer in a negotiation room. Either way it lands here."
               cta={{ href: "/submit", label: "Vault a graded slab" }}
             />
+          ) : tab === "awaiting" ? (
+            <Empty
+              icon={<Package size={24} />}
+              title="Nothing awaiting vaulting"
+              body="Cards appear here after Pokechain receives them, while Collector Crypt finishes vaulting them."
+            />
           ) : (
             <Empty
               icon={<Package size={24} />}
-              title="Everything is listed"
-              body="Slabs you hold without listing them show up here."
+              title="No vaulted slabs to list"
+              body="Slabs arrive here once Collector Crypt has vaulted and unlocked them."
             />
           )
         ) : null}
@@ -374,6 +395,7 @@ function SlabCard({
   onSell,
   onShip,
   onTransfer,
+  onReportLost,
   inOffer,
 }: {
   entry: VaultItem;
@@ -384,6 +406,7 @@ function SlabCard({
   onShip: () => void;
   /** tokenised slabs on a wallet account only */
   onTransfer?: () => void;
+  onReportLost?: () => void;
   /** the open trade offer that has this slab locked in escrow */
   inOffer?: { offerId: string; taker: string; room: string };
 }) {
@@ -423,8 +446,8 @@ function SlabCard({
           {listing.title}
         </Link>
         <div className={clsx("mt-2", small ? "space-y-1.5" : "flex items-center justify-between gap-2")}>
-          <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : "Not listed"}</span>
-          <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" ? "warn" : "good"}>
+          <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : entry.status === "Awaiting vaulting" ? "Locked until vaulted" : "Not listed"}</span>
+          <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" || entry.status === "Awaiting vaulting" ? "warn" : "good"}>
             {entry.status}
           </Badge>
         </div>
@@ -462,6 +485,9 @@ function SlabCard({
               <Send size={13} />
               Transfer
             </Button>
+          ) : null}
+          {entry.status === "Awaiting vaulting" && onReportLost ? (
+            <Button size="sm" variant="outline" onClick={onReportLost}>Report lost</Button>
           ) : null}
         </div>
       </div>
