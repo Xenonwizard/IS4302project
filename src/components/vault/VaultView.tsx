@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Blocks, Lock, MessagesSquare, Package, PackageOpen, Plus, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, Grid2x2, Grid3x3, Lock, MessagesSquare, Package, PackageOpen, Plus, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
 import type { Address } from "viem";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
@@ -48,6 +48,7 @@ export function VaultView() {
   } = useStore();
   const { cancelListing } = useMarketChain();
   const [delistingId, setDelistingId] = useState<string | null>(null);
+  const [gridSize, setGridSize] = useState<"medium" | "small">("medium");
 
   const handleDelist = async (listingId: string, tokenId?: string) => {
     setDelistingId(listingId);
@@ -167,20 +168,64 @@ export function VaultView() {
 
       <div className="mt-5">
         {tab === "all" || tab === "unlisted" ? (
+          <div className="mb-3 flex justify-end">
+            <div className="flex h-10 items-center rounded-xl border border-hairline bg-surface p-1" role="group" aria-label="Vault grid size">
+              <button
+                onClick={() => setGridSize("medium")}
+                aria-label="Medium grid"
+                aria-pressed={gridSize === "medium"}
+                title="Medium grid"
+                className={clsx(
+                  "grid h-8 w-8 place-items-center rounded-lg transition",
+                  gridSize === "medium" ? "bg-surface-3 text-white" : "text-muted hover:text-white",
+                )}
+              >
+                <Grid2x2 size={15} />
+              </button>
+              <button
+                onClick={() => setGridSize("small")}
+                aria-label="Small grid"
+                aria-pressed={gridSize === "small"}
+                title="Small grid"
+                className={clsx(
+                  "grid h-8 w-8 place-items-center rounded-lg transition",
+                  gridSize === "small" ? "bg-surface-3 text-white" : "text-muted hover:text-white",
+                )}
+              >
+                <Grid3x3 size={15} />
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {tab === "all" || tab === "unlisted" ? (
           (tab === "all" ? items : unlisted).length ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
-              {(tab === "all" ? items : unlisted).map(({ entry, listing }) => (
-                <SlabCard
-                  key={listing.id}
-                  entry={entry}
-                  listing={listing}
-                  onManage={() => setTab("listed")}
-                  onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
-                  onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
-                  onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
-                  inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
-                />
-              ))}
+            <div className={clsx(
+              "grid gap-3",
+              gridSize === "small"
+                ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9"
+                : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
+            )}>
+              {(tab === "all" ? items : unlisted).map(({ entry, listing }, index) => {
+                const shouldAnimate = index < 12;
+                return (
+                  <div
+                    key={listing.id}
+                    className={clsx("min-w-0", shouldAnimate && "fade-up motion-reduce:animate-none")}
+                    style={shouldAnimate ? { animationDelay: `${index * 22}ms` } : undefined}
+                  >
+                    <SlabCard
+                      entry={entry}
+                      listing={listing}
+                      size={gridSize}
+                      onManage={() => setTab("listed")}
+                      onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
+                      onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
+                      onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
+                      inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ) : tab === "all" ? (
             <Empty
@@ -324,6 +369,7 @@ function Stat({ label, value, href }: { label: string; value: string; href?: str
 function SlabCard({
   entry,
   listing,
+  size,
   onManage,
   onSell,
   onShip,
@@ -332,6 +378,7 @@ function SlabCard({
 }: {
   entry: VaultItem;
   listing: Listing;
+  size: "medium" | "small";
   onManage: () => void;
   onSell: () => void;
   onShip: () => void;
@@ -340,19 +387,20 @@ function SlabCard({
   /** the open trade offer that has this slab locked in escrow */
   inOffer?: { offerId: string; taker: string; room: string };
 }) {
+  const small = size === "small";
   if (inOffer) {
     return (
       <div className="overflow-hidden rounded-card border border-accent/50 bg-surface ring-1 ring-accent/30">
-        <Link href={`/asset/${listing.id}`} className="block bg-[#101014] p-4 opacity-70">
+        <Link href={`/asset/${listing.id}`} className={clsx("block bg-[#101014] opacity-70", small ? "p-2" : "p-4")}>
           <Slab listing={listing} />
         </Link>
-        <div className="p-3.5">
-          <p className="line-clamp-2 text-[12px] font-semibold leading-snug">{listing.title}</p>
+        <div className={small ? "p-2" : "p-3.5"}>
+          <p className={clsx("line-clamp-2 font-semibold leading-snug", small ? "text-[10.5px]" : "text-[12px]")}>{listing.title}</p>
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-[13px] font-bold">In trade</span>
-            <Badge tone="accent"><Lock size={11} /> In offer #{inOffer.offerId}</Badge>
+            <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>In trade</span>
+            <Badge className={small ? "px-1.5 text-[9px]" : undefined} tone="accent"><Lock size={11} /> In offer #{inOffer.offerId}</Badge>
           </div>
-          <p className="mt-1.5 text-[11px] text-dim">
+          <p className={clsx("mt-1.5 text-dim", small ? "text-[9.5px]" : "text-[11px]")}>
             Locked in TradeEscrow until the other collector answers, or you withdraw the offer in the chat.
           </p>
           <Link href={`/trades/${inOffer.room}`} className="mt-3 block">
@@ -364,35 +412,35 @@ function SlabCard({
   }
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
-      <Link href={`/asset/${listing.id}`} className="block bg-[#101014] p-4">
+      <Link href={`/asset/${listing.id}`} className={clsx("block bg-[#101014]", small ? "p-2" : "p-4")}>
         <Slab listing={listing} />
       </Link>
-      <div className="p-3.5">
+      <div className={small ? "p-2" : "p-3.5"}>
         <Link
           href={`/asset/${listing.id}`}
-          className="line-clamp-2 text-[12px] font-semibold leading-snug hover:underline"
+          className={clsx("line-clamp-2 font-semibold leading-snug hover:underline", small ? "text-[10.5px]" : "text-[12px]")}
         >
           {listing.title}
         </Link>
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-[13px] font-bold">{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : "Not listed"}</span>
-          <Badge tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" ? "warn" : "good"}>
+        <div className={clsx("mt-2", small ? "space-y-1.5" : "flex items-center justify-between gap-2")}>
+          <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : "Not listed"}</span>
+          <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" ? "warn" : "good"}>
             {entry.status}
           </Badge>
         </div>
-        <p className="mt-1.5 text-[11px] text-dim">
+        <p className={clsx("mt-1.5 text-dim", small ? "text-[9.5px]" : "text-[11px]")}>
           {entry.via} · <TimeAgo value={entry.acquiredAt} />
         </p>
         {entry.token ? (
           <Link
             href={`/trace/${entry.token.tokenId}`}
-            className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-accent hover:underline"
+            className={clsx("mt-1 flex items-center gap-1 font-semibold text-accent hover:underline", small ? "text-[9.5px]" : "text-[11px]")}
             title="Trace this slab across Polygon, Solana and Collector Crypt"
           >
             <Blocks size={11} /> Token #{entry.token.tokenId} · <Route size={11} /> Trace
           </Link>
         ) : null}
-        <div className="mt-3 grid gap-2">
+        <div className={clsx("mt-3 grid", small ? "gap-1.5" : "gap-2")}>
           {entry.status === "Listed" ? (
             <Button size="sm" variant="secondary" onClick={onManage}>
               Manage listing

@@ -126,9 +126,9 @@ function Group({
             </span>
           ) : null}
         </span>
-        <ChevronRight size={16} className={clsx("text-muted transition", expanded && "rotate-90")} />
+        <ChevronRight size={16} className={clsx("text-muted transition-transform duration-200", expanded && "rotate-90")} />
       </button>
-      {expanded ? <div className="px-5 pb-4">{children}</div> : null}
+      {expanded ? <div className="fade-up px-5 pb-4 motion-reduce:animate-none">{children}</div> : null}
     </section>
   );
 }

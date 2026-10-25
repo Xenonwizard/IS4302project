@@ -3,8 +3,8 @@
  *
  *   POST /api/dev/demo-traders
  *
- *   @ash    test1 wallet (#1)           3 Pikachus + 1 Charizard, $1,000 Pokechain credits in custody
- *   @misty  test2 wallet (#2)           2 Articunos + 1 Charizard-GX, $1,000 Pokechain credits in custody
+ *   @ash    test1 wallet (#1)           3 Pikachus + 1 Charizard, $1,000 PokeCredits in custody
+ *   @misty  test2 wallet (#2)           2 Articunos + 1 Charizard-GX, $1,000 PokeCredits in custody
  *
  * On the seeded demo chain these wallets already have accounts (test1 / test2), so they keep their own
  * handles and only get the slabs. Every slab goes through the real on-chain onboarding: requestSubmission (the NFT is minted,

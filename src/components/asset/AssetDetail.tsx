@@ -18,12 +18,11 @@ import {
   Truck,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { population } from "@/lib/catalog";
 import { truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
-import { DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
+import { chain, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -115,7 +114,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     refetchInterval: 2000,
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
-    placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
       try {
@@ -501,7 +499,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
         </div>
 
         {/* ---------------- right ---------------- */}
-        <div className="min-w-0 space-y-4 xl:flex xl:h-full xl:flex-col xl:justify-between xl:space-y-0">
+        <div className="min-w-0 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
               <ShieldCheck size={13} className="text-good" />
@@ -635,7 +633,19 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
           <CardComparables key={listing.id} card={listing} tokenId={onChainTokenId ?? undefined} />
 
-          <Details listing={effectiveListing} />
+          <Details
+            listing={effectiveListing}
+            blockchain={{
+              network: chain.name,
+              chainId: chain.id,
+              configured: IS_DEPLOYED,
+              readerReady: Boolean(client),
+              loading: enabledOnChain && onChainOwner === undefined,
+              contractAddress: IS_DEPLOYED ? contracts.slabVault.address : null,
+              tokenId: onChainOwner?.address ? resolvedTokenId : null,
+              ownerAddress: onChainOwner?.address ?? null,
+            }}
+          />
         </div>
       </div>
 
@@ -694,20 +704,20 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             <div className="h-px bg-hairline" />
             <div className="flex justify-between">
               <dt className="text-muted">Total payment from your Pokechain account</dt>
-              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} Pokechain credits</dd>
+              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} PokeCredits</dd>
             </div>
           </dl>
 
           <div className="mt-4 flex items-center justify-between rounded-xl border border-hairline p-3 text-[12px]">
             <span className="text-muted">Your Pokechain account balance:</span>
             <span className="font-bold">
-              {user?.address ? `${usd(acct.custodyBalance, { cents: true })} Pokechain credits` : usd(balance, { cents: true })}
+              {user?.address ? `${usd(acct.custodyBalance, { cents: true })} PokeCredits` : usd(balance, { cents: true })}
             </span>
           </div>
 
           {user?.address && acct.custodyBalance < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
-              You need {usd(displayPrice - acct.custodyBalance, { cents: true })} more Pokechain credits in your Pokechain account. Deposit more before buying.
+              You need {usd(displayPrice - acct.custodyBalance, { cents: true })} more PokeCredits in your Pokechain account. Deposit more before buying.
             </p>
           ) : !user?.address && balance < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
@@ -775,7 +785,22 @@ function Trust({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-function Details({ listing }: { listing: Listing }) {
+function Details({
+  listing,
+  blockchain,
+}: {
+  listing: Listing;
+  blockchain: {
+    network: string;
+    chainId: number;
+    configured: boolean;
+    readerReady: boolean;
+    loading: boolean;
+    contractAddress: string | null;
+    tokenId: string | null;
+    ownerAddress: string | null;
+  };
+}) {
   const [open, setOpen] = useState(false);
   // Older sets share their era's name (e.g. Base, Platinum), so drop the repeat.
   const chips = [
@@ -788,8 +813,6 @@ function Details({ listing }: { listing: Listing }) {
     listing.subject,
     listing.variant,
   ])];
-  const pop = population(listing);
-
   return (
     <section className="rounded-card border border-hairline bg-surface">
       <h2 className="border-b border-hairline px-4 py-3 text-sm font-bold">Details</h2>
@@ -806,24 +829,35 @@ function Details({ listing }: { listing: Listing }) {
         </div>
 
         {open ? (
-          <div className="mt-4 border-t border-hairline pt-4">
-            <p className="mb-2 text-[12px] font-bold uppercase tracking-wide text-muted">
-              {listing.grader} population report
-            </p>
-            <ul className="grid grid-cols-3 gap-2">
-              {pop.map((p) => (
-                <li
-                  key={p.grade}
-                  className={clsx(
-                    "rounded-xl px-2.5 py-2 text-center",
-                    String(listing.grade) === p.grade ? "bg-accent/15" : "bg-surface-2",
-                  )}
-                >
-                  <p className="text-[11px] text-muted">Grade {p.grade}</p>
-                  <p className="text-[13px] font-bold">{p.count.toLocaleString()}</p>
-                </li>
-              ))}
-            </ul>
+          <div className="fade-up mt-4 border-t border-hairline pt-4 motion-reduce:animate-none">
+            <p className="mb-2 text-[12px] font-bold uppercase tracking-wide text-muted">Blockchain details</p>
+            <dl className="space-y-2.5 text-[12px]">
+              <BlockchainRow label="Network" value={blockchain.network} />
+              <BlockchainRow label="Chain ID" value={String(blockchain.chainId)} />
+              {blockchain.contractAddress ? (
+                <BlockchainRow label="Contract address" value={blockchain.contractAddress} copy />
+              ) : null}
+              {blockchain.tokenId && blockchain.ownerAddress ? (
+                <>
+                  <BlockchainRow label="Token ID" value={blockchain.tokenId} copy />
+                  <BlockchainRow label="Owner address" value={blockchain.ownerAddress} copy />
+                </>
+              ) : null}
+              {!blockchain.tokenId || !blockchain.ownerAddress ? (
+                <div>
+                  <dt className="sr-only">Token record status</dt>
+                  <dd className="rounded-lg bg-surface-2 px-3 py-2 text-[12px] leading-relaxed text-muted">
+                    {!blockchain.configured
+                      ? `No SlabVault deployment is configured for ${blockchain.network}.`
+                      : !blockchain.readerReady
+                        ? "The blockchain read provider is not available."
+                        : blockchain.loading
+                          ? "Reading token data from the blockchain…"
+                          : "No on-chain token was found for this listing on the selected network."}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
           </div>
         ) : null}
 
@@ -835,5 +869,16 @@ function Details({ listing }: { listing: Listing }) {
         </button>
       </div>
     </section>
+  );
+}
+
+function BlockchainRow({ label, value, copy = false }: { label: string; value: string; copy?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-hairline/70 pb-2 last:border-0">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className="min-w-0 break-all text-right font-semibold text-white">
+        {copy ? <CopyText text={value} title={value} /> : value}
+      </dd>
+    </div>
   );
 }

@@ -25,8 +25,12 @@ export function Rail({
         </Link>
       </div>
       <div className="cy-scroll -mx-1 flex gap-3 overflow-x-auto px-1 pb-2">
-        {listings.map((l) => (
-          <div key={l.id} className="w-[210px] shrink-0">
+        {listings.map((l, index) => (
+          <div
+            key={l.id}
+            className="fade-up w-[210px] shrink-0 motion-reduce:animate-none"
+            style={{ animationDelay: `${index * 24}ms` }}
+          >
             <ListingCard listing={l} />
           </div>
         ))}

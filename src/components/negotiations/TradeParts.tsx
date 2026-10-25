@@ -48,7 +48,7 @@ export function BalancePanel({ give, get }: { give: ChatTradeSide; get: ChatTrad
       <p className="text-[13px] font-bold">Trade terms</p>
       <dl className="mt-2 space-y-2 text-[12px]">
         {[{ label: "You give", side: give }, { label: "You get", side: get }].map(({ label, side }) => (
-          <div key={label} className="flex justify-between gap-2"><dt className="text-muted">{label}</dt><dd>{side.slabs.length} slab{side.slabs.length === 1 ? "" : "s"} + {exact(side.cash)} USDC</dd></div>
+          <div key={label} className="flex justify-between gap-2"><dt className="text-muted">{label}</dt><dd>{side.slabs.length} slab{side.slabs.length === 1 ? "" : "s"} + {exact(side.cash)} PokeCredits</dd></div>
         ))}
       </dl>
       <p className="mt-3 text-[11px] leading-relaxed text-dim">Compare the records for each card and agree on the terms together. Seller asking prices are references, not assigned trade values.</p>

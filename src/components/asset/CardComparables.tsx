@@ -7,7 +7,7 @@ import { useComparables, type ComparableSlab, type ComparableTransaction } from 
 import { explorerTx, shortHash } from "@/lib/chain/config";
 import { shortDate, usd } from "@/lib/format";
 
-const exact = (value: number) => `${usd(value, { cents: true })} USDC`;
+const exact = (value: number) => `${usd(value, { cents: true })} PokeCredits`;
 
 export function CardComparables({ card, tokenId }: { card: CardIdentity; tokenId?: string }) {
   const [tab, setTab] = useState<"listings" | "transactions">("listings");
