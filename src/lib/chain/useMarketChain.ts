@@ -61,25 +61,7 @@ export function useMarketChain() {
 
   const buyCard = useCallback(
     async (tokenId: string, priceDollars: number) => {
-      if (!address || !client) throw new Error("Wallet not connected");
-      const units = toUsdcUnits(priceDollars);
-      const marketAddress = contracts.slabMarket.address;
-
-      // Check allowance; approve market contract if needed
-      const currentAllowance = await client.readContract({
-        ...contracts.usdc,
-        functionName: "allowance",
-        args: [address, marketAddress],
-      });
-
-      if (currentAllowance < units) {
-        await send({
-          contract: "usdc",
-          functionName: "approve",
-          args: [marketAddress, units],
-          label: "Approve USDC for purchase",
-        });
-      }
+      if (!address) throw new Error("Wallet not connected");
 
       const receipt = await send({
         contract: "slabMarket",
@@ -94,7 +76,7 @@ export function useMarketChain() {
       await queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
       return receipt.transactionHash;
     },
-    [send, address, client, queryClient],
+    [send, address, queryClient],
   );
 
   const getListing = useCallback(

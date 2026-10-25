@@ -11,13 +11,12 @@ import { useChainTx } from "@/lib/chain/useChainTx";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { Button, inputClass } from "../ui/primitives";
-import { Fn, OnChainNote } from "./ui";
 
 type Mode = "deposit" | "withdraw";
 
 /**
  * Account onboarding (money in) and offboarding (money out):
- *   MockUSDC.faucet                          test dollars into the wallet
+ *   MockUSDC.faucet                          test Pokechain credits into the wallet
  *   EIP-2612 permit signature + AccountRegistry.depositWithPermit
  *                                            wallet → Pokechain custody in one transaction
  *   MockUSDC.approve + AccountRegistry.deposit
@@ -54,8 +53,8 @@ export function OnChainFunds() {
 
   const faucet = () =>
     run("faucet", async () => {
-      await send({ contract: "usdc", functionName: "faucet", args: [toUsdcUnits(10000)], label: "Mint test USDC" });
-      pushToast({ title: "10,000 test USDC minted to your wallet", tone: "success" });
+      await send({ contract: "usdc", functionName: "faucet", args: [toUsdcUnits(10000)], label: "Mint test Pokechain credits" });
+      pushToast({ title: "10,000 test Pokechain credits minted to your wallet", tone: "success" });
     });
 
   const deposit = () =>
@@ -69,7 +68,7 @@ export function OnChainFunds() {
         const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
         const signature = await sign(
           "Authorise deposit",
-          "EIP-712 Permit (MockUSDC)",
+          "EIP-712 Pokechain credits deposit permit",
           [`spender ${contracts.accounts.address}`, `value ${units}`, `nonce ${nonce}`, `deadline ${deadline}`],
           () =>
             signTypedDataAsync({
@@ -92,39 +91,39 @@ export function OnChainFunds() {
           contract: "accounts",
           functionName: "depositWithPermit",
           args: [units, deadline, Number(v ?? BigInt(27 + yParity)), r, s],
-          label: "Deposit USDC",
+          label: "Deposit Pokechain credits",
         });
         hash = receipt.transactionHash;
       } else {
         if (acct.allowance < value) {
-          await send({ contract: "usdc", functionName: "approve", args: [contracts.accounts.address, units], label: "Approve USDC" });
+          await send({ contract: "usdc", functionName: "approve", args: [contracts.accounts.address, units], label: "Approve Pokechain credits" });
         }
-        const receipt = await send({ contract: "accounts", functionName: "deposit", args: [units], label: "Deposit USDC" });
+        const receipt = await send({ contract: "accounts", functionName: "deposit", args: [units], label: "Deposit Pokechain credits" });
         hash = receipt.transactionHash;
       }
-      recordChainCash(value, "USDC deposit from your wallet", hash);
+      recordChainCash(value, "Pokechain credits deposited from your wallet", hash);
       pushToast({ title: `${usd(value, { cents: true })} deposited`, body: "It's now in your Pokechain account.", tone: "success" });
     });
 
   const withdraw = () =>
     run("move", async () => {
-      const receipt = await send({ contract: "accounts", functionName: "withdraw", args: [toUsdcUnits(value)], label: "Withdraw USDC" });
-      recordChainCash(-value, "USDC withdrawal to your wallet", receipt.transactionHash);
+      const receipt = await send({ contract: "accounts", functionName: "withdraw", args: [toUsdcUnits(value)], label: "Withdraw Pokechain credits" });
+      recordChainCash(-value, "Pokechain credits withdrawn to your wallet", receipt.transactionHash);
       pushToast({ title: `${usd(value, { cents: true })} sent to your wallet`, tone: "success" });
     });
 
   return (
     <section className="rounded-card border border-accent/30 bg-surface">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-5 py-3.5">
-        <h2 className="text-[14px] font-bold">USDC on {chain.name}</h2>
+        <h2 className="text-[14px] font-bold">Pokechain credits on {chain.name}</h2>
         <Button size="sm" variant="secondary" onClick={faucet} disabled={busy !== null}>
           <Coins size={14} />
-          {busy === "faucet" ? "Minting…" : "Mint 10,000 test USDC"}
+          {busy === "faucet" ? "Minting…" : "Mint 10,000 test Pokechain credits"}
         </Button>
       </header>
 
       <div className="grid gap-3 p-5 sm:grid-cols-3">
-        <Balance label="In your wallet" value={acct.walletUsdc} hint="MockUSDC.balanceOf(you)" />
+        <Balance label="In your wallet" value={acct.walletUsdc} hint="Wallet Pokechain credits balance" />
         <Balance label="In your Pokechain account" value={acct.custodyBalance} hint="AccountRegistry.balanceOf(you)" accent />
         <div className="rounded-xl bg-[#101014] p-3.5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-dim">Gas</p>
@@ -169,34 +168,6 @@ export function OnChainFunds() {
           </label>
         ) : null}
 
-        <div className="mt-3">
-          <OnChainNote
-            tech={
-              mode === "withdraw" ? (
-                <>
-                  <Fn>AccountRegistry.withdraw(amount)</Fn>: lowers the balance before sending (checks-effects-interactions) behind a{" "}
-                  <Fn>nonReentrant</Fn> guard; emits <Fn>Withdrawn</Fn>.
-                </>
-              ) : usePermit ? (
-                <>
-                  An EIP-712 <Fn>Permit</Fn> signature, then <Fn>AccountRegistry.depositWithPermit(amount, deadline, v, r, s)</Fn>, which calls{" "}
-                  <Fn>MockUSDC.permit</Fn> and <Fn>transferFrom</Fn>.
-                </>
-              ) : (
-                <>
-                  <Fn>MockUSDC.approve(AccountRegistry, amount)</Fn>, then <Fn>AccountRegistry.deposit(amount)</Fn>, which calls{" "}
-                  <Fn>transferFrom</Fn>.
-                </>
-              )
-            }
-          >
-            {mode === "withdraw"
-              ? "The USDC goes from your Pokechain account back to your wallet. It works even after you close the account, so your money can't get stuck."
-              : usePermit
-                ? "You sign a one-off permission in your wallet (free, nothing is sent), then one transaction moves the USDC into your Pokechain account."
-                : "Two steps: first you allow Pokechain to take that amount of USDC, then it moves it into your Pokechain account. That's two transactions and two small fees; tick the permit box to do it in one."}
-          </OnChainNote>
-        </div>
       </div>
     </section>
   );

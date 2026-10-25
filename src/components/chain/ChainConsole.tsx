@@ -20,7 +20,7 @@ const KIND: Record<ChainLogKind, { label: string; className: string }> = {
 };
 
 /**
- * Local demo seed: @ash (Hardhat #1) and @misty (#2), each with vaulted slabs and USDC, onboarded
+ * Local demo seed: @ash (Hardhat #1) and @misty (#2), each with vaulted slabs and Pokechain credits, onboarded
  * through the real contracts by POST /api/dev/demo-traders. Log in as either with that test wallet.
  */
 function useDemoTraders() {
@@ -118,7 +118,7 @@ export function ChainConsole() {
           </ul>
         ) : (
           <p className="px-5 py-10 text-center text-[13px] text-muted">
-            Nothing yet. Open an account, deposit USDC or vault a slab, and every contract call shows up here.
+            Nothing yet. Open an account, deposit Pokechain credits or vault a slab, and every contract call shows up here.
           </p>
         )}
       </Drawer>

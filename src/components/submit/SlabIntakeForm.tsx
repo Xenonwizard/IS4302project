@@ -13,7 +13,6 @@ import { usd } from "@/lib/format";
 import { GRADERS } from "@/lib/pools";
 import { useStore } from "@/lib/store";
 import type { Grader } from "@/lib/types";
-import { Fn, OnChainNote } from "../chain/ui";
 import { Button, Field, inputClass } from "../ui/primitives";
 
 type Slot = "front" | "back" | "label" | "extra";
@@ -53,7 +52,6 @@ export function SlabIntakeForm() {
   const [tracking, setTracking] = useState("");
   const [declared, setDeclared] = useState({ owner: false, authentic: false, terms: false });
   const [stage, setStage] = useState<"idle" | "uploading" | "signing">("idle");
-  const [lastHash, setLastHash] = useState<string | null>(null);
 
   const preview = certPreview(grader, cert);
   const estimate = useMemo(
@@ -127,7 +125,6 @@ export function SlabIntakeForm() {
       );
       for (const [slot, p] of Object.entries(photos)) if (p) form.set(slot, p.file);
       const evidenceHash = await uploadEvidence(form);
-      setLastHash(evidenceHash);
 
       setStage("signing");
       await submit({
@@ -313,24 +310,6 @@ export function SlabIntakeForm() {
           </label>
         ))}
       </Section>
-
-      {/* what goes on-chain */}
-      <OnChainNote
-        title="What goes on-chain"
-        tech={
-          <>
-            <Fn>
-              SlabVault.requestSubmission({grader}, {cert || "…"}, {lastHash && stage !== "idle" ? shortHash(lastHash) : "evidenceHash"},{" "}
-              {method === "courier" ? carrier : "Drop-off"}, {method === "courier" ? tracking || "…" : '""'})
-            </Fn>
-            . <Fn>evidenceHash</Fn> is the keccak256 of a manifest that lists each photo&apos;s keccak256.
-          </>
-        }
-      >
-        Your slab gets its token straight away, locked until it reaches the vault. The chain records the grader, cert number and the tracking number. Your photos and notes are kept by Pokechain, but the chain keeps a
-        fingerprint of them: change one pixel or one word later and the fingerprint no longer matches. So if the parcel is
-        lost or damaged, you can prove exactly what you sent today.
-      </OnChainNote>
 
       {missing.length ? <p className="text-[12.5px] text-muted">Still needed: {missing.join(", ")}.</p> : null}
       <Button type="submit" size="lg" className="w-full" disabled={missing.length > 0 || stage !== "idle"}>

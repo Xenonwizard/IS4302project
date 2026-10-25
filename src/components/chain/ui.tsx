@@ -12,33 +12,6 @@ export function Fn({ children, className }: { children: React.ReactNode; classNa
   );
 }
 
-/**
- * "What happens on-chain" panel: what a step does, in plain English. The exact contract calls go in
- * `tech`, folded away under "Technical detail" for anyone who wants to check them.
- */
-export function OnChainNote({
-  title = "What happens on-chain",
-  children,
-  tech,
-}: {
-  title?: string;
-  children: React.ReactNode;
-  tech?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-accent/25 bg-accent/[0.06] p-3.5 text-[12.5px] leading-relaxed text-muted">
-      <p className="mb-1 text-[10.5px] font-bold uppercase tracking-wider text-accent">{title}</p>
-      {children}
-      {tech ? (
-        <details className="mt-2">
-          <summary className="cursor-pointer text-[11.5px] font-semibold text-accent hover:underline">Technical detail</summary>
-          <div className="mt-1.5 text-[11.5px] leading-relaxed">{tech}</div>
-        </details>
-      ) : null}
-    </div>
-  );
-}
-
 export type StepState = "todo" | "active" | "busy" | "done";
 
 /** One numbered step in a multi-step chain flow. */

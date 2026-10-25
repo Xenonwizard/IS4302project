@@ -9,7 +9,6 @@ import type { Listing, VaultItem } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
 import { PendingSubmissions } from "./PendingSubmissions";
-import { Fn, OnChainNote } from "./ui";
 
 /**
  * Slab offboarding: the slab leaves the vault, the token stays.
@@ -130,14 +129,6 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
             <PendingSubmissions />
           ) : (
             <>
-              <OnChainNote
-                title="Tokenise it first"
-                tech={<><Fn>requestSubmission</Fn> → <Fn>markReceived</Fn> → <Fn>markForwarded</Fn> → Solana check → <Fn>confirmVaulted</Fn>.</>}
-              >
-                This slab is in your vault but has no token on the chain yet, so there is nothing to lock or trace. Submit it
-                first: it gets a token, Pokechain receives it and passes it to Collector Crypt, and once Collector Crypt has
-                vaulted it you can withdraw it.
-              </OnChainNote>
               <Button className="w-full" onClick={tokenise} disabled={busy}>
                 {busy ? "Confirm in your wallet…" : "Tokenise this slab"}
               </Button>

@@ -7,7 +7,7 @@ import { useState } from "react";
 import type { InboxItem } from "@/lib/collectorCrypt/keys";
 import { Badge, Button } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
-import { Fn, OnChainNote } from "./ui";
+import { Fn } from "./ui";
 
 interface Inbox {
   collectorCrypt: string;
@@ -75,26 +75,6 @@ export function CollectorCryptInbox() {
             </p>
           )}
 
-          <OnChainNote
-            title="How the hand-off works"
-            tech={
-              <>
-                Key: <Fn>SlabVault.setEncryptionKey</Fn> (X25519). Forward: <Fn>markForwarded(id, ciphertext, commitment)</Fn>, encrypted with
-                X25519 + XChaCha20-Poly1305. Read: <Fn>SubmissionForwarded</Fn> events filtered on Collector Crypt&apos;s address. Dispute:{" "}
-                <Fn>verifyForwardCommitment</Fn>.
-              </>
-            }
-          >
-            1. Collector Crypt puts a public &quot;lock&quot; on the chain; only it holds the key that opens it.
-            <br />
-            2. When Pokechain sends a parcel on, it locks the carrier and tracking number with that lock and records the
-            locked message on the chain.
-            <br />
-            3. Collector Crypt picks up messages addressed to it and unlocks them. Everyone can see a parcel was sent, by
-            whom and when, but only Collector Crypt can read the details.
-            <br />
-            4. If there is a dispute, Pokechain can reveal the message and the contract checks it matches what was recorded.
-          </OnChainNote>
         </>
       ) : null}
     </div>

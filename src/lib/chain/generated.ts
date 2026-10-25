@@ -646,7 +646,7 @@ export const accountRegistryAbi = [
   },
   {
     "inputs": [],
-    "name": "OnlyTradeEscrow",
+    "name": "OnlyBalanceMover",
     "type": "error"
   },
   {
@@ -685,6 +685,11 @@ export const accountRegistryAbi = [
       }
     ],
     "name": "SafeERC20FailedOperation",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SlabMarketAlreadySet",
     "type": "error"
   },
   {
@@ -830,6 +835,19 @@ export const accountRegistryAbi = [
       }
     ],
     "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "slabMarket",
+        "type": "address"
+      }
+    ],
+    "name": "SlabMarketSet",
     "type": "event"
   },
   {
@@ -1093,6 +1111,19 @@ export const accountRegistryAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "market",
+        "type": "address"
+      }
+    ],
+    "name": "setSlabMarket",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "contract ISlabVaultCustody",
         "name": "vault",
         "type": "address"
@@ -1114,6 +1145,19 @@ export const accountRegistryAbi = [
     "name": "setTradeEscrow",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "slabMarket",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -3879,17 +3923,6 @@ export const slabMarketAbi = [
   {
     "inputs": [],
     "name": "ReentrancyGuardReentrantCall",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
-      }
-    ],
-    "name": "SafeERC20FailedOperation",
     "type": "error"
   },
   {
