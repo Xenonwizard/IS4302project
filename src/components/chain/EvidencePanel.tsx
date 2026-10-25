@@ -25,7 +25,7 @@ export function EvidencePanel({ hash, compact = false }: { hash: string; compact
     queryFn: async (): Promise<EvidenceResponse> => {
       const res = await fetch(`/api/evidence/${hash}`, { cache: "no-store" });
       const body = await res.json();
-      if (!res.ok || !body.manifest) throw new Error(body.error ?? "No evidence");
+      if (!res.ok || !body.manifest || !body.verified) throw new Error(body.error ?? "No evidence");
       return body;
     },
   });

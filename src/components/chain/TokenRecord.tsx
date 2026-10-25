@@ -60,13 +60,14 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
     queryFn: async () => {
       const res = await fetch(`/api/evidence/${slab!.evidenceHash}`, { cache: "no-store" });
       const body = res.ok ? ((await res.json()) as { manifest?: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
-      return body?.manifest ? (body as { manifest: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
+      // Only a full record counts; "nothing stored" (seeded slabs) and partial answers mean no evidence.
+      return body?.manifest && body.verified ? (body as { manifest: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
     },
   });
 
   if (!slab) return null;
   const m = evidence?.manifest;
-  const trusted = Boolean(evidence?.verified.all);
+  const trusted = Boolean(evidence?.verified?.all);
   const attr = (name: string) => meta?.attributes.find((a) => a.trait_type === name)?.value;
 
   const formRows: { field: string; entered: string; onChain: string; ok: boolean }[] = m
