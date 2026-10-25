@@ -12,7 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import { BRAND } from "./brand";
 import { LISTINGS, buildOnChainListing, getListing, makeStarterListings, makeSubmittedListing, registerListing } from "./catalog";
-import { IS_DEPLOYED } from "./chain/config";
+import { IS_DEPLOYED, PENDING_CUSTODY, type CustodyName } from "./chain/config";
 import { usd } from "./format";
 import {
   botReply,
@@ -124,6 +124,11 @@ export interface ChainSlab {
   redemptionRef?: string;
   isListed?: boolean;
   listedPrice?: number;
+}
+
+/** All in-progress inbound custody states belong in the Awaiting vaulting tab. */
+function isAwaitingVaulting(custody: string): boolean {
+  return PENDING_CUSTODY.has(custody as CustodyName);
 }
 
 export interface SlabSubmission {
@@ -1062,8 +1067,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!v.token) continue;
         const o = ownedMap.get(v.token.tokenId);
         if (!o) continue;
-        const newStatus = o.custody !== "Vaulted" ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
-        if (v.status !== newStatus || v.listedPrice !== o.listedPrice) {
+        const newStatus: VaultItem["status"] = o.custody === "Vaulted" ? (o.isListed ? "Listed" : "Vaulted") : isAwaitingVaulting(o.custody) ? "Awaiting vaulting" : "Withdrawn";
+        const listing = getListing(v.listingId);
+        const title = o.title || `Vaulted Slab #${o.token.tokenId}`;
+        const image = o.image || "";
+        if (v.status !== newStatus || v.listedPrice !== o.listedPrice || listing?.title !== title || listing?.image !== image) {
           updatedExisting = true;
           break;
         }
@@ -1085,8 +1093,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           contract: o.token.contract,
         });
         registerListing(listing);
-        const withdrawn = o.custody !== "Vaulted";
-        const status: VaultItem["status"] = withdrawn ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+        const awaitingVaulting = isAwaitingVaulting(o.custody);
+        const withdrawn = o.custody !== "Vaulted" && !awaitingVaulting;
+        const status: VaultItem["status"] = awaitingVaulting ? "Awaiting vaulting" : withdrawn ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
         added.push({
           listing,
           item: {
@@ -1125,9 +1134,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             if (!v.token) return v;
             const o = ownedMap.get(v.token.tokenId);
             if (!o) return v;
-            const status: VaultItem["status"] = o.custody !== "Vaulted" ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+            const status: VaultItem["status"] = o.custody === "Vaulted" ? (o.isListed ? "Listed" : "Vaulted") : isAwaitingVaulting(o.custody) ? "Awaiting vaulting" : "Withdrawn";
             return { ...v, status, listedPrice: o.listedPrice };
           });
+
+        // Older browser state can contain a received slab before it had a cert-derived
+        // preview. Refresh it in-place as well as handling newly received tokens above.
+        const refreshed = updatedVault.flatMap((v) => {
+          if (!v.token) return [];
+          const o = ownedMap.get(v.token.tokenId);
+          if (!o) return [];
+          const currentListing = getListing(v.listingId);
+          const title = o.title || `Vaulted Slab #${o.token.tokenId}`;
+          const image = o.image || "";
+          if (currentListing?.title === title && currentListing.image === image) return [];
+          const listing = buildOnChainListing({
+            tokenId: o.token.tokenId,
+            title,
+            image,
+            grader: o.grader,
+            certNumber: o.certNumber,
+            price: o.isListed && o.listedPrice ? o.listedPrice : undefined,
+            owner: me.username,
+            ownerAddress: me.address,
+            contract: o.token.contract,
+          });
+          registerListing(listing);
+          return [listing];
+        });
+        const refreshedIds = new Set(refreshed.map((listing) => listing.id));
 
         const newOverrides = { ...prev.overrides };
         // Update listing price and listing state only for items owned by this user
@@ -1148,7 +1183,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return {
           ...prev,
           negotiations,
-          slabs: [...added.map((a) => a.listing), ...prev.slabs.filter((l) => !addIds.has(l.id))],
+          slabs: [
+            ...added.map((a) => a.listing),
+            ...refreshed,
+            ...prev.slabs.filter((l) => !addIds.has(l.id) && !refreshedIds.has(l.id)),
+          ],
           vault: [...added.map((a) => a.item), ...updatedVault],
           overrides: newOverrides,
         };

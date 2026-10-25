@@ -34,9 +34,9 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   const from = { fromBlock: DEPLOY_BLOCK };
   const byToken = { args: { tokenId }, ...from };
 
-  // The token was minted at submission, so its submission id is its token id.
+  // A token is minted only at receipt; this immutable link recovers its cert-number request id.
   const [vaulted] = await publicClient.getContractEvents({ ...sv, eventName: "SlabVaulted", ...byToken });
-  const submissionId = tokenId;
+  const submissionId = await publicClient.readContract({ ...sv, functionName: "submissionOfToken", args: [tokenId] });
   const bySub = { args: { submissionId }, ...from };
 
   const [transfers, redeem, shipped, delivered, lost, resolved, requested, received, forwarded] = await Promise.all([
@@ -57,9 +57,9 @@ export async function traceSlab(origin: string, tokenId: bigint) {
 
   for (const l of requested) {
     const parcel = l.args.inboundTracking ? `, parcel ${l.args.inboundTracking}` : "";
-    push("SubmissionRequested", `NFT #${l.args.submissionId} minted to ${short(l.args.owner!)}, pending and locked: ${l.args.grader} ${l.args.certNumber}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
+    push("SubmissionRequested", `Request #${l.args.submissionId}: ${l.args.grader} ${l.args.certNumber}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
   }
-  for (const l of received) push("SubmissionReceived", `Pokechain's warehouse received submission #${l.args.submissionId}`, l);
+  for (const l of received) push("SubmissionReceived", `Pokechain received submission #${l.args.submissionId} and minted token #${l.args.tokenId}`, l);
   for (const l of forwarded) {
     const bytes = (l.args.ciphertext!.length - 2) / 2;
     push("SubmissionForwarded", `Forwarded to Collector Crypt; parcel details encrypted to its key (${bytes} bytes of ciphertext, commitment ${short(l.args.commitment!)})`, l);

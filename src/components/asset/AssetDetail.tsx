@@ -159,6 +159,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const owned = enabledOnChain && onChainOwner && user?.address
     ? onChainOwner.address.toLowerCase() === user.address.toLowerCase()
     : isOwned(listing.id);
+  const vaultEntry = vault.find((entry) => entry.listingId === listing.id || entry.token?.tokenId === resolvedTokenId);
+  const awaitingVaulting = owned && vaultEntry?.status === "Awaiting vaulting";
 
   const listed = enabledOnChain
     ? onChainMarketListing !== undefined
@@ -553,7 +555,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <div className="flex items-center justify-between gap-3">
             <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
               <ShieldCheck size={13} className="text-good" />
-              Vaulted and insured
+              {awaitingVaulting ? "Awaiting vaulting" : "Vaulted and insured"}
             </Badge>
             <div className="flex items-center gap-2">
               <button
@@ -620,7 +622,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
             <div className="flex items-center gap-2 border-b border-hairline px-4 py-3 text-[13px] text-muted">
               <Clock size={14} />
-              {!listed ? (
+              {awaitingVaulting ? (
+                <span>Received at Pokechain · awaiting Collector Crypt vaulting</span>
+              ) : !listed ? (
                 <span>{owned ? "Held in your vault, not listed" : "Not listed right now"}</span>
               ) : (
                 <span>
@@ -642,7 +646,12 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                 </div>
               </div>
 
-              {owned ? (
+              {awaitingVaulting ? (
+                <div className="mt-4">
+                  <p className="text-[12px] text-muted">This NFT is locked while the physical slab is being vaulted. The only available action is reporting it lost from your Vault.</p>
+                  <Link href="/vault" className="mt-3 block"><Button size="lg" variant="secondary" className="w-full">Open Vault</Button></Link>
+                </div>
+              ) : owned ? (
                 <div className="mt-4 grid gap-2">
                   {listed ? (
                     <>

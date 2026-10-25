@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { ChainConsole } from "../chain/ChainConsole";
 import { ChainDownBanner } from "../chain/ChainDownBanner";
 import { ChainMarketSync } from "../chain/ChainMarketSync";
@@ -13,6 +14,22 @@ import { PromoBanner, TopBar } from "./TopBar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const pathname = usePathname();
+
+  // The intake simulator is deliberately presentation-only: it should not look like or expose
+  // the normal collector product during a demo.
+  if (pathname === "/intake") {
+    return (
+      <div className="min-h-screen bg-black">
+        <header className="border-b border-white/10 py-3 text-center text-[11px] font-black tracking-[0.28em] text-warn">
+          FOR DEMO
+        </header>
+        <main>{children}</main>
+        <ChainConsole presentationOnly />
+        <Toasts />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-black">

@@ -1410,6 +1410,11 @@ export const slabVaultAbi = [
   },
   {
     "inputs": [],
+    "name": "InvalidCertNumber",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "MissingEvidence",
     "type": "error"
   },
@@ -1948,6 +1953,12 @@ export const slabVaultAbi = [
       },
       {
         "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
         "internalType": "address",
         "name": "owner",
         "type": "address"
@@ -2179,7 +2190,7 @@ export const slabVaultAbi = [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "tokenId",
+        "name": "submissionId",
         "type": "uint256"
       },
       {
@@ -3040,6 +3051,44 @@ export const slabVaultAbi = [
         "internalType": "struct SlabVault.Submission",
         "name": "",
         "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "submissionOfCert",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "submissionOfToken",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",

@@ -77,7 +77,7 @@ export type SubmissionStatusName = (typeof SUBMISSION_STATUS)[number];
 /** submission stages that are still in flight (not vaulted or rejected) */
 export const OPEN_SUBMISSION = new Set([1, 2, 3]);
 export type CustodyName = (typeof CUSTODY)[number];
-/** Custody states of a token minted at submission that hasn't reached the vault yet. */
+/** Custody states of a received NFT that has not reached the vault yet. */
 export const PENDING_CUSTODY = new Set<CustodyName>(["Posted to Pokechain", "At Pokechain", "Sent to Collector Crypt"]);
 /** TradeEscrow.Status */
 export const OFFER_STATUS = ["None", "Open", "Accepted", "Declined", "Withdrawn", "Countered"] as const;

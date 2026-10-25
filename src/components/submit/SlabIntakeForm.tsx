@@ -83,14 +83,17 @@ export function SlabIntakeForm() {
 
   /**
    * Demo helper: a random 8-digit cert that SlabVault hasn't seen, so the flow can be run again and
-   * again (each physical cert has one live token: tokenOfCert).
+   * again (each physical cert has one active intake request or token).
    */
   const randomCert = async () => {
     for (let i = 0; i < 20; i++) {
       const candidate = String(10_000_000 + Math.floor(Math.random() * 90_000_000));
       const key = await client!.readContract({ ...contracts.slabVault, functionName: "certKey", args: [grader, candidate] });
-      const token = await client!.readContract({ ...contracts.slabVault, functionName: "tokenOfCert", args: [key] });
-      if (token === BigInt(0)) {
+      const [token, submission] = await Promise.all([
+        client!.readContract({ ...contracts.slabVault, functionName: "tokenOfCert", args: [key] }),
+        client!.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [BigInt(candidate)] }),
+      ]);
+      if (token === BigInt(0) && submission.status === 0) {
         setCert(candidate);
         return;
       }
@@ -127,14 +130,14 @@ export function SlabIntakeForm() {
       const evidenceHash = await uploadEvidence(form);
 
       setStage("signing");
-      await submit({
+      const submissionId = await submit({
         grader,
         certNumber: cert.trim(),
         evidenceHash,
         inboundCarrier: method === "courier" ? carrier : "Drop-off",
         inboundTracking: method === "courier" ? tracking.trim() : "",
       });
-      pushToast({ title: "Submitted", body: "Ship the slab to Pokechain. Its tracker is above the form.", tone: "success" });
+      pushToast({ title: "Submitted", body: `Request #${submissionId} is waiting for receipt at Pokechain. An NFT is minted only when the slab arrives.`, tone: "success" });
       setCert("");
       setPhotos({});
       setTracking("");

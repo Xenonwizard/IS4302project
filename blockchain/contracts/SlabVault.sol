@@ -18,13 +18,12 @@ interface IAccountStatus {
  *         wallet. This token is the Pokechain-side title: trading moves this token only,
  *         while CC's NFT stays locked in the escrow.
  *
- *  Onboarding a slab: the NFT exists from the moment it is posted
+ *  Onboarding a slab: an intake request is not an NFT.
  *   1. `requestSubmission`  the collector declares grader + cert, the hash of their intake
- *                           evidence and the inbound tracking number. The NFT
- *                           is minted to them at once (token id = submission id), locked, with
- *                           custody PostedToPokechain, so a parcel lost in the post is already
- *                           a token that can be reported and traced.
- *   2. `markReceived`       Pokechain's warehouse has it. Custody: AtPokechain.
+ *                           evidence and the inbound tracking number. The numeric PSA cert is
+ *                           the submission id. Nothing is minted yet.
+ *   2. `markReceived`       Pokechain's warehouse has it. This mints one locked NFT to the
+ *                           collector and sets custody to AtPokechain.
  *   3. `markForwarded`      Pokechain ships it on to CC. The parcel details (carrier, tracking)
  *                           go on-chain only as ciphertext encrypted to CC's published key,
  *                           plus a salted commitment for disputes. Custody: SentToCustodian.
@@ -120,13 +119,17 @@ contract SlabVault is ERC721, AccessControl {
 
     IAccountStatus public immutable accounts;
 
-    /// @notice Token ids and submission ids are the same number: each submission is its token.
+    /// @notice ERC-721 token ids remain compact and sequential. Submission ids are PSA cert numbers.
     uint256 public nextTokenId = 1;
 
     mapping(uint256 => Slab) private _slabs;
     mapping(uint256 => Submission) private _submissions;
-    /// @notice keccak256(grader, cert) => its token (pending or vaulted), so one physical slab has one live token.
+    /// @notice keccak256(grader, cert) => its token once Pokechain has received and minted it.
     mapping(bytes32 => uint256) public tokenOfCert;
+    /// @notice keccak256(grader, cert) => its active intake request, including before minting.
+    mapping(bytes32 => uint256) public submissionOfCert;
+    /// @notice ERC-721 token => originating intake request.
+    mapping(uint256 => uint256) public submissionOfToken;
     /// @notice The TradeEscrow contract: may hold slabs in open offers and move Vaulted slabs for agreed trades.
     address public tradeEscrow;
     /// @notice Slabs each address holds that are still physically in the vault.
@@ -150,7 +153,7 @@ contract SlabVault is ERC721, AccessControl {
         bytes32 evidenceHash,
         string inboundTracking
     );
-    event SubmissionReceived(uint256 indexed submissionId, address indexed owner);
+    event SubmissionReceived(uint256 indexed submissionId, uint256 indexed tokenId, address indexed owner);
     /**
      * @param recipient who the details are encrypted for (the custodian)
      * @param recipientKey the exact public key used, so key rotation stays traceable
@@ -193,6 +196,7 @@ contract SlabVault is ERC721, AccessControl {
     error EmptyField();
     error NoEncryptionKey(address account);
     error MissingEvidence();
+    error InvalidCertNumber();
 
     constructor(IAccountStatus accounts_, address operator) ERC721("Pokechain Slab", "SLAB") {
         accounts = accounts_;
@@ -219,10 +223,11 @@ contract SlabVault is ERC721, AccessControl {
         if (bytes(grader).length == 0 || bytes(certNumber).length == 0) revert EmptyField();
         if (evidenceHash == bytes32(0)) revert MissingEvidence();
         bytes32 key = certKey(grader, certNumber);
-        if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
-
-        submissionId = nextTokenId++;
-        tokenOfCert[key] = submissionId;
+        submissionId = _submissionIdFromCert(certNumber);
+        if (_submissions[submissionId].status != SubmissionStatus.None || submissionOfCert[key] != 0) {
+            revert CertAlreadyTokenised(submissionId);
+        }
+        submissionOfCert[key] = submissionId;
         Submission storage s = _submissions[submissionId];
         s.owner = msg.sender;
         s.grader = grader;
@@ -233,9 +238,7 @@ contract SlabVault is ERC721, AccessControl {
         s.inboundCarrier = inboundCarrier;
         s.inboundTracking = inboundTracking;
         s.updatedAt = uint64(block.timestamp);
-        s.tokenId = submissionId;
-
-        _mintPending(submissionId);
+        // `tokenId` stays zero until Pokechain has physically received the slab.
         emit SubmissionRequested(
             submissionId, msg.sender, grader, certNumber, evidenceHash, inboundTracking
         );
@@ -244,8 +247,13 @@ contract SlabVault is ERC721, AccessControl {
     /// @notice Step 2: Pokechain's warehouse has received the slab from the collector.
     function markReceived(uint256 submissionId) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _moveSubmission(submissionId, SubmissionStatus.Pending, SubmissionStatus.ReceivedByPokechain);
-        _moveCustody(submissionId, Custody.PostedToPokechain, Custody.AtPokechain);
-        emit SubmissionReceived(submissionId, s.owner);
+        uint256 tokenId = nextTokenId++;
+        s.tokenId = tokenId;
+        submissionOfToken[tokenId] = submissionId;
+        tokenOfCert[certKey(s.grader, s.certNumber)] = tokenId;
+        _mintPending(submissionId, tokenId);
+        _moveCustody(tokenId, Custody.PostedToPokechain, Custody.AtPokechain);
+        emit SubmissionReceived(submissionId, tokenId, s.owner);
     }
 
     /* --------------------------- encrypted messaging --------------------------- */
@@ -280,7 +288,7 @@ contract SlabVault is ERC721, AccessControl {
         if (ciphertext.length == 0 || commitment == bytes32(0)) revert EmptyField();
         Submission storage s =
             _moveSubmission(submissionId, SubmissionStatus.ReceivedByPokechain, SubmissionStatus.AtCustodian);
-        _moveCustody(submissionId, Custody.AtPokechain, Custody.SentToCustodian);
+        _moveCustody(s.tokenId, Custody.AtPokechain, Custody.SentToCustodian);
         s.forwardCommitment = commitment;
         emit SubmissionForwarded(submissionId, s.owner, custodian, key, commitment, ciphertext);
     }
@@ -300,18 +308,20 @@ contract SlabVault is ERC721, AccessControl {
 
     /**
      * @notice Step 4: Collector Crypt has vaulted the slab and its Solana NFT sits in Pokechain's
-     *         escrow (the operator checked this off-chain). The token, minted at submission,
+     *         escrow (the operator checked this off-chain). The token, minted when Pokechain
+     *         received the slab,
      *         becomes Vaulted: it now counts as held in the vault and can be traded.
      * @param title display name, e.g. "2021 Evolving Skies Umbreon VMAX #215 PSA 10"
      * @param image URL of the card image
      * @param custodianRef Collector Crypt's Solana asset id for this slab
      */
-    function confirmVaulted(uint256 tokenId, string calldata title, string calldata image, string calldata custodianRef)
+    function confirmVaulted(uint256 submissionId, string calldata title, string calldata image, string calldata custodianRef)
         external
         onlyRole(OPERATOR_ROLE)
     {
-        Submission storage s = _moveSubmission(tokenId, SubmissionStatus.AtCustodian, SubmissionStatus.Vaulted);
+        Submission storage s = _moveSubmission(submissionId, SubmissionStatus.AtCustodian, SubmissionStatus.Vaulted);
         if (bytes(custodianRef).length == 0) revert EmptyField();
+        uint256 tokenId = s.tokenId;
         _moveCustody(tokenId, Custody.SentToCustodian, Custody.Vaulted);
         Slab storage slab = _slabs[tokenId];
         slab.title = title;
@@ -344,12 +354,17 @@ contract SlabVault is ERC721, AccessControl {
         if (!accounts.isActive(p.recipient)) revert AccountNotActive(p.recipient);
         if (bytes(p.custodianRef).length == 0) revert EmptyField();
         bytes32 key = certKey(p.grader, p.certNumber);
-        if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
+        uint256 submissionId = _submissionIdFromCert(p.certNumber);
+        if (tokenOfCert[key] != 0 || _submissions[submissionId].status != SubmissionStatus.None) {
+            revert CertAlreadyTokenised(tokenOfCert[key] != 0 ? tokenOfCert[key] : submissionId);
+        }
 
         tokenId = nextTokenId++;
         tokenOfCert[key] = tokenId;
+        submissionOfCert[key] = submissionId;
+        submissionOfToken[tokenId] = submissionId;
 
-        Submission storage sub = _submissions[tokenId];
+        Submission storage sub = _submissions[submissionId];
         sub.owner = p.recipient;
         sub.grader = p.grader;
         sub.certNumber = p.certNumber;
@@ -374,14 +389,15 @@ contract SlabVault is ERC721, AccessControl {
         emit SlabVaulted(tokenId, p.recipient, p.certNumber, p.custodianRef);
     }
 
-    /// @notice Refuses a submission at any open stage. The token stays (marked Rejected) as the record; the cert is freed.
+    /// @notice Refuses a submission at any open stage. A received slab keeps its rejected NFT record; an unreceived request has no NFT.
     function rejectSubmission(uint256 submissionId, string calldata reason) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _submissions[submissionId];
         if (!_isOpen(s.status)) revert SubmissionNotPending(submissionId);
         s.status = SubmissionStatus.Rejected;
         s.updatedAt = uint64(block.timestamp);
         delete tokenOfCert[certKey(s.grader, s.certNumber)];
-        _setCustody(submissionId, Custody.Rejected);
+        delete submissionOfCert[certKey(s.grader, s.certNumber)];
+        if (s.tokenId != 0) _setCustody(s.tokenId, Custody.Rejected);
         emit SubmissionRejected(submissionId, s.owner, reason);
     }
 
@@ -435,7 +451,7 @@ contract SlabVault is ERC721, AccessControl {
     function reportLost(uint256 tokenId, string calldata details) external {
         if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         Custody c = _slabs[tokenId].custody;
-        bool inPost = c == Custody.PostedToPokechain || c == Custody.SentToCustodian
+        bool inPost = c == Custody.PostedToPokechain || c == Custody.AtPokechain || c == Custody.SentToCustodian
             || c == Custody.RedemptionRequested || c == Custody.Shipped;
         if (!inPost) revert WrongCustody(tokenId, c);
         _setCustody(tokenId, Custody.Lost);
@@ -455,7 +471,7 @@ contract SlabVault is ERC721, AccessControl {
         address owner = ownerOf(tokenId);
         if (outcome == Custody.Vaulted) vaultedCount[owner] += 1;
         if (outcome == Custody.AtPokechain) {
-            Submission storage s = _submissions[tokenId];
+            Submission storage s = _submissions[submissionOfToken[tokenId]];
             s.status = SubmissionStatus.ReceivedByPokechain;
             s.updatedAt = uint64(block.timestamp);
         }
@@ -571,9 +587,9 @@ contract SlabVault is ERC721, AccessControl {
         return super._update(to, tokenId, auth);
     }
 
-    /// @dev The NFT, minted at submission from what was submitted: locked (custody isn't Vaulted), not counted as vaulted yet.
-    function _mintPending(uint256 tokenId) private {
-        Submission storage sub = _submissions[tokenId];
+    /// @dev The NFT is minted exactly once, after Pokechain has received the physical slab.
+    function _mintPending(uint256 submissionId, uint256 tokenId) private {
+        Submission storage sub = _submissions[submissionId];
         Slab storage slab = _slabs[tokenId];
         slab.grader = sub.grader;
         slab.certNumber = sub.certNumber;
@@ -609,6 +625,18 @@ contract SlabVault is ERC721, AccessControl {
     function _setCustody(uint256 tokenId, Custody next) private {
         _slabs[tokenId].custody = next;
         _slabs[tokenId].custodyUpdatedAt = uint64(block.timestamp);
+    }
+
+    /// @dev PSA certificates are numeric. Their decimal value is the intake request id shown to operators.
+    function _submissionIdFromCert(string calldata certNumber) private pure returns (uint256 id) {
+        bytes calldata raw = bytes(certNumber);
+        if (raw.length == 0) revert InvalidCertNumber();
+        for (uint256 i; i < raw.length; ++i) {
+            uint8 c = uint8(raw[i]);
+            if (c < 48 || c > 57) revert InvalidCertNumber();
+            id = id * 10 + (c - 48);
+        }
+        if (id == 0) revert InvalidCertNumber();
     }
 
     function _custodyName(Custody c) private pure returns (string memory) {

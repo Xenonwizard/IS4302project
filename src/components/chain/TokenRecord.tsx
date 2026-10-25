@@ -47,11 +47,16 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
   const owner = reads?.[1]?.result;
   const meta = reads?.[2]?.result ? decodeTokenUri(reads[2].result) : null;
 
-  // The submission this token was minted from: same id, since the NFT is minted at submission.
-  const { data: submission } = useQuery({
+  // The receipt event minted this token; use its immutable link back to the cert-number request.
+  const { data: submissionId } = useQuery({
     queryKey: ["token-submission", tokenId],
     enabled: Boolean(client),
-    queryFn: () => client!.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [id] }),
+    queryFn: () => client!.readContract({ ...contracts.slabVault, functionName: "submissionOfToken", args: [id] }),
+  });
+  const { data: submission } = useQuery({
+    queryKey: ["token-submission-detail", submissionId?.toString()],
+    enabled: Boolean(client && submissionId),
+    queryFn: () => client!.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [submissionId!] }),
   });
 
   const { data: evidence } = useQuery({
