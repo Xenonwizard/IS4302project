@@ -24,7 +24,7 @@ test("collector: an invalid handle is refused with a reason", async ({ page }) =
   await page.goto("/");
   await page.getByRole("button", { name: "Sign up" }).click();
   await page.getByRole("button", { name: "Connect wallet" }).click();
-  await page.getByText("Hardhat test collector #1").click();
+  await page.getByText("test1 wallet", { exact: true }).click();
   await page.getByPlaceholder("vaultedcharizard").fill("ab");
   await page.getByRole("button", { name: "Open account" }).click();
   await expect(page.getByText("3 to 20 characters: a-z, 0-9 or _.", { exact: true })).toBeVisible();
@@ -235,7 +235,9 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
   // His Charizard (market $1,207) for her listed Articuno (market $1,057): ash is giving more, and the panel says so.
   await page.getByRole("button", { name: /Charizard.*#4$/ }).click();
   await expect(page.getByRole("button", { name: /Articuno.*#5$/ })).toHaveAttribute("aria-pressed", "true"); // the listed slab
-  await expect(page.getByText("Listed for sale: it is delisted if they accept")).toBeVisible();
+  // Her stated value is what she's asking now ($900), not the $500 she declared at submission.
+  await expect(page.getByText("Listed at $900.00: it is delisted if they accept")).toBeVisible();
+  await expect(page.getByRole("button", { name: "stated $900.00" })).toBeVisible();
   await expect(page.getByTestId("trade-balance").getByTestId("trade-net")).toHaveText("−$150.00");
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
@@ -282,7 +284,7 @@ test("seeded demo: an offer on a listed slab, a counter that includes your own l
   await test2.goto("/trades");
   await test2.getByRole("link", { name: /test1/ }).first().click();
   await test2.getByRole("button", { name: "Counter" }).click();
-  await expect(test2.getByText("Listed for sale: the listing is cancelled when you send")).toBeVisible();
+  await expect(test2.getByText(/Listed at \$[\d,.]+: the listing is cancelled when you send/).first()).toBeVisible();
   await test2.getByRole("button", { name: /Alakazam.*#1$/ }).click();
   await test2.getByRole("button", { name: "Send counter-offer" }).click();
   await expect(test2.getByTestId("trade-card").last().getByTestId("trade-status")).toHaveText("Waiting for them");

@@ -5,7 +5,7 @@
  *
  *   MetaMask / browser wallet   the real thing. RainbowKit asks MetaMask to add the
  *                               Pokechain chain the first time.
- *   Hardhat test collectors     local chain only. Hardhat's node keeps its 20 test accounts
+ *   test1 / test2 wallet        local chain only. Hardhat's node keeps its 20 test accounts
  *                               unlocked, so these "wallets" just forward transactions to it
  *                               unsigned and the node signs them. Handy for demoing two users
  *                               without setting up MetaMask twice.
@@ -56,7 +56,7 @@ function testCollectorWallet({ index, address, hue }: (typeof TEST_COLLECTORS)[n
 
   return (): Wallet => ({
     id,
-    name: `Hardhat test collector #${index}`,
+    name: `test${index} wallet`,
     iconUrl: icon,
     iconBackground: "#000",
     installed: true,
@@ -67,7 +67,7 @@ function testCollectorWallet({ index, address, hue }: (typeof TEST_COLLECTORS)[n
           ...base,
           ...walletDetails,
           id,
-          name: `Hardhat test collector #${index}`,
+          name: `test${index} wallet`,
           connect: (async (params) => {
             const result = await base.connect(params);
             remember(true);

@@ -42,13 +42,13 @@ npm run dev       # terminal 2: the app
 ```
 
 `npm run chain` deploys the contracts and then **seeds a demo** (`blockchain/scripts/seed.mjs`): five
-accounts with vaulted slabs, 10 of them listed on the marketplace. Hardhat test collector **#1 is @test1**
-and **#2 is @test2** (the ones you can log in as, no MetaMask needed); @ash, @misty and @brock own the rest.
+accounts with vaulted slabs, 10 of them listed on the marketplace. the **test1 wallet** is **@test1**
+and the **test2 wallet** is **@test2** (the ones you can log in as, no MetaMask needed); @ash, @misty and @brock own the rest.
 
-To try a trade: open http://localhost:3000 → **Log in** → **Connect wallet** → **Hardhat test collector
-#1** → **Negotiation rooms** → **Chat** next to **@test2** → type a message → **Make a trade offer**. Pick
+To try a trade: open http://localhost:3000 → **Log in** → **Connect wallet** → **test1
+wallet** → **Negotiation rooms** → **Chat** next to **@test2** → type a message → **Make a trade offer**. Pick
 slabs from both vaults, add cash, and choose for each slab whether it counts at its **market** or
-**stated** value; the balance panel shows who comes out ahead. Then sign out, log in with #2, open the
+**stated** value; the balance panel shows who comes out ahead. Then sign out, log in with the test2 wallet, open the
 chat, and **Accept**, **Counter** or **Decline**. (Cash in a trade comes from your Pokechain account:
 deposit some in **Wallet** first. A slab you have listed for sale can't go into an offer until you
 cancel the listing.)
@@ -109,10 +109,10 @@ operator buttons), the seeded demo accounts and slabs (`seedSlab`, operator-only
 | `npm run chain` says *Cannot find module* / *hardhat: not found* | `blockchain/` dependencies not installed | `npm run setup` |
 | *Something is already listening on 8545* | An old chain is still running | Close the other terminal (or the process on port 8545) and run `npm run chain` again |
 | Signed in on an old session, odd balances, or slabs that don't exist | Browser data from an earlier chain | Chain log panel → **Reset chain + demo data**, or use a private window |
-| You can't **Sign up** with collector #1 or #2 (*already has an active account*) | The seeded demo already opened them as **@test1** / **@test2** | Use **Log in** instead, or reset to an empty chain: `curl -X POST "localhost:3000/api/dev/reset?clean=1"` |
+| You can't **Sign up** with the test1 or test2 wallet (*already has an active account*) | The seeded demo already opened them as **@test1** / **@test2** | Use **Log in** instead, or reset to an empty chain: `curl -X POST "localhost:3000/api/dev/reset?clean=1"` |
 | A trade offer won't send: *"isn't in the vault"* or *"isn't owned by that collector"* | The slab is still pending, withdrawn, or locked in another open offer | Pick another slab, or withdraw the other offer in its chat first |
 | One of *your* slabs is greyed out in the trade builder: *"Listed for sale"* | A slab listed on the marketplace can't be locked in an offer | Cancel the listing in the Vault first (their listed slabs can still be asked for) |
-| MetaMask: wrong network, or transactions stuck | MetaMask isn't on the local chain, or remembers an old one | Use **Hardhat test collector #1**; or in MetaMask approve *Add network* (127.0.0.1:8545, chain 31337) and Settings → Advanced → **Clear activity tab data** |
+| MetaMask: wrong network, or transactions stuck | MetaMask isn't on the local chain, or remembers an old one | Use the **test1 wallet**; or in MetaMask approve *Add network* (127.0.0.1:8545, chain 31337) and Settings → Advanced → **Clear activity tab data** |
 | Account page shows nothing after `git pull` | The contracts changed | Stop `npm run chain`, run `npm run setup`, start `npm run chain` again, then reset demo data |
 
 ```bash

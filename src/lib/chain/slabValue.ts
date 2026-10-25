@@ -20,7 +20,11 @@ export function marketValueOf(slab: { grader: string; certNumber: string; title?
   return value;
 }
 
-/** A slab with both of its values worked out and the one that counts, ready for an offer. */
+/**
+ * A slab with both of its values worked out and the one that counts, ready for an offer. Its stated
+ * value is what the owner says it is worth today: the asking price while it is listed for sale,
+ * otherwise the value they declared when they submitted it.
+ */
 export function valuedSlab(slab: TradeSlab, basis: ValueBasis = "market"): ChatTradeSlab {
   return {
     tokenId: slab.tokenId,
@@ -29,7 +33,7 @@ export function valuedSlab(slab: TradeSlab, basis: ValueBasis = "market"): ChatT
     grader: slab.grader,
     certNumber: slab.certNumber,
     market: marketValueOf(slab),
-    stated: slab.declaredValueCents / 100,
+    stated: slab.listedPrice ?? slab.declaredValueCents / 100,
     basis,
   };
 }

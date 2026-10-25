@@ -33,7 +33,7 @@ export async function logIn(page: Page, wallet: 1 | 2, handle: string) {
   await page.goto("/");
   await page.getByRole("button", { name: "Log in" }).first().click();
   await page.getByRole("button", { name: "Connect wallet" }).click();
-  await page.getByText(`Hardhat test collector #${wallet}`).click();
+  await page.getByText(`test${wallet} wallet`, { exact: true }).click();
   await expect(page.locator("header")).toContainText(handle);
 }
 
@@ -76,7 +76,7 @@ export async function openAccount(page: Page, handle: string, wallet: 1 | 2 = 1)
   await page.goto("/");
   await page.getByRole("button", { name: "Sign up" }).click();
   await page.getByRole("button", { name: "Connect wallet" }).click();
-  await page.getByText(`Hardhat test collector #${wallet}`).click();
+  await page.getByText(`test${wallet} wallet`, { exact: true }).click();
   await page.getByPlaceholder("vaultedcharizard").fill(handle);
   await page.getByRole("button", { name: "Open account" }).click();
   await expect(page.locator("header")).toContainText(handle);

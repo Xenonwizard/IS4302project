@@ -413,7 +413,7 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
 ### A 6-minute demo script
 
 1. `npm run chain`, then `npm run dev`, and open http://localhost:3000.
-2. **Sign up** → Connect wallet → *Hardhat test collector #1* (or MetaMask) → handle `ash` → **Open account**.
+2. **Sign up** → Connect wallet → *test1 wallet* (or MetaMask) → handle `ash` → **Open account**.
    Open the Chain log: `AccountRegistry.register`.
 3. **Wallet** → *Mint 1,000 test USDC* → deposit 250 with the permit box ticked. The Chain log shows
    the off-chain **Signature**, then a single `depositWithPermit` tx.
@@ -424,7 +424,7 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
    moves at each step; after 3 the page confirms it. The Chain log shows `markReceived`, `markForwarded`,
    `Collector Crypt GET /cards`, `Solana getAsset`, then `SlabVault.confirmVaulted`. Send *4 · getAsset* to
    show the escrow-held NFT the operator checked. (Each step also has a Simulate button.)
-6. Sign out, connect *Hardhat test collector #2*, open account `misty`. Sign back in as `ash`,
+6. Sign out, connect *test2 wallet*, open account `misty`. Sign back in as `ash`,
    then in the **Vault** → **Transfer** → `misty`. Ash's Vault empties; switch to misty, and token #1 is
    in her Vault (read from `Transfer` events).
 7. As misty: **Ship to me** → address → *Withdraw*. Collector Crypt redemption `CCR-00001` is created
@@ -433,11 +433,13 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
 9. Open **Trace** for token #1: Polygon, Solana and Collector Crypt, side by side.
 10. **Account** → history, then **Close account** (allowed now that no slabs are vaulted).
 
-**Multi-slab trade demo (2 minutes).** Chain log → **Load demo traders** (@ash on test collector #1
-with 3 Pikachus + a Charizard, @misty on #2 with 2 Articunos + a Charizard-GX, $1,000 each). Log in as
-ash → **Negotiation rooms** → **@misty** → **Make an offer**: pick the 3 Pikachus, $50, and misty's 2
-Articunos → **Send offer** (Chain log: `TradeEscrow.createOffer`; ash's Vault shows **In offer #1**).
-Sign out, log in with #2 as misty → the room shows *1 to answer* → **Accept trade** (or **Counter**).
+**Multi-slab trade demo (2 minutes).** `npm run chain` seeds the demo. Log in with the **test1 wallet**
+→ **Negotiation rooms** → **Chat** next to **@test2** → send a message → **Make a trade offer**: the slab the
+chat is about is already picked; add slabs from your vault, cash if you like, and choose for each slab
+whether it counts at its market value or its stated value (the listing price, if it's listed). The balance
+shows who comes out ahead → **Send offer** (Chain log: `TradeEscrow.createOffer`; your Vault shows
+**In offer #1**). Sign out, log in with the **test2 wallet**, open the chat → **Accept trade** (or
+**Counter** / **Decline**). The slab's page then shows **Sold**.
 
 ---
 

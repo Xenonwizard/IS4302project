@@ -27,8 +27,10 @@ export interface TradeSlab {
   certNumber: string;
   /** what its owner declared at submission, recorded on-chain */
   declaredValueCents: number;
-  /** listed for sale on SlabMarket: can't be put into an offer until it is delisted */
+  /** listed for sale on SlabMarket (an offer cancels the listing before the slab can move) */
   listed?: boolean;
+  /** its asking price on SlabMarket, in dollars, while listed */
+  listedPrice?: number;
 }
 
 export interface TradeOffer {
@@ -88,14 +90,15 @@ export function useTradeSlabs(owner: Address | undefined) {
       const ids = [...new Set(incoming.map((e) => e.args.tokenId!))];
       const owners = await Promise.all(ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] })));
       const held = ids.filter((_, i) => owners[i] === owner);
-      const [slabs, listed] = await Promise.all([
+      const [slabs, listed, listings] = await Promise.all([
         Promise.all(held.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),
         Promise.all(held.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "isListed", args: [id] }).catch(() => false))),
+        Promise.all(held.map((id) => client!.readContract({ ...contracts.slabMarket, functionName: "getListing", args: [id] }).catch(() => null))),
       ]);
       return held
-        .map((id, i) => ({ id, s: slabs[i], listed: listed[i] }))
+        .map((id, i) => ({ id, s: slabs[i], listed: listed[i], listing: listings[i] }))
         .filter(({ s }) => CUSTODY[s.custody] === "Vaulted")
-        .map(({ id, s, listed }) => ({
+        .map(({ id, s, listed, listing }) => ({
           tokenId: id.toString(),
           title: s.title,
           image: s.image,
@@ -103,6 +106,7 @@ export function useTradeSlabs(owner: Address | undefined) {
           certNumber: s.certNumber,
           declaredValueCents: Number(s.declaredValueCents),
           listed,
+          listedPrice: listed && listing && listing.price > BigInt(0) ? fromUsdcUnits(listing.price) : undefined,
         }));
     },
   });
