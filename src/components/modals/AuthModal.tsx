@@ -105,7 +105,7 @@ function Onboarding() {
           <OnChainNote>
             Nothing yet. Your wallet address becomes your account id. MetaMask holds the private
             key, and {BRAND.name} never sees it.
-            {IS_LOCAL ? " For a quick demo, pick a Hardhat test collector." : ""}
+            {IS_LOCAL ? " For a quick demo, pick the test1 or test2 wallet." : ""}
           </OnChainNote>
         </Step>
         {acct.isConnected && acct.status !== "Active" ? (

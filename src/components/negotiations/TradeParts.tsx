@@ -71,7 +71,13 @@ export function SlabTile({
           Market <b className="text-white">{exact(slab.market)}</b>
         </span>
         <span className="block text-[11px] text-muted">
-          Stated <b className="text-white">{exact(slab.stated)}</b>
+          {slab.stated !== null ? (
+            <>
+              Stated <b className="text-white">{exact(slab.stated)}</b>
+            </>
+          ) : (
+            "Not listed: counts at market"
+          )}
         </span>
         {note ? <span className="mt-0.5 block text-[10.5px] text-warn">{note}</span> : null}
       </span>
@@ -86,7 +92,7 @@ export function SlabTile({
       ) : (
         <div className="flex gap-2">{face}</div>
       )}
-      {selected && onBasis ? (
+      {selected && onBasis && slab.stated !== null ? (
         <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-lg bg-black/30 p-0.5" role="group" aria-label="Count this slab at">
           {(["market", "stated"] as const).map((b) => (
             <button
@@ -99,13 +105,13 @@ export function SlabTile({
                 slab.basis === b ? "bg-accent text-white" : "text-muted hover:text-white",
               )}
             >
-              {b} {exact(b === "market" ? slab.market : slab.stated)}
+              {b} {exact(b === "market" ? slab.market : (slab.stated ?? slab.market))}
             </button>
           ))}
         </div>
       ) : !onBasis && !onClick ? (
         <p className="mt-1 text-[11px] text-muted">
-          Counted at <b className="text-white">{slab.basis}</b> · {exact(slabWorth(slab))}
+          Counted at <b className="text-white">{slab.stated === null ? "market" : slab.basis}</b> · {exact(slabWorth(slab))}
         </p>
       ) : null}
       {flag ? (
@@ -127,7 +133,7 @@ const VERDICT: Record<Verdict, { label: string; tone: string; bar: string }> = {
 
 /**
  * What a trade comes to, from the viewer's side: what they give, what they get, who is ahead, by how
- * much, and what that looks like if every slab were counted at market or at its stated value. Nothing
+ * much, and what that looks like if every slab were counted at market or at its stated (asking) price. Nothing
  * is sent to the other side; this is only for the person looking.
  */
 export function BalancePanel({
@@ -155,7 +161,7 @@ export function BalancePanel({
   const rows: { label: string; b: Balance }[] = [
     { label: "As priced in this offer", b: asPriced },
     { label: "Everything at market", b: balance(give, get, "market") },
-    { label: "Everything at stated", b: balance(give, get, "stated") },
+    { label: "Everything at stated (unlisted at market)", b: balance(give, get, "stated") },
   ];
   // Coming out ahead isn't a warning for the viewer, so it reads in the accent colour instead of red or amber.
   const v = !asPriced.against && asPriced.verdict !== "fair" ? { ...VERDICT[asPriced.verdict], tone: "text-accent", bar: "bg-accent" } : VERDICT[asPriced.verdict];
@@ -198,7 +204,7 @@ export function BalancePanel({
             <li key={s.tokenId} className="flex items-start gap-1.5 text-[11.5px] leading-snug text-warn">
               <AlertTriangle size={12} className="mt-px shrink-0" />
               <span>
-                {cardName(s.title)}: stated {exact(s.stated)} vs market {exact(s.market)}.
+                {cardName(s.title)}: stated {exact(s.stated ?? s.market)} vs market {exact(s.market)}.
               </span>
             </li>
           ))}

@@ -93,8 +93,6 @@ export interface SlabToken {
   mintTx: string;
   /** Collector Crypt's Solana NFT (asset id) for the slab, held by Pokechain's escrow */
   custodianRef: string;
-  /** what the collector declared in the intake form, as recorded on-chain */
-  declaredValueCents?: number;
   evidenceHash?: string;
 }
 

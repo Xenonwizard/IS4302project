@@ -63,7 +63,6 @@ const SEED_SLABS = [
     title: "2006 Pokémon Crystal Guardians #99/100 Alakazam ★ - Holo Star (PSA 9.5 MINT+)",
     image: "https://images.pokemontcg.io/ex14/99_hires.png",
     custodianRef: "SolanaMintAlakazamStar99",
-    declaredValueCents: 324400,
     listPriceUsdc: 3244, // Listed
   },
   {
@@ -73,7 +72,6 @@ const SEED_SLABS = [
     title: "1999 Pokémon Base #4/102 Charizard - Holo (PSA 10 GEM MT)",
     image: "https://images.pokemontcg.io/base1/4_hires.png",
     custodianRef: "SolanaMintCharizardBase4",
-    declaredValueCents: 450000,
     listPriceUsdc: 0, // Unlisted in test1's vault
   },
   {
@@ -83,7 +81,6 @@ const SEED_SLABS = [
     title: "2004 Pokémon Team Rocket Returns #15/109 Dark Dragonite (PSA 9 MINT)",
     image: "https://images.pokemontcg.io/ex7/15_hires.png",
     custodianRef: "SolanaMintDarkDragonite15",
-    declaredValueCents: 115000,
     listPriceUsdc: 1150, // Listed
   },
   {
@@ -93,7 +90,6 @@ const SEED_SLABS = [
     title: "2002 Pokémon Neo Destiny #106/105 Shining Celebi (PSA 9 MINT)",
     image: "https://images.pokemontcg.io/neo4/106_hires.png",
     custodianRef: "SolanaMintShiningCelebi106",
-    declaredValueCents: 180000,
     listPriceUsdc: 0, // Unlisted in test2's vault
   },
   {
@@ -103,7 +99,6 @@ const SEED_SLABS = [
     title: "2003 Pokémon Skyridge #146/144 Charizard - Rare Secret (PSA 10 GEM MT)",
     image: "https://images.pokemontcg.io/ecard3/146_hires.png",
     custodianRef: "SolanaMintCharizardSkyridge146",
-    declaredValueCents: 850000,
     listPriceUsdc: 8500, // Listed
   },
   {
@@ -113,7 +108,6 @@ const SEED_SLABS = [
     title: "2011 Pokémon Call of Legends #20/95 Rayquaza - Holo (PSA 10 GEM MT)",
     image: "https://images.pokemontcg.io/col1/20_hires.png",
     custodianRef: "SolanaMintRayquazaCol20",
-    declaredValueCents: 220000,
     listPriceUsdc: 2200, // Listed
   },
   {
@@ -123,7 +117,6 @@ const SEED_SLABS = [
     title: "2007 Pokémon Power Keepers #102/108 Vaporeon ★ - Holo Star (PSA 9 MINT)",
     image: "https://images.pokemontcg.io/ex16/102_hires.png",
     custodianRef: "SolanaMintVaporeonStar102",
-    declaredValueCents: 140000,
     listPriceUsdc: 1400, // Listed
   },
   {
@@ -133,7 +126,6 @@ const SEED_SLABS = [
     title: "2003 Pokémon Skyridge #11/144 Gyarados (PSA 9.5 MINT+)",
     image: "https://images.pokemontcg.io/ecard3/11_hires.png",
     custodianRef: "SolanaMintGyaradosSkyridge11",
-    declaredValueCents: 195000,
     listPriceUsdc: 1950, // Listed
   },
   {
@@ -143,7 +135,6 @@ const SEED_SLABS = [
     title: "2007 Pokémon Power Keepers #101/108 Jolteon ★ - Holo Star (BGS 10 PRISTINE)",
     image: "https://images.pokemontcg.io/ex16/101_hires.png",
     custodianRef: "SolanaMintJolteonStar101",
-    declaredValueCents: 520000,
     listPriceUsdc: 5200, // Listed
   },
   {
@@ -153,7 +144,6 @@ const SEED_SLABS = [
     title: "2004 Pokémon Team Rocket Returns #106/109 Rocket's Zapdos ex (PSA 10 GEM MT)",
     image: "https://images.pokemontcg.io/ex7/106_hires.png",
     custodianRef: "SolanaMintZapdosEx106",
-    declaredValueCents: 345000,
     listPriceUsdc: 3450, // Listed
   },
   {
@@ -163,7 +153,6 @@ const SEED_SLABS = [
     title: "2000 Pokémon Neo Genesis #9/111 Lugia - Holo (CGC 10 PRISTINE)",
     image: "https://images.pokemontcg.io/neo1/9_hires.png",
     custodianRef: "SolanaMintLugiaNeo9",
-    declaredValueCents: 1450000,
     listPriceUsdc: 14500, // Listed
   },
   {
@@ -173,7 +162,6 @@ const SEED_SLABS = [
     title: "2025 Pokémon Prismatic Evolutions #161/131 Umbreon ex (PSA 10 GEM MT)",
     image: "https://images.pokemontcg.io/sv8pt5/161_hires.png",
     custodianRef: "SolanaMintUmbreonEx161",
-    declaredValueCents: 280000,
     listPriceUsdc: 2800, // Listed
   },
 ];
@@ -193,7 +181,7 @@ async function seed() {
   ]);
 
   const vaultAbi = parseAbi([
-    "struct SeedParams { address recipient; string grader; string certNumber; string title; string image; string custodianRef; uint64 declaredValueCents; bytes32 evidenceHash; }",
+    "struct SeedParams { address recipient; string grader; string certNumber; string title; string image; string custodianRef; bytes32 evidenceHash; }",
     "function seedSlab(SeedParams calldata p) external returns (uint256 tokenId)",
     "function tokenOfCert(bytes32 key) external view returns (uint256)",
     "function certKey(string grader, string certNumber) external pure returns (bytes32)",
@@ -282,7 +270,6 @@ async function seed() {
             title: slab.title,
             image: slab.image,
             custodianRef: slab.custodianRef,
-            declaredValueCents: BigInt(slab.declaredValueCents),
             evidenceHash,
           },
         ],

@@ -24,7 +24,7 @@ test("collector: an invalid handle is refused with a reason", async ({ page }) =
   await page.goto("/");
   await page.getByRole("button", { name: "Sign up" }).click();
   await page.getByRole("button", { name: "Connect wallet" }).click();
-  await page.getByText("Hardhat test collector #1").click();
+  await page.getByText("test1 wallet", { exact: true }).click();
   await page.getByPlaceholder("vaultedcharizard").fill("ab");
   await page.getByRole("button", { name: "Open account" }).click();
   await expect(page.getByText("3 to 20 characters: a-z, 0-9 or _.", { exact: true })).toBeVisible();
@@ -37,7 +37,6 @@ test("collector: submits a slab through the intake form; its NFT is minted at on
   await expect(page.getByText(/Found in the PSA registry/i)).toBeVisible();
   await page.getByRole("button", { name: /Use sample photos/ }).click();
   await expect(page.getByText(/^keccak 0x/)).toHaveCount(3);
-  await page.getByRole("button", { name: "Use estimate" }).click();
   await page.getByPlaceholder("RR123456789SG").fill("RR000111222SG");
   for (const text of [/I own this slab/, /The slab is authentic/, /I agree to Pokechain/]) {
     await page.getByText(text).click();
@@ -57,7 +56,6 @@ test("collector: a parcel lost on the way in is reported against its NFT, then f
   await page.getByRole("button", { name: /Random unused cert/ }).click();
   await page.getByRole("button", { name: /Use sample photos/ }).click();
   await expect(page.getByText(/^keccak 0x/)).toHaveCount(3);
-  await page.getByRole("button", { name: "Use estimate" }).click();
   await page.getByPlaceholder("RR123456789SG").fill("RR000333444SG");
   for (const text of [/I own this slab/, /The slab is authentic/, /I agree to Pokechain/]) {
     await page.getByText(text).click();
@@ -100,14 +98,9 @@ async function ashOffersFromChat(page: Page) {
   // That is hugely in ash's favour, and the panel says so before he sends it.
   await expect(balance).toContainText("Lopsided, in your favour");
   await expect(balance.getByTestId("trade-net")).toHaveText("+$1,131.87");
-  // The stated value of each Pikachu is $500 (that is what was declared at submission): counting them
-  // at that makes the same swap fair, even slightly against ash. Both numbers stay on screen, so nobody has to take it on trust.
-  for (const id of [1, 2, 3]) {
-    await page.getByRole("button", { name: /stated \$500\.00/ }).nth(id - 1).click();
-  }
-  await expect(balance).toContainText("Fair trade");
-  await expect(balance.getByTestId("trade-net")).toHaveText("−$47.95");
-  await expect(balance).toContainText("Pikachu: stated $500.00 vs market $8.00."); // an inflated stated value is called out
+  // None of these slabs is listed for sale, so none has a stated (asking) price: they count at market.
+  await expect(page.getByText("Not listed: counts at market").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /^stated / })).toHaveCount(0);
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
 }
@@ -140,11 +133,10 @@ test("two collectors: negotiate in a chat, then 3 Pikachus + $50 for 2 Articunos
   await expect(misty.getByText("Would you swap my Pikachus for them?")).toBeVisible();
   const card = misty.getByTestId("trade-card");
   await expect(card.getByTestId("trade-status")).toHaveText("Your move");
-  // She gives $1,502.05 of Articunos at market and gets $1,550.00 at what ash stated: fair on those numbers...
-  await expect(card.getByTestId("trade-verdict")).toHaveText("Fair trade");
-  // ...but at market, the Pikachus are worth far less. Her own view of the same offer says so, and tells no one.
-  await card.getByText("See it at market and at stated values").click();
-  await expect(card.getByRole("row", { name: /Everything at market/ })).toContainText("−$1,131.87");
+  // From her side the same offer reads the other way: she'd give $1,502.05 of Articunos for $370.18.
+  // Only she sees this; ash isn't told how she reads it.
+  await expect(card.getByTestId("trade-verdict")).toHaveText("Lopsided");
+  await expect(card.getByTestId("trade-net")).toHaveText("−$1,131.87");
   await card.getByRole("button", { name: "Accept trade" }).click();
   await expect(card.getByTestId("trade-status")).toHaveText("Accepted");
   await expect(misty.getByText(/misty accepted trade #1/)).toBeVisible();
@@ -235,7 +227,9 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
   // His Charizard (market $1,207) for her listed Articuno (market $1,057): ash is giving more, and the panel says so.
   await page.getByRole("button", { name: /Charizard.*#4$/ }).click();
   await expect(page.getByRole("button", { name: /Articuno.*#5$/ })).toHaveAttribute("aria-pressed", "true"); // the listed slab
-  await expect(page.getByText("Listed for sale: it is delisted if they accept")).toBeVisible();
+  // Her stated value is what she's asking for it ($900).
+  await expect(page.getByText("Listed at $900.00: it is delisted if they accept")).toBeVisible();
+  await expect(page.getByRole("button", { name: "stated $900.00" })).toBeVisible();
   await expect(page.getByTestId("trade-balance").getByTestId("trade-net")).toHaveText("−$150.00");
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
@@ -282,7 +276,7 @@ test("seeded demo: an offer on a listed slab, a counter that includes your own l
   await test2.goto("/trades");
   await test2.getByRole("link", { name: /test1/ }).first().click();
   await test2.getByRole("button", { name: "Counter" }).click();
-  await expect(test2.getByText("Listed for sale: the listing is cancelled when you send")).toBeVisible();
+  await expect(test2.getByText(/Listed at \$[\d,.]+: the listing is cancelled when you send/).first()).toBeVisible();
   await test2.getByRole("button", { name: /Alakazam.*#1$/ }).click();
   await test2.getByRole("button", { name: "Send counter-offer" }).click();
   await expect(test2.getByTestId("trade-card").last().getByTestId("trade-status")).toHaveText("Waiting for them");

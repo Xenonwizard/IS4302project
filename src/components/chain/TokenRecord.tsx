@@ -75,12 +75,6 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
         { field: "Grader", entered: m.grader, onChain: slab.grader, ok: m.grader === slab.grader },
         { field: "Cert number", entered: m.certNumber, onChain: slab.certNumber, ok: m.certNumber === slab.certNumber },
         {
-          field: "Declared value",
-          entered: usd(m.declaredValueCents / 100, { cents: true }),
-          onChain: usd(Number(slab.declaredValueCents) / 100, { cents: true }),
-          ok: m.declaredValueCents === Number(slab.declaredValueCents),
-        },
-        {
           field: "Shipping to Pokechain",
           entered:
             m.source === "already-vaulted"
@@ -111,11 +105,6 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
         { field: "name", value: meta.name, ok: meta.name === slab.title },
         { field: "Grader", value: String(attr("Grader")), ok: attr("Grader") === slab.grader },
         { field: "Cert number", value: String(attr("Cert number")), ok: attr("Cert number") === slab.certNumber },
-        {
-          field: "Declared value (USD cents)",
-          value: String(attr("Declared value (USD cents)")),
-          ok: Number(attr("Declared value (USD cents)")) === Number(slab.declaredValueCents),
-        },
         { field: "Evidence hash", value: shortHash(String(attr("Evidence hash"))), ok: attr("Evidence hash") === slab.evidenceHash },
         { field: "Custody", value: String(attr("Custody")), ok: attr("Custody") === CUSTODY[slab.custody] },
         {

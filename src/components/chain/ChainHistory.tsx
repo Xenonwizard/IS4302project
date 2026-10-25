@@ -72,7 +72,7 @@ export function ChainHistory({ address }: { address: Address }) {
         const a = log.args as Record<string, unknown>;
         const detail =
           log.eventName === "SubmissionRequested"
-            ? `NFT #${a.submissionId} minted, pending · ${a.grader} ${a.certNumber} · declared ${usd(Number(a.declaredValueCents) / 100)}`
+            ? `NFT #${a.submissionId} minted, pending · ${a.grader} ${a.certNumber}`
             : log.eventName === "SubmissionReceived"
               ? `submission #${a.submissionId} · at Pokechain's warehouse`
               : log.eventName === "SubmissionForwarded"

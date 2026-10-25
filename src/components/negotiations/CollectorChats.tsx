@@ -32,7 +32,7 @@ export function CollectorChats({ me }: { me: string }) {
         </ul>
       ) : (
         <p className="rounded-card border border-dashed border-hairline p-4 text-[13px] text-muted">
-          No other collectors on-chain yet. Open a second account with Hardhat test collector #2 (or use{" "}
+          No other collectors on-chain yet. Open a second account with the test2 wallet (or use{" "}
           <b className="text-white">Load demo traders</b> in the Chain log panel).
         </p>
       )}

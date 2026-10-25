@@ -95,7 +95,7 @@ function Form({
   // Their slabs the offer being countered already names are in escrow, so they aren't in their vault list.
   const theirPool: TradeSlab[] = useMemo(() => {
     const held = new Set(theirs.map((s) => s.tokenId));
-    const fromOffer = (counterOf?.theirSide.slabs ?? []).filter((s) => !held.has(s.tokenId)).map((s) => ({ ...s, declaredValueCents: Math.round(s.stated * 100) }));
+    const fromOffer = (counterOf?.theirSide.slabs ?? []).filter((s) => !held.has(s.tokenId)).map((s) => ({ tokenId: s.tokenId, title: s.title, image: s.image, grader: s.grader, certNumber: s.certNumber }));
     return [...theirs, ...fromOffer];
   }, [theirs, counterOf]);
 
@@ -158,7 +158,7 @@ function Form({
     <div className="space-y-4 p-5">
       <p className="text-[13px] leading-relaxed text-muted">
         Pick slabs from both vaults and add cash if you like. Count each slab at its <b className="text-white">market</b> value or the value
-        its owner <b className="text-white">stated</b> when they submitted it. The balance below shows who comes out ahead, only to you.
+        its owner <b className="text-white">stated</b> (their asking price, for a slab listed for sale; one that isn&apos;t listed counts at market). The balance below shows who comes out ahead, only to you.
       </p>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -173,7 +173,7 @@ function Form({
           onCash={setGiveCash}
           hint={`You have ${exact(cash)} in your Pokechain account`}
           empty="You have no vaulted slabs to offer. Slabs in another open offer are locked there."
-          listedNote="Listed for sale: the listing is cancelled when you send"
+          listedNote="the listing is cancelled when you send"
         />
         <Column
           title={`You get from @${them.handle}`}
@@ -186,7 +186,7 @@ function Form({
           onCash={setGetCash}
           hint="Cash they add"
           empty={`@${them.handle} has no vaulted slabs right now. You can still ask for cash.`}
-          listedNote="Listed for sale: it is delisted if they accept"
+          listedNote="it is delisted if they accept"
         />
       </div>
 
@@ -262,7 +262,7 @@ function Column({
               key={s.tokenId}
               slab={face(s)}
               selected={selected.includes(s.tokenId)}
-              note={s.listed ? listedNote : undefined}
+              note={s.listed ? `Listed at ${exact(s.listedPrice ?? 0)}: ${listedNote}` : undefined}
               onClick={() => onToggle(s.tokenId)}
               onBasis={(b) => onBasis(s.tokenId, b)}
             />

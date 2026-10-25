@@ -22,15 +22,24 @@ const SLOT_LABEL: Record<string, string> = { front: "Front", back: "Back", label
 export function EvidencePanel({ hash, compact = false }: { hash: string; compact?: boolean }) {
   const { data, error } = useQuery({
     queryKey: ["evidence", hash],
-    queryFn: async (): Promise<EvidenceResponse> => {
+    queryFn: async (): Promise<EvidenceResponse | null> => {
       const res = await fetch(`/api/evidence/${hash}`, { cache: "no-store" });
       const body = await res.json();
+      // Nothing stored is normal: demo-seeded slabs never had an intake form, and Reset clears stored photos.
+      if (res.ok && body.found === false) return null;
       if (!res.ok || !body.manifest || !body.verified) throw new Error(body.error ?? "No evidence");
       return body;
     },
   });
 
   if (error) return <p className="text-[12px] text-bad">Evidence {shortHash(hash)}: {(error as Error).message}</p>;
+  if (data === null) {
+    return (
+      <p className="text-[12px] text-muted">
+        No intake photos are stored for this slab. Demo-seeded slabs never had an intake form, and resetting the demo clears stored photos.
+      </p>
+    );
+  }
   if (!data) return <p className="text-[12px] text-dim">Checking evidence {shortHash(hash)}…</p>;
 
   const m = data.manifest;
@@ -69,7 +78,6 @@ export function EvidencePanel({ hash, compact = false }: { hash: string; compact
       )}
       {!compact ? (
         <dl className="grid gap-x-4 gap-y-1 text-[12px] sm:grid-cols-2">
-          <Row label="Declared value" value={usd(m.declaredValueCents / 100, { cents: true })} />
           <Row label="Condition" value={flags.length ? flags.join(", ") : "no damage declared"} />
           {c.notes ? <Row label="Notes" value={c.notes} /> : null}
           <Row

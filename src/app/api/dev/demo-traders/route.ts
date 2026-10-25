@@ -3,8 +3,8 @@
  *
  *   POST /api/dev/demo-traders
  *
- *   @ash    Hardhat test collector #1   3 Pikachus + 1 Charizard, $1,000 USDC in custody
- *   @misty  Hardhat test collector #2   2 Articunos + 1 Charizard-GX, $1,000 USDC in custody
+ *   @ash    test1 wallet (#1)           3 Pikachus + 1 Charizard, $1,000 USDC in custody
+ *   @misty  test2 wallet (#2)           2 Articunos + 1 Charizard-GX, $1,000 USDC in custody
  *
  * On the seeded demo chain these wallets already have accounts (test1 / test2), so they keep their own
  * handles and only get the slabs. Every slab goes through the real on-chain onboarding: requestSubmission (the NFT is minted,
@@ -23,7 +23,6 @@ const TRADERS: { handle: string; address: Address; certs: string[] }[] = [
   { handle: "misty", address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", certs: ["70000136", "70000256", "70000022"] },
 ];
 const STARTING_USD = 1_000;
-const DECLARED_CENTS = 50_000;
 
 export async function POST(request: Request) {
   if (!IS_LOCAL) return Response.json({ error: "Demo traders only exist on the local chain" }, { status: 400 });
@@ -56,7 +55,6 @@ export async function POST(request: Request) {
           {
             grader: "PSA",
             certNumber: cert,
-            declaredValueCents: DECLARED_CENTS,
             condition: { caseCracked: false, caseScratched: false, labelDamaged: false, notes: "Demo slab" },
             shipping: { method: "dropoff", carrier: "", tracking: "" },
             declarations: { owner: true, authentic: true, terms: true },
@@ -66,7 +64,7 @@ export async function POST(request: Request) {
           [],
         );
         if ("error" in evidence) throw new Error(evidence.error);
-        const receipt = await send("slabVault", "requestSubmission", ["PSA", cert, BigInt(DECLARED_CENTS), evidence.evidenceHash, "Drop-off", ""]);
+        const receipt = await send("slabVault", "requestSubmission", ["PSA", cert, evidence.evidenceHash, "Drop-off", ""]);
         if (receipt.status !== "success") throw new Error(`requestSubmission for ${cert} reverted`);
         const id = await publicClient.readContract({ ...contracts.slabVault, functionName: "tokenOfCert", args: [key] });
         await receiveSubmission(id);

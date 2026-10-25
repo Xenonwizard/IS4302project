@@ -19,8 +19,8 @@ interface IAccountStatus {
  *         while CC's NFT stays locked in the escrow.
  *
  *  Onboarding a slab: the NFT exists from the moment it is posted
- *   1. `requestSubmission`  the collector declares grader + cert, a declared value, the hash
- *                           of their intake evidence and the inbound tracking number. The NFT
+ *   1. `requestSubmission`  the collector declares grader + cert, the hash of their intake
+ *                           evidence and the inbound tracking number. The NFT
  *                           is minted to them at once (token id = submission id), locked, with
  *                           custody PostedToPokechain, so a parcel lost in the post is already
  *                           a token that can be reported and traced.
@@ -91,9 +91,8 @@ contract SlabVault is ERC721, AccessControl {
         bytes32 shippingHash;
         /// Collector Crypt's redemption id for the outbound shipment.
         string redemptionRef;
-        /// Carried over from the submission: the owner's declared value (USD cents) and the
-        /// keccak256 of their intake evidence manifest (photos + condition report).
-        uint64 declaredValueCents;
+        /// Carried over from the submission: the keccak256 of the owner's intake evidence manifest
+        /// (photos + condition report).
         bytes32 evidenceHash;
         string carrier;
         string trackingNumber;
@@ -107,8 +106,6 @@ contract SlabVault is ERC721, AccessControl {
         SubmissionStatus status;
         uint256 tokenId;
         uint64 requestedAt;
-        /// Declared value for insurance, in USD cents.
-        uint64 declaredValueCents;
         /// keccak256 of the evidence manifest: the intake photos' hashes, condition notes and
         /// declarations. The photos stay off-chain; this proves later exactly what was declared.
         bytes32 evidenceHash;
@@ -150,7 +147,6 @@ contract SlabVault is ERC721, AccessControl {
         address indexed owner,
         string grader,
         string certNumber,
-        uint64 declaredValueCents,
         bytes32 evidenceHash,
         string inboundTracking
     );
@@ -208,7 +204,6 @@ contract SlabVault is ERC721, AccessControl {
 
     /**
      * @notice Step 1: the collector declares a slab they are sending to Pokechain.
-     * @param declaredValueCents value declared for insurance, in USD cents
      * @param evidenceHash keccak256 of the intake evidence manifest (photo hashes, condition, declarations)
      * @param inboundCarrier carrier of the parcel to Pokechain (may be empty if dropped off)
      * @param inboundTracking its tracking number (may be empty if dropped off)
@@ -216,13 +211,12 @@ contract SlabVault is ERC721, AccessControl {
     function requestSubmission(
         string calldata grader,
         string calldata certNumber,
-        uint64 declaredValueCents,
         bytes32 evidenceHash,
         string calldata inboundCarrier,
         string calldata inboundTracking
     ) external returns (uint256 submissionId) {
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
-        if (bytes(grader).length == 0 || bytes(certNumber).length == 0 || declaredValueCents == 0) revert EmptyField();
+        if (bytes(grader).length == 0 || bytes(certNumber).length == 0) revert EmptyField();
         if (evidenceHash == bytes32(0)) revert MissingEvidence();
         bytes32 key = certKey(grader, certNumber);
         if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
@@ -235,7 +229,6 @@ contract SlabVault is ERC721, AccessControl {
         s.certNumber = certNumber;
         s.status = SubmissionStatus.Pending;
         s.requestedAt = uint64(block.timestamp);
-        s.declaredValueCents = declaredValueCents;
         s.evidenceHash = evidenceHash;
         s.inboundCarrier = inboundCarrier;
         s.inboundTracking = inboundTracking;
@@ -244,7 +237,7 @@ contract SlabVault is ERC721, AccessControl {
 
         _mintPending(submissionId);
         emit SubmissionRequested(
-            submissionId, msg.sender, grader, certNumber, declaredValueCents, evidenceHash, inboundTracking
+            submissionId, msg.sender, grader, certNumber, evidenceHash, inboundTracking
         );
     }
 
@@ -339,7 +332,6 @@ contract SlabVault is ERC721, AccessControl {
         string title;
         string image;
         string custodianRef;
-        uint64 declaredValueCents;
         bytes32 evidenceHash;
     }
 
@@ -350,7 +342,7 @@ contract SlabVault is ERC721, AccessControl {
      */
     function seedSlab(SeedParams calldata p) external onlyRole(OPERATOR_ROLE) returns (uint256 tokenId) {
         if (!accounts.isActive(p.recipient)) revert AccountNotActive(p.recipient);
-        if (bytes(p.custodianRef).length == 0 || p.declaredValueCents == 0) revert EmptyField();
+        if (bytes(p.custodianRef).length == 0) revert EmptyField();
         bytes32 key = certKey(p.grader, p.certNumber);
         if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
 
@@ -364,7 +356,6 @@ contract SlabVault is ERC721, AccessControl {
         sub.status = SubmissionStatus.Vaulted;
         sub.requestedAt = uint64(block.timestamp);
         sub.updatedAt = uint64(block.timestamp);
-        sub.declaredValueCents = p.declaredValueCents;
         sub.evidenceHash = p.evidenceHash;
         sub.tokenId = tokenId;
 
@@ -374,7 +365,6 @@ contract SlabVault is ERC721, AccessControl {
         slab.title = p.title;
         slab.image = p.image;
         slab.custodianRef = p.custodianRef;
-        slab.declaredValueCents = p.declaredValueCents;
         slab.evidenceHash = p.evidenceHash;
         slab.mintedAt = uint64(block.timestamp);
         _setCustody(tokenId, Custody.Vaulted);
@@ -526,9 +516,7 @@ contract SlabVault is ERC721, AccessControl {
         bytes memory tail = abi.encodePacked(
             '"},{"trait_type":"Collector Crypt NFT (Solana)","value":"', s.custodianRef,
             '"},{"trait_type":"Custody","value":"', _custodyName(s.custody),
-            '"},{"trait_type":"Declared value (USD cents)","display_type":"number","value":',
-            uint256(s.declaredValueCents).toString(),
-            '},{"trait_type":"Evidence hash","value":"', uint256(s.evidenceHash).toHexString(32),
+            '"},{"trait_type":"Evidence hash","value":"', uint256(s.evidenceHash).toHexString(32),
             '"}]}'
         );
         return string.concat("data:application/json;base64,", Base64.encode(bytes.concat(head, tail)));
@@ -583,13 +571,12 @@ contract SlabVault is ERC721, AccessControl {
         return super._update(to, tokenId, auth);
     }
 
-    /// @dev The NFT, minted at submission from what was declared: locked (custody isn't Vaulted), not counted as vaulted yet.
+    /// @dev The NFT, minted at submission from what was submitted: locked (custody isn't Vaulted), not counted as vaulted yet.
     function _mintPending(uint256 tokenId) private {
         Submission storage sub = _submissions[tokenId];
         Slab storage slab = _slabs[tokenId];
         slab.grader = sub.grader;
         slab.certNumber = sub.certNumber;
-        slab.declaredValueCents = sub.declaredValueCents;
         slab.evidenceHash = sub.evidenceHash;
         slab.carrier = sub.inboundCarrier;
         slab.trackingNumber = sub.inboundTracking;
