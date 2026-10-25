@@ -332,6 +332,58 @@ contract SlabVault is ERC721, AccessControl {
         emit SlabVaulted(tokenId, owner, s.certNumber, custodianRef);
     }
 
+    struct SeedParams {
+        address recipient;
+        string grader;
+        string certNumber;
+        string title;
+        string image;
+        string custodianRef;
+        uint64 declaredValueCents;
+        bytes32 evidenceHash;
+    }
+
+    /**
+     * @notice Seeds an initial vaulted slab directly to an active collector account, as if it had been
+     *         submitted, received, forwarded and vaulted already (so it has a submission record too).
+     * @dev Only callable by the operator role, for platform initialisation and demo data.
+     */
+    function seedSlab(SeedParams calldata p) external onlyRole(OPERATOR_ROLE) returns (uint256 tokenId) {
+        if (!accounts.isActive(p.recipient)) revert AccountNotActive(p.recipient);
+        if (bytes(p.custodianRef).length == 0 || p.declaredValueCents == 0) revert EmptyField();
+        bytes32 key = certKey(p.grader, p.certNumber);
+        if (tokenOfCert[key] != 0) revert CertAlreadyTokenised(tokenOfCert[key]);
+
+        tokenId = nextTokenId++;
+        tokenOfCert[key] = tokenId;
+
+        Submission storage sub = _submissions[tokenId];
+        sub.owner = p.recipient;
+        sub.grader = p.grader;
+        sub.certNumber = p.certNumber;
+        sub.status = SubmissionStatus.Vaulted;
+        sub.requestedAt = uint64(block.timestamp);
+        sub.updatedAt = uint64(block.timestamp);
+        sub.declaredValueCents = p.declaredValueCents;
+        sub.evidenceHash = p.evidenceHash;
+        sub.tokenId = tokenId;
+
+        Slab storage slab = _slabs[tokenId];
+        slab.grader = p.grader;
+        slab.certNumber = p.certNumber;
+        slab.title = p.title;
+        slab.image = p.image;
+        slab.custodianRef = p.custodianRef;
+        slab.declaredValueCents = p.declaredValueCents;
+        slab.evidenceHash = p.evidenceHash;
+        slab.mintedAt = uint64(block.timestamp);
+        _setCustody(tokenId, Custody.Vaulted);
+
+        _safeMint(p.recipient, tokenId);
+        vaultedCount[p.recipient] += 1;
+        emit SlabVaulted(tokenId, p.recipient, p.certNumber, p.custodianRef);
+    }
+
     /// @notice Refuses a submission at any open stage. The token stays (marked Rejected) as the record; the cert is freed.
     function rejectSubmission(uint256 submissionId, string calldata reason) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _submissions[submissionId];

@@ -10,7 +10,16 @@ import { Empty, LoginPrompt } from "./shared";
 
 /** Slabs the user hearted, to keep an eye on. */
 export function WatchlistView() {
-  const { user, watchlist, resolve } = useStore();
+  const { user, ready, watchlist, resolve } = useStore();
+
+  if (!ready) {
+    return (
+      <div className="space-y-4 px-4 py-5 lg:px-6">
+        <div className="skeleton h-10 w-48 rounded-xl" />
+        <div className="skeleton h-32 w-full rounded-2xl" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (

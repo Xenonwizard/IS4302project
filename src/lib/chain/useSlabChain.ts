@@ -27,7 +27,8 @@ import { useCallback } from "react";
 import { keccak256, parseEventLogs, toBytes, type Address } from "viem";
 import type { CheckStep } from "../collectorCrypt/client";
 import type { Grader } from "../types";
-import { contracts } from "./config";
+import { usePublicClient } from "wagmi";
+import { contracts, CUSTODY } from "./config";
 import { useChainLog } from "./log";
 import type { LostOutcome, OperatorTx } from "./operator";
 import { useChainTx } from "./useChainTx";
@@ -38,6 +39,7 @@ export type MintOutcome =
 
 export function useSlabChain() {
   const { send, operator, address } = useChainTx();
+  const client = usePublicClient();
   const log = useChainLog();
   const queryClient = useQueryClient();
 
@@ -154,12 +156,35 @@ export function useSlabChain() {
   const redeem = useCallback(
     async (tokenId: string, shipTo: string) => {
       const shippingHash = keccak256(toBytes(shipTo.trim()));
-      const receipt = await send({
-        contract: "slabVault",
-        functionName: "requestRedemption",
-        args: [BigInt(tokenId), shippingHash],
-        label: "Withdraw slab",
-      });
+      let requestTx = "";
+
+      // Check current on-chain custody state
+      if (client) {
+        const slab = await client.readContract({
+          ...contracts.slabVault,
+          functionName: "slabOf",
+          args: [BigInt(tokenId)],
+        });
+
+        if (CUSTODY[slab.custody] === "Vaulted") {
+          const receipt = await send({
+            contract: "slabVault",
+            functionName: "requestRedemption",
+            args: [BigInt(tokenId), shippingHash],
+            label: "Withdraw slab",
+          });
+          requestTx = receipt.transactionHash;
+        }
+      } else {
+        const receipt = await send({
+          contract: "slabVault",
+          functionName: "requestRedemption",
+          args: [BigInt(tokenId), shippingHash],
+          label: "Withdraw slab",
+        });
+        requestTx = receipt.transactionHash;
+      }
+
       const shipped = await operator<{
         redemptionRef: string;
         carrier: string;
@@ -167,9 +192,9 @@ export function useSlabChain() {
         tx: OperatorTx;
         checks: CheckStep[];
       }>("Collector Crypt ships to you", "/api/chain/ship", { tokenId, shipTo: shipTo.trim() });
-      return { shippingHash, requestTx: receipt.transactionHash, ...shipped };
+      return { shippingHash, requestTx, ...shipped };
     },
-    [send, operator],
+    [client, send, operator],
   );
 
   const confirmDelivery = useCallback(

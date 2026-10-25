@@ -19,10 +19,13 @@ import {
 const exact = (n: number) => usd(n, { cents: true });
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
-/** "2023 Pokémon 151 #173/165 Pikachu - Illustration Rare (PSA 9 MINT)" → "Pikachu" */
+/**
+ * "2023 Pokémon 151 #173/165 Pikachu - Illustration Rare (PSA 9 MINT)" → "Pikachu";
+ * "2002 Pokémon Neo Destiny #106/105 Shining Celebi (PSA 9 MINT)" → "Shining Celebi"
+ */
 export function cardName(title?: string) {
   if (!title) return undefined;
-  return title.match(/#\S+\s+(.+?)\s+-\s/)?.[1] ?? title;
+  return title.match(/#\S+\s+(.+?)(?:\s+-\s|\s+\()/)?.[1] ?? title;
 }
 
 export interface SlabFace extends ValuedSlab {

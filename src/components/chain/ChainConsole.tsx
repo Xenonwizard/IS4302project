@@ -30,7 +30,7 @@ function useDemoTraders() {
   const [loading, setLoading] = useState(false);
   const load = async () => {
     setLoading(true);
-    const id = log.add({ kind: "operator", label: "Load demo traders", call: "POST /api/dev/demo-traders", args: ["@ash", "@misty"], status: "pending" });
+    const id = log.add({ kind: "operator", label: "Load demo traders", call: "POST /api/dev/demo-traders", args: ["test collector #1", "test collector #2"], status: "pending" });
     try {
       const res = await fetch("/api/dev/demo-traders", { method: "POST" });
       const body = (await res.json()) as { done?: string[]; error?: string };
@@ -38,7 +38,7 @@ function useDemoTraders() {
       log.update(id, { status: "success", args: body.done?.length ? body.done : ["Already loaded"] });
       pushToast({
         title: "Demo traders ready",
-        body: "Log in with Hardhat test collector #1 for @ash or #2 for @misty, then open Negotiation rooms.",
+        body: "Log in with Hardhat test collector #1 or #2, then open Negotiation rooms to chat and trade.",
         tone: "success",
       });
       void queryClient.invalidateQueries();

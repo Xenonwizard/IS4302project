@@ -3,7 +3,7 @@ import { createPublicClient, http } from "viem";
 import { hardhat } from "viem/chains";
 import { deployments, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect, test } from "./fixtures";
-import { ASH, MISTY, custodyDollars, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, resetDemo } from "./helpers";
+import { ASH, MISTY, TEST1, TEST2, custodyDollars, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, resetDemo, resetSeeded } from "./helpers";
 
 // One test per role's main job, against the real app and local chain. Each test starts from a
 // freshly reset chain and a fresh browser (empty localStorage).
@@ -251,6 +251,33 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
   expect(await isListed(5)).toBe(false);
   expect(await ownerOf(4)).toBe(MISTY);
   expect(await ownerOf(5)).toBe(ASH);
+});
+
+test("seeded demo: test1 and test2 swap their seeded slabs in a chat", async ({ page, browser, request }) => {
+  // What `npm run chain` and the Reset button give you: accounts, slabs and listings already on-chain.
+  await resetSeeded(request);
+  await logIn(page, 1, "test1");
+  await page.goto("/trades");
+  await page.getByRole("button", { name: "Chat with @test2" }).click();
+  await page.getByRole("button", { name: "Make a trade offer" }).click();
+  // test1's Alakazam is listed for sale, so it can't be locked in an offer; the Charizard can.
+  await expect(page.getByText("Listed for sale: cancel the listing first")).toBeVisible();
+  await page.getByRole("button", { name: /Charizard.*#2$/ }).click();
+  await page.getByRole("button", { name: /Shining Celebi.*#4$/ }).click();
+  await expect(page.getByTestId("trade-verdict")).toBeVisible();
+  await page.getByRole("button", { name: "Send offer" }).click();
+  await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
+
+  const other = await browser.newContext();
+  const test2 = await other.newPage();
+  await logIn(test2, 2, "test2");
+  await test2.goto("/trades");
+  await test2.getByRole("link", { name: /test1/ }).first().click();
+  await test2.getByRole("button", { name: "Accept trade" }).click();
+  await expect(test2.getByTestId("trade-status")).toHaveText("Accepted");
+  await other.close();
+  expect(await ownerOf(2)).toBe(TEST2);
+  expect(await ownerOf(4)).toBe(TEST1);
 });
 
 test("Collector Crypt: reads the forwarded parcel; the chain only holds ciphertext", async ({ page, request }) => {

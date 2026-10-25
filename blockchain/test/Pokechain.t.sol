@@ -331,6 +331,29 @@ contract PokechainTest is Test {
         vault.confirmVaulted(sid, "x", "y", "z");
     }
 
+    function test_SeedSlab() public {
+        _register(alice, "alice");
+        vm.prank(operator);
+        uint256 tokenId = vault.seedSlab(
+            SlabVault.SeedParams({
+                recipient: alice,
+                grader: "PSA",
+                certNumber: "88889999",
+                title: "Charizard",
+                image: "img",
+                custodianRef: "cc-nft",
+                declaredValueCents: 500_000,
+                evidenceHash: EVIDENCE
+            })
+        );
+        assertEq(tokenId, 1);
+        assertEq(vault.ownerOf(1), alice);
+        SlabVault.Slab memory slab = vault.slabOf(1);
+        assertEq(slab.title, "Charizard");
+        assertEq(slab.declaredValueCents, 500_000);
+        assertEq(uint256(slab.custody), uint256(SlabVault.Custody.Vaulted));
+    }
+
     function test_SubmissionNeedsEvidenceAndValue() public {
         _register(alice, "alice");
         vm.startPrank(alice);

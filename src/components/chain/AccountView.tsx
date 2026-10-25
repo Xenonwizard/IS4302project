@@ -17,8 +17,17 @@ import { Fn, OnChainNote } from "./ui";
 
 /** /account: the on-chain account record, offboarding (close account) and the event history. */
 export function AccountView() {
-  const { user, setAuthOpen } = useStore();
+  const { user, ready, setAuthOpen } = useStore();
   const acct = useOnchainAccount();
+
+  if (!ready) {
+    return (
+      <div className="mx-auto max-w-xl space-y-4 px-4 py-10">
+        <div className="skeleton h-10 w-48 rounded-xl" />
+        <div className="skeleton h-32 w-full rounded-2xl" />
+      </div>
+    );
+  }
 
   if (!user) {
     return <LoginPrompt icon={<UserRound size={26} />} title="Account" body="Connect a wallet to see your on-chain account." />;

@@ -11,7 +11,7 @@ import { AssetDetail } from "./AssetDetail";
  */
 export function StoredSlab({ id }: { id: string }) {
   const { ready, slabs } = useStore();
-  const listing = slabs.find((s) => s.id === id);
+  const listing = slabs.find((s) => s.id === id || s.tokenId === id || s.id === `token-${id}`);
 
   if (!ready) {
     return (

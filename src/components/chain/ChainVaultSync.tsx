@@ -34,11 +34,11 @@ export function ChainVaultSync() {
   const enabled = Boolean(ready && client && address && user?.address?.toLowerCase() === addrLower);
   const queryClient = useQueryClient();
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", addrLower] });
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", args: { seller: address }, enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", args: { seller: address }, enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", args: { seller: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", args: { seller: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
 
   // Tokens the Vault already lists: keep ref updated to avoid re-triggering queryKey
   const knownIds = vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])).sort().join(",");
@@ -50,7 +50,9 @@ export function ChainVaultSync() {
   const { data } = useQuery({
     queryKey: ["owned-slabs", addrLower],
     enabled,
-    refetchInterval: 5000,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<{ owned: ChainSlab[]; ownedByOthers: string[] }> => {
       const vaultCode = await client!.getBytecode({ address: contracts.slabVault.address }).catch(() => null);
       if (!vaultCode || vaultCode === "0x") return { owned: [], ownedByOthers: [] };
@@ -110,6 +112,8 @@ export function ChainVaultSync() {
               declaredValueCents: Number(s.declaredValueCents),
               evidenceHash: s.evidenceHash,
             },
+            title: s.title,
+            image: s.image,
             grader: s.grader as Grader,
             certNumber: s.certNumber,
             custody: CUSTODY[s.custody],

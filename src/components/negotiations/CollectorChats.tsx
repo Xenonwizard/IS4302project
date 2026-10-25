@@ -47,8 +47,7 @@ function CollectorRow({ address, handle }: { address: Address; handle: string })
 
   const start = () => {
     // The chat hangs on one of their slabs; a trade in it can ask for any of them.
-    const anchor = slabs[0] ? anchorListing(slabs[0], handle, address) : null;
-    const id = anchor ? openChat(anchor) : null;
+    const id = slabs[0] ? openChat(anchorListing(slabs[0], handle, address)) : null;
     if (id) router.push(`/trades/${id}`);
   };
 

@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { contracts, fromUsdcUnits, IS_DEPLOYED, shortHash } from "@/lib/chain/config";
-import { makeSubmittedListing } from "@/lib/catalog";
+import { buildOnChainListing } from "@/lib/catalog";
 import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
 
@@ -24,14 +24,37 @@ export function ChainMarketSync() {
     void queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
   };
 
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, onLogs: refresh });
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardListed",
+    enabled,
+    poll: true,
+    pollingInterval: 1000,
+    onLogs: refresh,
+  });
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "ListingCancelled",
+    enabled,
+    poll: true,
+    pollingInterval: 1000,
+    onLogs: refresh,
+  });
+  useWatchContractEvent({
+    ...contracts.slabMarket,
+    eventName: "CardPurchased",
+    enabled,
+    poll: true,
+    pollingInterval: 1000,
+    onLogs: refresh,
+  });
 
   const { data } = useQuery({
     queryKey: ["market-active-listings"],
     enabled,
-    refetchInterval: 5000,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
     queryFn: async () => {
       if (!client) return [];
@@ -140,60 +163,21 @@ export function ChainMarketSync() {
           const price = fromUsdcUnits(item.price);
           const nowMs = Number(item.listedAt) * 1000 || Date.now();
 
-          const made = makeSubmittedListing({
+          const listing = buildOnChainListing({
+            tokenId: item.tokenId.toString(),
+            title: item.title,
+            image: item.image,
             grader: item.grader as Grader,
             certNumber: item.certNumber,
-            owner: sellerName,
-            nowMs,
-          });
-
-          const baseListing: Listing = made ?? {
-            id: `token-${item.tokenId}`,
-            title: item.title || `Vaulted Slab #${item.tokenId}`,
-            shortName: item.title || `Slab #${item.tokenId}`,
-            year: new Date().getFullYear(),
-            set: "Pokéchain Vault",
-            series: "Modern",
-            cardNumber: `#${item.tokenId}`,
-            subject: item.title || "Card",
-            grader: item.grader as Grader,
-            grade: 10,
-            gradeLabel: "GEM MT 10",
-            language: "English",
-            variant: "Holo",
             price,
-            fmv: price,
-            confidence: "High",
             owner: sellerName,
             ownerAddress: item.seller,
-            certNumber: item.certNumber,
             listedAt: new Date(nowMs).toISOString(),
-            endsAt: new Date(nowMs + 7 * 86400000).toISOString(),
-            likes: 0,
-            offers: [],
-            sales: [],
-            activity: [],
-            comments: [],
-            tokenId: item.tokenId.toString(),
             contract: contracts.slabVault.address,
-            chain: "Polygon",
-            note: `Listed on Pokéchain marketplace by ${sellerName}.`,
-            image: item.image || "",
-            thumb: item.image || "",
-            holo: true,
-            hue: 200,
-          };
+          });
 
           results.push({
-            listing: {
-              ...baseListing,
-              price,
-              owner: sellerName,
-              ownerAddress: item.seller,
-              tokenId: item.tokenId.toString(),
-              contract: contracts.slabVault.address,
-              listedAt: new Date(nowMs).toISOString(),
-            },
+            listing,
             price,
             seller: sellerName,
           });

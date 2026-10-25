@@ -1,22 +1,20 @@
-import { makeSubmittedListing } from "../catalog";
+import { buildOnChainListing, marketValueFor } from "../catalog";
 import type { ChatTradeSlab, Grader, Listing } from "../types";
 import type { ValueBasis } from "../valuation";
 import { contracts } from "./config";
 import type { TradeSlab } from "./trades";
 
 /**
- * Market value of a tokenised slab: the marketplace's own estimate for that card and grade, the same one
- * the submit form shows before a slab is sent in. It comes from the cert, so both collectors in a
- * chat compute the same number. If the cert isn't in the registry, the stated value stands in.
+ * Market value of a tokenised slab, from the catalogue's graded pricing (see marketValueFor). Both collectors in
+ * a chat compute the same number. If the card isn't in the catalogue, the stated value stands in.
  */
 const marketCache = new Map<string, number>();
 
-export function marketValueOf(slab: Pick<TradeSlab, "grader" | "certNumber" | "declaredValueCents">): number {
-  const key = `${slab.grader}:${slab.certNumber}`;
+export function marketValueOf(slab: { grader: string; certNumber: string; title?: string; image?: string; declaredValueCents: number }): number {
+  const key = `${slab.grader}:${slab.certNumber}:${slab.image ?? ""}`;
   let value = marketCache.get(key);
   if (value === undefined) {
-    const made = makeSubmittedListing({ grader: slab.grader as Grader, certNumber: slab.certNumber, owner: "-", nowMs: 0 });
-    value = made?.fmv ?? slab.declaredValueCents / 100;
+    value = marketValueFor({ ...slab, grader: slab.grader as Grader }) ?? slab.declaredValueCents / 100;
     marketCache.set(key, value);
   }
   return value;
@@ -37,18 +35,20 @@ export function valuedSlab(slab: TradeSlab, basis: ValueBasis = "market"): ChatT
 }
 
 /**
- * The listing a chat about someone else's slab hangs on. Like every tokenised slab, its value is the
- * owner's declared value from the chain; the chat computes the market value next to it.
+ * The listing a chat about someone else's slab hangs on: the on-chain listing for the token (title,
+ * image and declared value straight from SlabVault, id `token-<id>`), the same one their Vault and the
+ * marketplace use, so both sides of the chat point at the same slab.
  */
-export function anchorListing(slab: TradeSlab, ownerHandle: string, ownerAddress: string): Listing | null {
-  const made = makeSubmittedListing({ grader: slab.grader as Grader, certNumber: slab.certNumber, owner: ownerHandle, nowMs: Date.now() });
-  if (!made) return null;
-  const stated = slab.declaredValueCents / 100;
-  return {
-    ...made,
+export function anchorListing(slab: TradeSlab, ownerHandle: string, ownerAddress: string): Listing {
+  return buildOnChainListing({
     tokenId: slab.tokenId,
-    contract: contracts.slabVault.address,
+    title: slab.title,
+    image: slab.image,
+    grader: slab.grader as Grader,
+    certNumber: slab.certNumber,
+    declaredValueCents: slab.declaredValueCents,
+    owner: ownerHandle,
     ownerAddress,
-    ...(stated > 0 ? { price: stated, fmv: stated } : {}),
-  };
+    contract: contracts.slabVault.address,
+  });
 }

@@ -12,6 +12,7 @@ import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useEscrowedByMe } from "@/lib/chain/trades";
 import { useStore } from "@/lib/store";
+import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import type { Listing, VaultItem } from "@/lib/types";
 import { PendingSubmissions } from "../chain/PendingSubmissions";
@@ -36,6 +37,7 @@ export function VaultView() {
   const params = useSearchParams();
   const {
     user,
+    ready,
     vault,
     delist,
     requestShipping,
@@ -73,12 +75,13 @@ export function VaultView() {
   const allItems = useMemo(
     () =>
       vault
+        .filter((v) => !IS_DEPLOYED || !user?.address || Boolean(v.token))
         .map((v) => {
           const listing = getListing(v.listingId);
           return listing ? { entry: v, listing: resolve(listing) } : null;
         })
         .filter((x): x is { entry: VaultItem; listing: Listing } => Boolean(x)),
-    [vault, resolve],
+    [vault, resolve, user?.address],
   );
   // Withdrawn slabs have left the vault but keep their token, so they get their own tab.
   const items = allItems.filter((i) => i.entry.status !== "Withdrawn");
@@ -93,6 +96,16 @@ export function VaultView() {
     unlisted: unlisted.length,
     withdrawn: withdrawn.length,
   };
+
+  if (!ready) {
+    return (
+      <div className="space-y-6 px-4 py-6 lg:px-6">
+        <div className="skeleton h-10 w-48 rounded-xl" />
+        <div className="skeleton h-24 w-full rounded-2xl" />
+        <div className="skeleton h-[400px] w-full rounded-card" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (

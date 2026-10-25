@@ -73,6 +73,7 @@ export interface Listing {
   tokenId: string;
   contract: string;
   ownerAddress: string;
+  isListed?: boolean;
   chain: "Polygon";
   note: string;
   /** hi-res card scan and a small one for thumbnails */

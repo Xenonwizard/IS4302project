@@ -28,17 +28,19 @@ export function HomeLiveActivity() {
     void queryClient.invalidateQueries({ queryKey: ["home-live-onchain-activity"] });
   };
 
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "SlabVaulted", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", enabled, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "RedemptionRequested", enabled, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "SlabVaulted", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
+  useWatchContractEvent({ ...contracts.slabVault, eventName: "RedemptionRequested", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
 
   const { data: events = [] } = useQuery({
     queryKey: ["home-live-onchain-activity"],
     enabled,
-    refetchInterval: 8000,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<OnChainEventRow[]> => {
       if (!client) return [];
       const from = { fromBlock: DEPLOY_BLOCK };

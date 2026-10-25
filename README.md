@@ -41,15 +41,20 @@ npm run chain     # terminal 1: local blockchain + deploys the contracts. Leave 
 npm run dev       # terminal 2: the app
 ```
 
-Then open http://localhost:3000, click **Sign up**, **Connect wallet**, pick **Hardhat test
-collector #1** (no MetaMask needed), choose a handle and **Open account**.
+`npm run chain` deploys the contracts and then **seeds a demo** (`blockchain/scripts/seed.mjs`): five
+accounts with vaulted slabs, 10 of them listed on the marketplace. Hardhat test collector **#1 is @test1**
+and **#2 is @test2** (the ones you can log in as, no MetaMask needed); @ash, @misty and @brock own the rest.
 
-To try a trade straight away: **Chain log** (bottom left) → **Load demo traders**. That opens **@ash**
-(test collector #1: 3 Pikachus + a Charizard) and **@misty** (#2: 2 Articunos + a Charizard-GX), $1,000
-each, all through the real contracts. **Log in** with collector #1 → **Negotiation rooms** → **Chat** next to
-**@misty** → type a message → **Make a trade offer**: pick slabs from both vaults, add cash, and choose for each
-slab whether it counts at its **market** or **stated** value. The balance panel shows who comes out ahead.
-Then sign out, log in with #2, open the chat, and **Accept**, **Counter** or **Decline**.
+To try a trade: open http://localhost:3000 → **Log in** → **Connect wallet** → **Hardhat test collector
+#1** → **Negotiation rooms** → **Chat** next to **@test2** → type a message → **Make a trade offer**. Pick
+slabs from both vaults, add cash, and choose for each slab whether it counts at its **market** or
+**stated** value; the balance panel shows who comes out ahead. Then sign out, log in with #2, open the
+chat, and **Accept**, **Counter** or **Decline**. (Cash in a trade comes from your Pokechain account:
+deposit some in **Wallet** first. A slab you have listed for sale can't go into an offer until you
+cancel the listing.)
+
+**Chain log** (bottom left) → **Reset chain + demo data** puts the seeded demo back. To sign up a new
+account instead, use MetaMask or reset to an empty chain with `curl -X POST "localhost:3000/api/dev/reset?clean=1"`.
 `docs/postman/` has the Postman collection that plays Pokechain's warehouse, Collector Crypt and the
 carrier. The dev server needs internet access to fetch card images. (`./dev.sh` is a macOS helper that
 pins Homebrew's Node; you don't need it.)
@@ -66,10 +71,10 @@ npm run test:unit
 npm run test:smoke
 ```
 
-`contracts:test` runs the Solidity unit and fuzz tests (67, including trade cash conservation);
+`contracts:test` runs the Solidity unit and fuzz tests (68, including trade cash conservation);
 `test:unit` checks the encryption round-trip; `test:smoke` clicks through each role in Chrome, including
-a lost parcel and a two-browser trade (it starts the chain and the app if they aren't running, and
-resets the demo first).
+a lost parcel and two-browser trades in a chat (it starts the chain and the app if they aren't running,
+and resets to an empty chain first, except the seeded-demo test). `test:unit` also checks the trade balance maths.
 
 ### Who uses it
 
@@ -91,7 +96,7 @@ card and grade (seeded from the Pokémon TCG price data, not a live feed), and t
 the browser: the contract moves whatever the offer names.
 **Simulated (labelled in the UI):** Collector Crypt's API and Solana NFTs (mock routes with the real
 Solana DAS request shapes), the carrier (including "parcel found"), Pokechain's warehouse actions (the
-operator buttons), the demo traders' seed, and the Hardhat test wallets that stand in for MetaMask locally.
+operator buttons), the seeded demo accounts and slabs (`seedSlab`, operator-only), and the Hardhat test wallets that stand in for MetaMask locally.
 
 ### Can't sign up or log in?
 
@@ -104,7 +109,7 @@ operator buttons), the demo traders' seed, and the Hardhat test wallets that sta
 | `npm run chain` says *Cannot find module* / *hardhat: not found* | `blockchain/` dependencies not installed | `npm run setup` |
 | *Something is already listening on 8545* | An old chain is still running | Close the other terminal (or the process on port 8545) and run `npm run chain` again |
 | Signed in on an old session, odd balances, or slabs that don't exist | Browser data from an earlier chain | Chain log panel → **Reset chain + demo data**, or use a private window |
-| *Load demo traders* says the handle is taken, or you can't sign up with collector #1 | Collector #1 is already **@ash** (demo traders loaded) | Use **Log in** with collector #1 instead of Sign up, or reset the chain first |
+| You can't **Sign up** with collector #1 or #2 (*already has an active account*) | The seeded demo already opened them as **@test1** / **@test2** | Use **Log in** instead, or reset to an empty chain: `curl -X POST "localhost:3000/api/dev/reset?clean=1"` |
 | A trade offer won't send: *"isn't in the vault"* or *"isn't owned by that collector"* | The slab is still pending, withdrawn, or locked in another open offer | Pick another slab, or withdraw the other offer in its chat first |
 | One of *your* slabs is greyed out in the trade builder: *"Listed for sale"* | A slab listed on the marketplace can't be locked in an offer | Cancel the listing in the Vault first (their listed slabs can still be asked for) |
 | MetaMask: wrong network, or transactions stuck | MetaMask isn't on the local chain, or remembers an old one | Use **Hardhat test collector #1**; or in MetaMask approve *Add network* (127.0.0.1:8545, chain 31337) and Settings → Advanced → **Clear activity tab data** |

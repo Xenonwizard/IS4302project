@@ -7,11 +7,20 @@ import { expect } from "./fixtures";
 
 const local = deployments["31337"];
 
-/** Back to "contracts just deployed", the same call the Reset chain + demo data button makes. */
+/** Back to "contracts just deployed", without the seeded demo data (the Reset button re-seeds it). */
 export async function resetDemo(request: APIRequestContext) {
+  const res = await request.post("/api/dev/reset?clean=1");
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** Back to the seeded demo: test1 / test2 (wallets #1 / #2), ash, misty, brock, their slabs and listings. */
+export async function resetSeeded(request: APIRequestContext) {
   const res = await request.post("/api/dev/reset");
   expect(res.ok(), await res.text()).toBeTruthy();
 }
+
+export const TEST1: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+export const TEST2: Address = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 
 /** Opens @ash (test collector #1) and @misty (#2) with vaulted slabs and $1,000 each, on-chain. */
 export async function loadDemoTraders(request: APIRequestContext) {

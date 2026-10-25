@@ -6,7 +6,8 @@
  *   @ash    Hardhat test collector #1   3 Pikachus + 1 Charizard, $1,000 USDC in custody
  *   @misty  Hardhat test collector #2   2 Articunos + 1 Charizard-GX, $1,000 USDC in custody
  *
- * Every slab goes through the real on-chain onboarding: requestSubmission (the NFT is minted,
+ * On the seeded demo chain these wallets already have accounts (test1 / test2), so they keep their own
+ * handles and only get the slabs. Every slab goes through the real on-chain onboarding: requestSubmission (the NFT is minted,
  * pending), markReceived, markForwarded (encrypted to Collector Crypt), Collector Crypt's mock
  * intake, then the Solana check and confirmVaulted. Running it twice only fills in what's missing.
  */
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
         await send("accounts", "deposit", [amount]);
         done.push(`@${t.handle} opened with $${STARTING_USD}`);
       }
+      const handle = (await publicClient.readContract({ ...contracts.accounts, functionName: "accountOf", args: [t.address] })).handle;
 
       for (const cert of t.certs) {
         const key = await publicClient.readContract({ ...contracts.slabVault, functionName: "certKey", args: ["PSA", cert] });
@@ -72,10 +74,10 @@ export async function POST(request: Request) {
         intake({ grader: "PSA", certNumber: cert, owner: POKECHAIN_ESCROW, depositorRef: `pokechain-submission-${id}` });
         const minted = await mintSubmission(origin, id);
         if (minted.result !== "minted") throw new Error(`Collector Crypt check for ${cert}: ${minted.result}`);
-        done.push(`@${t.handle} token #${id} (PSA ${cert}) vaulted`);
+        done.push(`@${handle} token #${id} (PSA ${cert}) vaulted`);
       }
     }
-    return Response.json({ ok: true, done, traders: TRADERS.map(({ handle, address }) => ({ handle, address })) });
+    return Response.json({ ok: true, done, traders: TRADERS.map(({ address }) => ({ address })) });
   } catch (e) {
     return Response.json({ error: operatorError(e, "Seeding failed"), done }, { status: 400 });
   }
