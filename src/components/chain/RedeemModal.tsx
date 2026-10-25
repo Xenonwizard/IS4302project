@@ -39,14 +39,12 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
     setBusy(true);
     try {
       // Pokechain already holds this slab, so there are no new photos: the evidence records that.
-      const valueCents = Math.round(listing.fmv * 100);
       const form = new FormData();
       form.set(
         "meta",
         JSON.stringify({
           grader: listing.grader,
           certNumber: listing.certNumber,
-          declaredValueCents: valueCents,
           condition: { caseCracked: false, caseScratched: false, labelDamaged: false, notes: "Already held by Pokechain" },
           shipping: { method: "dropoff", carrier: "", tracking: "" },
           declarations: { owner: true, authentic: true, terms: true },
@@ -58,7 +56,6 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
       await submit({
         grader: listing.grader,
         certNumber: listing.certNumber,
-        declaredValueCents: valueCents,
         evidenceHash,
         inboundCarrier: "Already at Pokechain",
         inboundTracking: "",

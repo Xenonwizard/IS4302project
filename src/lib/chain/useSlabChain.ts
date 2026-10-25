@@ -63,7 +63,6 @@ export function useSlabChain() {
     async (input: {
       grader: Grader;
       certNumber: string;
-      declaredValueCents: number;
       evidenceHash: `0x${string}`;
       inboundCarrier: string;
       inboundTracking: string;
@@ -74,7 +73,6 @@ export function useSlabChain() {
         args: [
           input.grader,
           input.certNumber,
-          BigInt(input.declaredValueCents),
           input.evidenceHash,
           input.inboundCarrier,
           input.inboundTracking,

@@ -55,7 +55,7 @@ contract TradeEscrowTest is Test {
         for (uint256 i; i < n; ++i) {
             string memory cert = vm.toString(10_000_000 + ++certSeq);
             vm.prank(who);
-            uint256 id = vault.requestSubmission("PSA", cert, 10_000, keccak256("evidence"), "SingPost", "RR1SG");
+            uint256 id = vault.requestSubmission("PSA", cert, keccak256("evidence"), "SingPost", "RR1SG");
             vm.startPrank(operator);
             vault.markReceived(id);
             vault.markForwarded(id, hex"01", keccak256("c"));
@@ -208,7 +208,7 @@ contract TradeEscrowTest is Test {
     function test_PendingSlabsCannotBeTraded() public {
         uint256[] memory theirs = _slabs(misty, 1);
         vm.prank(ash);
-        uint256 pending = vault.requestSubmission("PSA", "99999999", 10_000, keccak256("e"), "SingPost", "RR");
+        uint256 pending = vault.requestSubmission("PSA", "99999999", keccak256("e"), "SingPost", "RR");
         uint256[] memory mine = new uint256[](1);
         mine[0] = pending;
         vm.prank(ash);

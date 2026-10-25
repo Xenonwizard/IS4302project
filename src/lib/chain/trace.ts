@@ -56,9 +56,8 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     rows.push({ event, detail, block: log.blockNumber, tx: log.transactionHash, logIndex: log.logIndex });
 
   for (const l of requested) {
-    const value = (Number(l.args.declaredValueCents) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
     const parcel = l.args.inboundTracking ? `, parcel ${l.args.inboundTracking}` : "";
-    push("SubmissionRequested", `NFT #${l.args.submissionId} minted to ${short(l.args.owner!)}, pending and locked: ${l.args.grader} ${l.args.certNumber}, declared ${value}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
+    push("SubmissionRequested", `NFT #${l.args.submissionId} minted to ${short(l.args.owner!)}, pending and locked: ${l.args.grader} ${l.args.certNumber}${parcel}; evidence ${short(l.args.evidenceHash!)}`, l);
   }
   for (const l of received) push("SubmissionReceived", `Pokechain's warehouse received submission #${l.args.submissionId}`, l);
   for (const l of forwarded) {
@@ -118,7 +117,6 @@ export async function traceSlab(origin: string, tokenId: bigint) {
         }
       : null,
     evidenceHash: slab.evidenceHash,
-    declaredValueCents: Number(slab.declaredValueCents),
     polygon,
     custodian: await custodianTrace(origin, slab.custodianRef, slab.redemptionRef || undefined),
   };

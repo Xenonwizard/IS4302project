@@ -1966,12 +1966,6 @@ export const slabVaultAbi = [
       },
       {
         "indexed": false,
-        "internalType": "uint64",
-        "name": "declaredValueCents",
-        "type": "uint64"
-      },
-      {
-        "indexed": false,
         "internalType": "bytes32",
         "name": "evidenceHash",
         "type": "bytes32"
@@ -2565,11 +2559,6 @@ export const slabVaultAbi = [
         "type": "string"
       },
       {
-        "internalType": "uint64",
-        "name": "declaredValueCents",
-        "type": "uint64"
-      },
-      {
         "internalType": "bytes32",
         "name": "evidenceHash",
         "type": "bytes32"
@@ -2716,11 +2705,6 @@ export const slabVaultAbi = [
             "internalType": "string",
             "name": "custodianRef",
             "type": "string"
-          },
-          {
-            "internalType": "uint64",
-            "name": "declaredValueCents",
-            "type": "uint64"
           },
           {
             "internalType": "bytes32",
@@ -2913,11 +2897,6 @@ export const slabVaultAbi = [
             "type": "string"
           },
           {
-            "internalType": "uint64",
-            "name": "declaredValueCents",
-            "type": "uint64"
-          },
-          {
             "internalType": "bytes32",
             "name": "evidenceHash",
             "type": "bytes32"
@@ -2986,11 +2965,6 @@ export const slabVaultAbi = [
           {
             "internalType": "uint64",
             "name": "requestedAt",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "declaredValueCents",
             "type": "uint64"
           },
           {

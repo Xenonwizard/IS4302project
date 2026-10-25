@@ -28,7 +28,6 @@ interface Pending {
   custody: CustodyName;
   /** keccak256(salt ‖ parcel details); the details themselves are only on-chain encrypted */
   forwardCommitment: string;
-  declaredValueCents: number;
   evidenceHash: string;
   inboundCarrier: string;
   inboundTracking: string;
@@ -69,7 +68,6 @@ export function PendingSubmissions({ onMinted }: { onMinted?: (listing: Listing 
           status: s.status,
           custody,
           forwardCommitment: s.forwardCommitment,
-          declaredValueCents: Number(s.declaredValueCents),
           evidenceHash: s.evidenceHash,
           inboundCarrier: s.inboundCarrier,
           inboundTracking: s.inboundTracking,
@@ -125,7 +123,6 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
         owner: out.owner,
         mintTx: out.tx.hash,
         custodianRef: out.custodianRef,
-        declaredValueCents: sub.declaredValueCents,
         evidenceHash: sub.evidenceHash,
       };
       let listing: Listing | null = null;
@@ -134,7 +131,7 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
       pushToast({ title: `Token #${out.tokenId} vaulted`, body: "Collector Crypt's NFT is in Pokechain's escrow. It's in your Vault and can be traded.", tone: "success" });
       onDone(listing);
     },
-    [existingId, attachToken, submitSlab, pushToast, onDone, sub.grader, sub.certNumber, sub.declaredValueCents, sub.evidenceHash],
+    [existingId, attachToken, submitSlab, pushToast, onDone, sub.grader, sub.certNumber, sub.evidenceHash],
   );
 
   const mint = useCallback(async () => {
@@ -266,8 +263,7 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
             </span>
           </p>
           <p className="mt-1 text-[12.5px] text-muted">
-            {sub.grader} cert <span className="font-mono text-white">{sub.certNumber}</span> · declared{" "}
-            {usd(sub.declaredValueCents / 100)}
+            {sub.grader} cert <span className="font-mono text-white">{sub.certNumber}</span>
             {sub.inboundTracking ? ` · to Pokechain by ${sub.inboundCarrier} ${sub.inboundTracking}` : ""}
             {/^0x0*$/.test(sub.forwardCommitment) ? "" : " · parcel details sent to Collector Crypt, encrypted"}
           </p>

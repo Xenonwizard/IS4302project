@@ -634,7 +634,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="flex items-end justify-between gap-3">
                 <div>
                   <p className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                    {listed ? "Asking" : owned ? (onChainTokenId ? "Declared value (on-chain)" : "Market value") : "Last asked"}
+                    {listed ? "Asking" : owned ? "Market value" : "Last asked"}
                   </p>
                   <p className="mt-1 text-[30px] font-bold leading-none">
                     {usd(displayPrice, { cents: Boolean(onChainTokenId) })}
@@ -719,7 +719,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </h2>
             <div className="space-y-3 p-4">
               <div className="flex items-center justify-between">
-                <span className="text-[13px] text-muted">{onChainTokenId ? "Declared value (on-chain)" : "Market value"}</span>
+                <span className="text-[13px] text-muted">Market value</span>
                 <span className="text-lg font-bold">{usd(listing.fmv, { cents: Boolean(onChainTokenId) })}</span>
               </div>
               <div className="flex items-center justify-between">

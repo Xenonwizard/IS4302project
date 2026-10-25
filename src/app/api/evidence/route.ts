@@ -3,7 +3,7 @@
  * evidenceHash that goes on-chain in SlabVault.requestSubmission.
  *
  *   POST /api/evidence   multipart/form-data:
- *     meta   JSON: grader, certNumber, declaredValueCents, condition, shipping, declarations,
+ *     meta   JSON: grader, certNumber, condition, shipping, declarations,
  *            submittedBy, source ("new" | "already-vaulted")
  *     front, back, label (required for "new"), extra (optional): image files
  */

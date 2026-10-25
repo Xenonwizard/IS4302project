@@ -250,17 +250,15 @@ function closeSellerChats(prev: PersistShape, listingId: string, note: string): 
 }
 
 /**
- * A tokenised slab's listing takes its facts from the chain: token id, contract, owner wallet,
- * mint tx, and the declared value (instead of the catalogue's estimate).
+ * A tokenised slab's listing takes its facts from the chain: token id, contract, owner wallet and
+ * mint tx. Its value stays the catalogue's market estimate.
  */
 function withToken(listing: Listing, token: SlabToken): Listing {
-  const declared = token.declaredValueCents ? token.declaredValueCents / 100 : undefined;
   return {
     ...listing,
     tokenId: token.tokenId,
     contract: token.contract,
     ownerAddress: token.owner,
-    ...(declared ? { fmv: declared, price: declared } : {}),
     activity: token.mintTx
       ? listing.activity.map((a) => (a.kind === "Mint" ? { ...a, txHash: token.mintTx } : a))
       : listing.activity,
@@ -820,8 +818,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
       const made = makeSubmittedListing({ ...input, owner: user.username, nowMs: Date.now() });
-      // A minted slab shows its real token id, contract, owner wallet, mint transaction and the
-      // value the owner declared on-chain.
+      // A minted slab shows its real token id, contract, owner wallet and mint transaction.
       const listing = made && token ? withToken(made, token) : made;
       if (!listing) {
         pushToast({ title: "Cert not found", body: `${input.grader} has no record of cert ${cert}.`, tone: "error" });
@@ -1082,7 +1079,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           image: o.image || "",
           grader: o.grader,
           certNumber: o.certNumber,
-          declaredValueCents: o.token.declaredValueCents,
           price: o.isListed && o.listedPrice ? o.listedPrice : undefined,
           owner: me.username,
           ownerAddress: me.address,

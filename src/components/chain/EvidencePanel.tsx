@@ -78,7 +78,6 @@ export function EvidencePanel({ hash, compact = false }: { hash: string; compact
       )}
       {!compact ? (
         <dl className="grid gap-x-4 gap-y-1 text-[12px] sm:grid-cols-2">
-          <Row label="Declared value" value={usd(m.declaredValueCents / 100, { cents: true })} />
           <Row label="Condition" value={flags.length ? flags.join(", ") : "no damage declared"} />
           {c.notes ? <Row label="Notes" value={c.notes} /> : null}
           <Row

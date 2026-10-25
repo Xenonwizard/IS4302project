@@ -109,7 +109,6 @@ export function ChainVaultSync() {
               owner: address!,
               mintTx: "",
               custodianRef: s.custodianRef,
-              declaredValueCents: Number(s.declaredValueCents),
               evidenceHash: s.evidenceHash,
             },
             title: s.title,

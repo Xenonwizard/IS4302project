@@ -290,14 +290,14 @@ export function buildOnChainListing(input: {
   grader: Grader;
   certNumber: string;
   price?: number;
-  declaredValueCents?: number;
   owner: string;
   ownerAddress?: string;
   listedAt?: string;
   contract?: string;
 }): Listing {
   const id = `token-${input.tokenId}`;
-  const fmv = input.declaredValueCents ? input.declaredValueCents / 100 : (input.price ?? 1000);
+  // Market value from the catalogue (the card matched by its image or cert); the asking price if it isn't there.
+  const fmv = marketValueFor(input) ?? input.price ?? 0;
   const price = input.price ?? fmv;
 
   // Try to parse grade and grade label from title if present, e.g. "(PSA 10 GEM MT)" or "(PSA 9.5 MINT+)"

@@ -276,7 +276,7 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
               </Link>
               <p className="text-[12px] text-muted">
                 {chainMode
-                  ? `${isListed(listing.id) ? "Asking" : "Stated"} ${exact(listing.price)} · market value ${exact(marketValueOf({ grader: listing.grader, certNumber: listing.certNumber, title: listing.title, image: listing.image, declaredValueCents: listing.price * 100 }))}`
+                  ? `${isListed(listing.id) ? "Asking" : "Stated"} ${exact(listing.price)} · market value ${exact(marketValueOf({ grader: listing.grader, certNumber: listing.certNumber, title: listing.title, image: listing.image, fallback: listing.price }))}`
                   : `Asking ${exact(listing.price)} · market value ${exact(listing.fmv)}`}
               </p>
             </div>

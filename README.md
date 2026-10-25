@@ -90,10 +90,10 @@ and resets to an empty chain first, except the seeded-demo test). `test:unit` al
 **Real:** the Solidity contracts on a real EVM chain (local Hardhat, or Polygon Amoy), wallet
 signatures, EIP-2612 permits, every on-chain read and event, the keccak256 evidence and commitments,
 and the X25519 + XChaCha20-Poly1305 encryption.
-Trades between collectors are real too: `TradeEscrow` holds the offer and swaps both sides on-chain. The stated
-value of a slab is on-chain (`declaredValueCents`); the **market value** is the marketplace's estimate for the
-card and grade (seeded from the Pokémon TCG price data, not a live feed), and the balance maths is off-chain, in
-the browser: the contract moves whatever the offer names.
+Trades between collectors are real too: `TradeEscrow` holds the offer and swaps both sides on-chain. A slab's
+stated value is its asking price on `SlabMarket` (on-chain, only while it is listed); the **market value** is the
+marketplace's estimate for the card and grade (seeded from the Pokémon TCG price data, not a live feed), and the
+balance maths is off-chain, in the browser: the contract moves whatever the offer names.
 **Simulated (labelled in the UI):** Collector Crypt's API and Solana NFTs (mock routes with the real
 Solana DAS request shapes), the carrier (including "parcel found"), Pokechain's warehouse actions (the
 operator buttons), the seeded demo accounts and slabs (`seedSlab`, operator-only), and the Hardhat test wallets that stand in for MetaMask locally.
@@ -156,7 +156,7 @@ npm run lint                 # eslint
 9. **Trade on-chain with another collector, in a chat** (Negotiation rooms → **Chat** with a collector, or
    **Make an offer** on a slab a collector has listed): chat, then **Make a trade offer** with slabs and
    cash on both sides. Each slab counts at its **market value** (the marketplace estimate for that card and
-   grade) or its **stated value** (what its owner declared at submission, recorded on-chain). The balance
+   grade) or, if it's listed for sale, its **stated value** (the owner's asking price). The balance
    shows what you give, what you get, who is ahead and by how much, and the same trade at all-market and
    all-stated values; slabs whose stated value is over 20% off market are flagged. Only you see your
    balance. The offer is locked in `TradeEscrow` and the other collector accepts, counters or declines in

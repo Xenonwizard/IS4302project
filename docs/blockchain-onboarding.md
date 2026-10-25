@@ -110,7 +110,7 @@ The token can only move (transfer, trade) while **Vaulted**. Token id = submissi
 
 | Function | Who | What it changes | Event / errors |
 | --- | --- | --- | --- |
-| `requestSubmission(grader, cert, declaredValueCents, evidenceHash, inboundCarrier, inboundTracking)` | wallet | **Mints the NFT to the submitter right away**, custody **PostedToPokechain**, locked and not counted as vaulted. Carries the declared value, the fingerprint of the intake photos and declarations, and the parcel's tracking number, so a parcel lost in the post is already a token that can be reported. One physical cert has one live token | `SubmissionRequested`, `Transfer(0 → you)` · `AccountNotActive`, `CertAlreadyTokenised`, `MissingEvidence` |
+| `requestSubmission(grader, cert, evidenceHash, inboundCarrier, inboundTracking)` | wallet | **Mints the NFT to the submitter right away**, custody **PostedToPokechain**, locked and not counted as vaulted. Carries the fingerprint of the intake photos and declarations, and the parcel's tracking number, so a parcel lost in the post is already a token that can be reported. One physical cert has one live token | `SubmissionRequested`, `Transfer(0 → you)` · `AccountNotActive`, `CertAlreadyTokenised`, `MissingEvidence` |
 | `markReceived(submissionId)` | operator | → **AtPokechain** (submission ReceivedByPokechain) | `SubmissionReceived` · `WrongSubmissionStatus` |
 | `markForwarded(submissionId, ciphertext, commitment)` | operator | → **SentToCustodian**; the parcel details go on-chain only encrypted to the custodian's published key, plus a salted commitment | `SubmissionForwarded` · `NoEncryptionKey` |
 | `setEncryptionKey(key)` / `setCustodian(address)` | anyone / admin | Publish your X25519 public key; name the custodian (Collector Crypt) | `EncryptionKeySet`, `CustodianSet` |
@@ -124,7 +124,7 @@ The token can only move (transfer, trade) while **Vaulted**. Token id = submissi
 | `reportLost(tokenId, details)` | owner | Custody → **Lost**, from any in-the-post state, inbound or outbound | `SlabReportedLost` (carries the tracking number) |
 | `resolveLostReport(tokenId, outcome)` | operator | Lost → AtPokechain (inbound, found), Delivered, or back to Vaulted | `LostReportResolved` |
 | `setTradeEscrow(address)`, `isApprovedForAll` | admin / view | Names TradeEscrow, which may then move slabs without a per-token approval (it only does so inside a call signed by that slab's owner) | `TradeEscrowSet` |
-| `tokenURI(tokenId)` | view | **Fully on-chain metadata**: a base64 JSON document with grader, cert, Collector Crypt's Solana id, live custody, and what the owner declared at intake (declared value in cents, evidence hash) | |
+| `tokenURI(tokenId)` | view | **Fully on-chain metadata**: a base64 JSON document with grader, cert, Collector Crypt's Solana id, live custody, and the evidence hash of the owner's intake form | |
 | `_update` (internal hook) | every transfer | Transfers only while **Vaulted**, only **to an Active account other than the owner**, and keeps `vaultedCount` right | `SlabLocked`, `AccountNotActive`, `SelfTransfer` |
 
 ### TradeEscrow (`blockchain/contracts/TradeEscrow.sol`)
@@ -210,7 +210,7 @@ The Submit page is a realistic intake form for wallet accounts:
 
 1. **The slab:** grader and cert number, looked up in the grader's registry, with an estimated value.
 2. **Photos:** front, back and a close-up of the grading label (required), plus an optional extra.
-3. **Condition and value:** a declared value for insurance, damage checkboxes and notes.
+3. **Condition:** damage checkboxes and notes.
 4. **Getting it to Pokechain:** courier (carrier + tracking number) or drop-off.
 5. **Declarations:** ownership, authenticity, and the vault and storage terms.
 
@@ -222,18 +222,18 @@ the manifest   →  keccak256(manifest JSON) = evidenceHash    SlabVault.request
 ```
 
 The photos stay off-chain (`POST /api/evidence`, stored in `.data/evidence/`; in production, IPFS
-or an object-locked bucket). Change one pixel, the declared value or a note and the hash no longer
+or an object-locked bucket). Change one pixel or a note and the hash no longer
 matches. When the slab reaches Pokechain, `markReceived` only goes ahead if the stored evidence
 still hashes to the on-chain value; otherwise the operator calls `rejectSubmission`. The token
-keeps the `evidenceHash` and declared value forever, in `slabOf` and in its own `tokenURI` metadata.
+keeps the `evidenceHash` forever, in `slabOf` and in its own `tokenURI` metadata.
 The Trace page re-hashes the photos on every view, so a lost or damage claim can prove exactly what
 was declared at intake.
 
 **Does the token tally with the form?** On a tokenised slab's page, *Your submission vs the token*
-puts each field you entered (grader, cert, declared value, shipping, photos and notes) beside what
+puts each field you entered (grader, cert, shipping, photos and notes) beside what
 `slabOf` / `submissionOf` hold. It then decodes the NFT's own `tokenURI` and checks each attribute
-too, with a tick or cross per field. The Vault and the asset page show the declared value, not the
-catalogue's market estimate.
+too, with a tick or cross per field. The Vault and the asset page show the catalogue's market estimate,
+or the asking price while the slab is listed.
 
 ### Slab onboarding: you → Pokechain → Collector Crypt → token
 
@@ -250,7 +250,7 @@ sequenceDiagram
   participant CC as Collector Crypt (Postman)
   participant S as Solana RPC (DAS)
   A->>A: POST /api/evidence (photos + declarations) → evidenceHash
-  A->>SV: requestSubmission("PSA", "72862688", 263400, evidenceHash, "SingPost", "RR…SG")
+  A->>SV: requestSubmission("PSA", "72862688", evidenceHash, "SingPost", "RR…SG")
   SV-->>A: Transfer(0 → A, token #1), custody PostedToPokechain (locked)
   Note over A: ships the slab to Pokechain (lost? A calls reportLost(1))
   O->>SV: markReceived(1)        (cert + evidence hash checked; else rejectSubmission)

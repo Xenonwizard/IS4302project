@@ -37,8 +37,8 @@ interface Photo {
 /**
  * The intake form for a wallet account: everything Pokechain and Collector Crypt need to accept a
  * slab, and exactly what of it goes on-chain. Photos and declarations are stored off-chain and
- * fingerprinted; SlabVault.requestSubmission records the fingerprint (evidenceHash), the declared
- * value and the inbound tracking number.
+ * fingerprinted; SlabVault.requestSubmission records the fingerprint (evidenceHash) and the
+ * inbound tracking number.
  */
 export function SlabIntakeForm() {
   const { user, pushToast } = useStore();
@@ -47,7 +47,6 @@ export function SlabIntakeForm() {
   const [grader, setGrader] = useState<Grader>("PSA");
   const [cert, setCert] = useState("");
   const [photos, setPhotos] = useState<Partial<Record<Slot, Photo>>>({});
-  const [value, setValue] = useState("");
   const [condition, setCondition] = useState({ caseCracked: false, caseScratched: false, labelDamaged: false, notes: "" });
   const [method, setMethod] = useState<"courier" | "dropoff">("courier");
   const [carrier, setCarrier] = useState(CARRIERS[0]);
@@ -95,18 +94,15 @@ export function SlabIntakeForm() {
       const token = await client!.readContract({ ...contracts.slabVault, functionName: "tokenOfCert", args: [key] });
       if (token === BigInt(0)) {
         setCert(candidate);
-        setValue("");
         return;
       }
     }
     pushToast({ title: "Couldn't find an unused cert, try again", tone: "error" });
   };
 
-  const valueCents = Math.round(Number(value || 0) * 100);
   const missing = [
     !preview && "a cert number the grader recognises",
     ...PHOTO_SLOTS.filter((s) => s.required && !photos[s.slot]).map((s) => `a photo: ${s.title.toLowerCase()}`),
-    !(valueCents > 0) && "a declared value",
     method === "courier" && !tracking.trim() && "the courier tracking number",
     !(declared.owner && declared.authentic && declared.terms) && "all three declarations",
   ].filter(Boolean) as string[];
@@ -122,7 +118,6 @@ export function SlabIntakeForm() {
         JSON.stringify({
           grader,
           certNumber: cert.trim(),
-          declaredValueCents: valueCents,
           condition,
           shipping: { method, carrier: method === "courier" ? carrier : "", tracking: method === "courier" ? tracking.trim() : "" },
           declarations: declared,
@@ -138,7 +133,6 @@ export function SlabIntakeForm() {
       await submit({
         grader,
         certNumber: cert.trim(),
-        declaredValueCents: valueCents,
         evidenceHash,
         inboundCarrier: method === "courier" ? carrier : "Drop-off",
         inboundTracking: method === "courier" ? tracking.trim() : "",
@@ -146,7 +140,6 @@ export function SlabIntakeForm() {
       pushToast({ title: "Submitted", body: "Ship the slab to Pokechain. Its tracker is above the form.", tone: "success" });
       setCert("");
       setPhotos({});
-      setValue("");
       setTracking("");
       setCondition({ caseCracked: false, caseScratched: false, labelDamaged: false, notes: "" });
       setDeclared({ owner: false, authentic: false, terms: false });
@@ -228,27 +221,8 @@ export function SlabIntakeForm() {
         </div>
       </Section>
 
-      {/* 3. condition and value */}
-      <Section n={3} title="Condition and value">
-        <Field label="Declared value (USD)" hint="What you'd insure it for. Recorded on-chain; used for insurance and lost-in-transit claims.">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-dim">$</span>
-              <input
-                className={clsx(inputClass, "pl-7")}
-                value={value}
-                onChange={(e) => setValue(e.target.value.replace(/[^\d.]/g, ""))}
-                placeholder={estimate ? String(Math.round(estimate)) : "2500"}
-                inputMode="decimal"
-              />
-            </div>
-            {estimate ? (
-              <Button type="button" variant="secondary" onClick={() => setValue(String(Math.round(estimate)))}>
-                Use estimate
-              </Button>
-            ) : null}
-          </div>
-        </Field>
+      {/* 3. condition */}
+      <Section n={3} title="Condition">
         <div className="flex flex-wrap gap-x-5 gap-y-2 text-[13px]">
           {(
             [
@@ -346,15 +320,14 @@ export function SlabIntakeForm() {
         tech={
           <>
             <Fn>
-              SlabVault.requestSubmission({grader}, {cert || "…"}, {valueCents || "…"}, {lastHash && stage !== "idle" ? shortHash(lastHash) : "evidenceHash"},{" "}
+              SlabVault.requestSubmission({grader}, {cert || "…"}, {lastHash && stage !== "idle" ? shortHash(lastHash) : "evidenceHash"},{" "}
               {method === "courier" ? carrier : "Drop-off"}, {method === "courier" ? tracking || "…" : '""'})
             </Fn>
             . <Fn>evidenceHash</Fn> is the keccak256 of a manifest that lists each photo&apos;s keccak256.
           </>
         }
       >
-        Your slab gets its token straight away, locked until it reaches the vault. The chain records the grader, cert number,
-        the value you declare and the tracking number. Your photos and notes are kept by Pokechain, but the chain keeps a
+        Your slab gets its token straight away, locked until it reaches the vault. The chain records the grader, cert number and the tracking number. Your photos and notes are kept by Pokechain, but the chain keeps a
         fingerprint of them: change one pixel or one word later and the fingerprint no longer matches. So if the parcel is
         lost or damaged, you can prove exactly what you sent today.
       </OnChainNote>

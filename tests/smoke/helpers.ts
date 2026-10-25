@@ -98,7 +98,6 @@ export async function forwardedSubmission(request: APIRequestContext, cert: stri
       meta: JSON.stringify({
         grader: "PSA",
         certNumber: cert,
-        declaredValueCents: 50_000,
         condition: { caseCracked: false, caseScratched: false, labelDamaged: false, notes: "" },
         shipping: { method: "dropoff", carrier: "", tracking: "" },
         declarations: { owner: true, authentic: true, terms: true },
@@ -113,7 +112,7 @@ export async function forwardedSubmission(request: APIRequestContext, cert: stri
       address: local.SlabVault,
       abi: slabVaultAbi,
       functionName: "requestSubmission",
-      args: ["PSA", cert, BigInt(50_000), evidenceHash, "Drop-off", ""],
+      args: ["PSA", cert, evidenceHash, "Drop-off", ""],
     }),
   });
   const [ev] = parseEventLogs({ abi: slabVaultAbi, logs: receipt.logs, eventName: "SubmissionRequested" });

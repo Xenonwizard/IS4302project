@@ -43,7 +43,7 @@ export function OfferModal({
           </p>
           <dl className="grid grid-cols-2 gap-2 text-center text-[12px]">
             <Fact label="Asking / stated" value={usd(listing.price, { cents: true })} />
-            <Fact label="Market value" value={usd(marketValueOf({ grader: listing.grader, certNumber: listing.certNumber, title: listing.title, image: listing.image, declaredValueCents: listing.price * 100 }), { cents: true })} />
+            <Fact label="Market value" value={usd(marketValueOf({ grader: listing.grader, certNumber: listing.certNumber, title: listing.title, image: listing.image, fallback: listing.price }), { cents: true })} />
           </dl>
           <Button
             size="lg"

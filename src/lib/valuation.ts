@@ -1,9 +1,9 @@
 /**
- * How a slab-for-slab trade is weighed. Each slab has two numbers: the market value (what comparable
- * graded sales say it is worth, the estimate the marketplace uses) and the stated value (what its owner
- * declared when they submitted it, recorded on-chain). The collector picks which one counts for each
- * slab, and the balance below says who comes out ahead. Plain numbers in, plain numbers out, so the
- * same maths runs in the offer builder, on the offer card and in the tests.
+ * How a slab-for-slab trade is weighed. Each slab has a market value (what comparable graded sales say
+ * it is worth, the estimate the marketplace uses) and, while its owner has it listed for sale, a stated
+ * value: their asking price. The collector picks which one counts for each slab (a slab that isn't
+ * listed counts at market), and the balance below says who comes out ahead. Plain numbers in, plain
+ * numbers out, so the same maths runs in the offer builder, on the offer card and in the tests.
  */
 
 export type ValueBasis = "market" | "stated";
@@ -11,7 +11,8 @@ export type ValueBasis = "market" | "stated";
 export interface ValuedSlab {
   tokenId: string;
   market: number;
-  stated: number;
+  /** the owner's asking price while it is listed for sale; null when it isn't listed */
+  stated: number | null;
   basis: ValueBasis;
 }
 
@@ -44,7 +45,7 @@ export const VERDICT_LIMITS = { fair: 0.05, slight: 0.15, uneven: 0.3 } as const
 export const cents = (n: number) => Math.round(n * 100) / 100;
 
 export function slabWorth(s: ValuedSlab, only?: ValueBasis): number {
-  return (only ?? s.basis) === "market" ? s.market : s.stated;
+  return (only ?? s.basis) === "stated" && s.stated !== null ? s.stated : s.market;
 }
 
 export function sideWorth(side: TradeSide, only?: ValueBasis): number {
@@ -68,7 +69,7 @@ export function balance(give: TradeSide, get: TradeSide, only?: ValueBasis): Bal
 
 /** How far a stated value sits from the market value, as a signed share of the market value. */
 export function statedVsMarket(s: Pick<ValuedSlab, "market" | "stated">): number {
-  return s.market > 0 ? (s.stated - s.market) / s.market : 0;
+  return s.market > 0 && s.stated !== null ? (s.stated - s.market) / s.market : 0;
 }
 
 /** A stated value more than this far from market is worth a second look. */

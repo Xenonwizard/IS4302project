@@ -59,6 +59,13 @@ test("a stated value far from market gets flagged", () => {
   assert.equal(statedFlag({ market: 100, stated: 110 }), null);
 });
 
+test("a slab that isn't listed has no stated price, so it counts at market whatever is picked", () => {
+  const unlisted: ValuedSlab = { tokenId: "9", market: 120, stated: null, basis: "stated" };
+  assert.equal(sideWorth(side([unlisted])), 120);
+  assert.equal(sideWorth(side([unlisted]), "stated"), 120);
+  assert.equal(statedFlag(unlisted), null);
+});
+
 test("an empty trade does not divide by zero", () => {
   const b = balance(side([]), side([]));
   assert.equal(b.gap, 0);

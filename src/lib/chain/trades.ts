@@ -25,8 +25,6 @@ export interface TradeSlab {
   image: string;
   grader: string;
   certNumber: string;
-  /** what its owner declared at submission, recorded on-chain */
-  declaredValueCents: number;
   /** listed for sale on SlabMarket (an offer cancels the listing before the slab can move) */
   listed?: boolean;
   /** its asking price on SlabMarket, in dollars, while listed */
@@ -104,7 +102,6 @@ export function useTradeSlabs(owner: Address | undefined) {
           image: s.image,
           grader: s.grader,
           certNumber: s.certNumber,
-          declaredValueCents: Number(s.declaredValueCents),
           listed,
           listedPrice: listed && listing && listing.price > BigInt(0) ? fromUsdcUnits(listing.price) : undefined,
         }));
@@ -132,7 +129,6 @@ export function useSlabDetails(tokenIds: string[]) {
             image: slabs[i].image,
             grader: slabs[i].grader,
             certNumber: slabs[i].certNumber,
-            declaredValueCents: Number(slabs[i].declaredValueCents),
           },
         ]),
       );

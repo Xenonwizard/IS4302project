@@ -7,7 +7,7 @@
  *   each photo      →  keccak256(file bytes)                 listed in the manifest
  *   the manifest    →  keccak256(manifest JSON)  = evidenceHash, passed to SlabVault.requestSubmission
  *
- * Changing one pixel of one photo, the declared value or a condition note changes the evidenceHash,
+ * Changing one pixel of one photo or a condition note changes the evidenceHash,
  * so anyone can later prove exactly what was declared at intake by re-hashing the stored files and
  * comparing with the chain. That is what a lost-in-transit or damage claim needs.
  *
@@ -36,7 +36,6 @@ export interface PhotoEntry {
 export interface EvidenceInput {
   grader: string;
   certNumber: string;
-  declaredValueCents: number;
   condition: { caseCracked: boolean; caseScratched: boolean; labelDamaged: boolean; notes: string };
   shipping: { method: "courier" | "dropoff"; carrier: string; tracking: string };
   declarations: { owner: boolean; authentic: boolean; terms: boolean };
@@ -68,7 +67,6 @@ export function storeEvidence(input: EvidenceInput, files: { slot: PhotoSlot; na
   if (!input.declarations.owner || !input.declarations.authentic || !input.declarations.terms) {
     return { error: "All three declarations must be ticked" };
   }
-  if (!(input.declaredValueCents > 0)) return { error: "Declare a value above $0" };
 
   const manifest: Manifest = {
     version: 1,
