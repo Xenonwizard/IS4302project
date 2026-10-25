@@ -219,8 +219,15 @@ export function NegotiationsInbox() {
 
       {shown.length ? (
         <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-          {shown.map((n) => (
-            <Row key={n.id} n={n} me={me!} slabs={slabs} />
+          {shown.map((n, index) => (
+            <Row
+              key={n.id}
+              n={n}
+              me={me!}
+              slabs={slabs}
+              animate={index < 12}
+              animationDelay={index < 12 ? `${index * 22}ms` : undefined}
+            />
           ))}
         </ul>
       ) : (
@@ -273,7 +280,7 @@ export function NegotiationsInbox() {
   );
 }
 
-function Row({ n, me, slabs }: { n: Negotiation; me: string; slabs: Listing[] }) {
+function Row({ n, me, slabs, animate, animationDelay }: { n: Negotiation; me: string; slabs: Listing[]; animate?: boolean; animationDelay?: string }) {
   const listing =
     getListing(n.listingId) ||
     slabs.find(
@@ -308,7 +315,10 @@ function Row({ n, me, slabs }: { n: Negotiation; me: string; slabs: Listing[] })
           : { tone: "neutral" as const, label: "Open" };
 
   return (
-    <li>
+    <li
+      className={animate ? "fade-up motion-reduce:animate-none" : undefined}
+      style={animationDelay ? { animationDelay } : undefined}
+    >
       <Link href={`/trades/${n.id}`} className="flex items-center gap-4 p-4 transition hover:bg-white/5">
         <span className="relative w-11 shrink-0">
           <Slab listing={listing} flat />

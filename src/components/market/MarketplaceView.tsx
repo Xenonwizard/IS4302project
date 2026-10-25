@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Grid2x2, LayoutGrid, Search, SlidersHorizontal, X } from "lucide-react";
+import { Grid2x2, Grid3x3, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   EMPTY_FILTERS,
@@ -36,7 +36,7 @@ export function MarketplaceView() {
     return SORTS.find((s) => s.value === fromUrl)?.value ?? "recent";
   });
   const [pageSize, setPageSize] = useState<"24" | "48" | "96">("48");
-  const [dense, setDense] = useState(false);
+  const [gridSize, setGridSize] = useState<"medium" | "small">("medium");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>(() => {
     const era = params.get("era");
@@ -81,6 +81,7 @@ export function MarketplaceView() {
 
   const shown = filtered.slice(0, visible);
   const activeCount = activeFilterCount(filters);
+  const animationStart = page.sig === signature ? Math.max(0, page.count - Number(pageSize)) : 0;
 
   return (
     <div className="px-4 py-4 lg:px-6 lg:py-5">
@@ -88,24 +89,28 @@ export function MarketplaceView() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex h-10 items-center rounded-xl border border-hairline bg-surface p-1">
           <button
-            onClick={() => setDense(false)}
-            aria-label="Comfortable grid"
+            onClick={() => setGridSize("medium")}
+            aria-label="Medium grid"
+            aria-pressed={gridSize === "medium"}
+            title="Medium grid"
             className={clsx(
               "grid h-8 w-8 place-items-center rounded-lg transition",
-              !dense ? "bg-surface-3 text-white" : "text-muted hover:text-white",
-            )}
-          >
-            <LayoutGrid size={15} />
-          </button>
-          <button
-            onClick={() => setDense(true)}
-            aria-label="Dense grid"
-            className={clsx(
-              "grid h-8 w-8 place-items-center rounded-lg transition",
-              dense ? "bg-surface-3 text-white" : "text-muted hover:text-white",
+              gridSize === "medium" ? "bg-surface-3 text-white" : "text-muted hover:text-white",
             )}
           >
             <Grid2x2 size={15} />
+          </button>
+          <button
+            onClick={() => setGridSize("small")}
+            aria-label="Small grid"
+            aria-pressed={gridSize === "small"}
+            title="Small grid"
+            className={clsx(
+              "grid h-8 w-8 place-items-center rounded-lg transition",
+              gridSize === "small" ? "bg-surface-3 text-white" : "text-muted hover:text-white",
+            )}
+          >
+            <Grid3x3 size={15} />
           </button>
         </div>
 
@@ -184,14 +189,23 @@ export function MarketplaceView() {
         <div
           className={clsx(
             "mt-3 grid gap-3",
-            dense
-              ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7"
-              : "grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5",
+            gridSize === "small"
+              ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9"
+              : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
           )}
         >
-          {shown.map((l) => (
-            <ListingCard key={l.id} listing={l} dense={dense} />
-          ))}
+          {shown.map((l, index) => {
+            const shouldAnimate = index >= animationStart && index < animationStart + 12;
+            return (
+              <div
+                key={l.id}
+                className={clsx("min-w-0", shouldAnimate && "fade-up motion-reduce:animate-none")}
+                style={shouldAnimate ? { animationDelay: `${(index - animationStart) * 22}ms` } : undefined}
+              >
+                <ListingCard listing={l} size={gridSize} />
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="mt-16 flex flex-col items-center gap-4 text-center">

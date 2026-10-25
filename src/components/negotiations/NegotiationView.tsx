@@ -246,7 +246,7 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
 
   return (
     <div className="px-4 py-5 lg:px-6">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className={clsx("grid gap-5 transition-[grid-template-columns] duration-300", builder ? "lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]" : "xl:grid-cols-[minmax(0,1fr)_340px]")}>
         <section className="flex h-[calc(100dvh-230px)] min-h-[480px] flex-col lg:h-[calc(100vh-150px)] overflow-hidden rounded-card border border-hairline bg-surface">
           {/* who you are talking to */}
           <header className="flex items-center gap-3 border-b border-hairline px-4 py-3">
@@ -283,10 +283,14 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
               n.status === "open" ? (
                 <div className="flex items-center gap-2">
                   {openTrades.length ? <Badge tone="accent">{openTrades.length} open trade{openTrades.length === 1 ? "" : "s"}</Badge> : null}
-                  <Button size="sm" onClick={() => setBuilder({})}>
-                    <ArrowLeftRight size={14} />
-                    Make a trade offer
-                  </Button>
+                  {builder ? (
+                    <Badge tone="good"><ArrowLeftRight size={12} />Trade room open</Badge>
+                  ) : (
+                    <Button size="sm" onClick={() => setBuilder({})}>
+                      <ArrowLeftRight size={14} />
+                      Make a trade offer
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <Badge tone="neutral">Closed</Badge>
@@ -364,7 +368,17 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
           )}
         </section>
 
-        <aside className="space-y-4">
+        {chainMode && wallet.address && otherAddress && builder ? (
+          <TradeBuilder
+            open
+            onClose={() => setBuilder(null)}
+            negotiationId={n.id}
+            me={{ address: wallet.address, handle: me }}
+            them={{ address: otherAddress, handle: other }}
+            cash={wallet.custodyBalance}
+            counterOf={builder.counter}
+          />
+        ) : <aside className="space-y-4">
           <div className="rounded-card border border-hairline bg-[#0c0c10] p-6">
             <div className="mx-auto w-[62%] max-w-[220px]">
               <Slab listing={listing} interactive sizes="240px" />
@@ -406,24 +420,12 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
               </ul>
             </div>
           ) : null}
-        </aside>
+        </aside>}
       </div>
 
-      {chainMode && wallet.address && otherAddress ? (
-        <TradeBuilder
-          open={builder !== null}
-          onClose={() => setBuilder(null)}
-          negotiationId={n.id}
-          me={{ address: wallet.address, handle: me }}
-          them={{ address: otherAddress, handle: other }}
-          cash={wallet.custodyBalance}
-          counterOf={builder?.counter}
-          // A new offer starts with the slab this chat is about, on whichever side owns it.
-          preselect={listing.tokenId ? (iAmBuyer ? { mine: [], theirs: [listing.tokenId] } : { mine: [listing.tokenId], theirs: [] }) : undefined}
-        />
-      ) : (
+      {!chainMode || !wallet.address || !otherAddress ? (
         <OfferModal listing={listing} open={editOpen} onClose={() => setEditOpen(false)} editing />
-      )}
+      ) : null}
       <ReportLostModal negotiation={n} open={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );

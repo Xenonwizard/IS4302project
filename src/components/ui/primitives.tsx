@@ -18,7 +18,7 @@ export function Button({
     <button
       {...rest}
       className={clsx(
-        "inline-flex select-none items-center justify-center gap-2 rounded-xl font-semibold transition disabled:cursor-not-allowed disabled:opacity-45",
+        "inline-flex select-none items-center justify-center gap-2 rounded-xl font-semibold transition active:scale-[0.98] motion-reduce:transform-none disabled:cursor-not-allowed disabled:opacity-45",
         size === "sm" && "h-9 px-3 text-[13px]",
         size === "md" && "h-11 px-4 text-sm",
         size === "lg" && "h-12 px-5 text-[15px]",

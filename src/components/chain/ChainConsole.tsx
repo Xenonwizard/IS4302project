@@ -20,7 +20,7 @@ const KIND: Record<ChainLogKind, { label: string; className: string }> = {
 };
 
 /**
- * Local demo seed: @ash (Hardhat #1) and @misty (#2), each with vaulted slabs and Pokechain credits, onboarded
+ * Local demo seed: @ash (Hardhat #1) and @misty (#2), each with vaulted slabs and PokeCredits, onboarded
  * through the real contracts by POST /api/dev/demo-traders. Log in as either with that test wallet.
  */
 function useDemoTraders() {

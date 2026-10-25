@@ -128,8 +128,8 @@ async function ashOffersFromChat(page: Page) {
   await page.getByRole("button", { name: /Articuno.*#6$/ }).click();
 
   const terms = page.getByTestId("trade-terms");
-  await expect(terms).toContainText("3 slabs + $50.00 USDC");
-  await expect(terms).toContainText("2 slabs + $0.00 USDC");
+  await expect(terms).toContainText("3 slabs + $50.00 PokeCredits");
+  await expect(terms).toContainText("2 slabs + $0.00 PokeCredits");
   await expect(page.getByTestId("trade-verdict")).toHaveCount(0);
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
@@ -163,8 +163,8 @@ test("two collectors: negotiate in a chat, then 3 Pikachus + $50 for 2 Articunos
   await expect(misty.getByText("Would you swap my Pikachus for them?")).toBeVisible();
   const card = misty.getByTestId("trade-card");
   await expect(card.getByTestId("trade-status")).toHaveText("Your move");
-  await expect(card.getByTestId("trade-terms")).toContainText("2 slabs + $0.00 USDC");
-  await expect(card.getByTestId("trade-terms")).toContainText("3 slabs + $50.00 USDC");
+  await expect(card.getByTestId("trade-terms")).toContainText("2 slabs + $0.00 PokeCredits");
+  await expect(card.getByTestId("trade-terms")).toContainText("3 slabs + $50.00 PokeCredits");
   await card.getByRole("button", { name: "Accept trade" }).click();
   await expect(card.getByTestId("trade-status")).toHaveText("Accepted");
   await expect(misty.getByText(/misty accepted trade #1/)).toBeVisible();
@@ -257,7 +257,7 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
   await expect(page.getByRole("button", { name: /Articuno.*#5$/ })).toHaveAttribute("aria-pressed", "true"); // the listed slab
   // Her stated value is what she's asking for it ($900).
   await expect(page.getByText("Listed at $900.00: it is delisted if they accept")).toBeVisible();
-  await expect(page.getByTestId("trade-terms")).toContainText("1 slab + $0.00 USDC");
+  await expect(page.getByTestId("trade-terms")).toContainText("1 slab + $0.00 PokeCredits");
   await expect(page.getByTestId("trade-verdict")).toHaveCount(0);
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");

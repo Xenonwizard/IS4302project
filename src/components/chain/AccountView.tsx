@@ -38,7 +38,7 @@ export function AccountView() {
         <h1 className="text-[22px] font-bold">@{user.username} is an off-chain demo account</h1>
         <p className="text-[13px] text-muted">
           It lives only in this browser. Open an on-chain account with a wallet to register a handle in{" "}
-          <Fn>AccountRegistry</Fn>, deposit Pokechain credits and tokenise slabs.
+          <Fn>AccountRegistry</Fn>, deposit PokeCredits and tokenise slabs.
         </p>
         <Button onClick={() => setAuthOpen(true)}>
           <Wallet size={15} /> Open an on-chain account
@@ -59,7 +59,7 @@ export function AccountView() {
         </div>
         <Link href="/wallet">
           <Button variant="secondary" size="sm">
-            <Wallet size={14} /> Deposit or withdraw Pokechain credits
+            <Wallet size={14} /> Deposit or withdraw PokeCredits
           </Button>
         </Link>
       </div>
@@ -120,8 +120,8 @@ function CloseAccount({ acct }: { acct: Acct }) {
           <CheckCircle2 size={16} className="mt-0.5 text-good" />
           <span>
             {acct.custodyBalance > 0
-              ? `${usd(acct.custodyBalance, { cents: true })} Pokechain credits go back to ${shortHash(acct.address!)} in the same transaction.`
-              : "No Pokechain credits in custody to refund."}
+              ? `${usd(acct.custodyBalance, { cents: true })} PokeCredits go back to ${shortHash(acct.address!)} in the same transaction.`
+              : "No PokeCredits in custody to refund."}
           </span>
         </li>
       </ul>

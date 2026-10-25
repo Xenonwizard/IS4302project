@@ -36,6 +36,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 /* ---- scrollbars ---- */
 .cy-scroll {
   scrollbar-width: thin;
@@ -103,6 +113,29 @@ body {
 }
 .slide-in-right {
   animation: slide-in-right 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes trade-room-enter {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.trade-room-enter {
+  animation: trade-room-enter 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trade-room-enter,
+  .fade-up,
+  .pop-in,
+  .slide-in-right {
+    animation: none !important;
+  }
 }
 
 @keyframes shimmer {

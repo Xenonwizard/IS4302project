@@ -71,7 +71,7 @@ export function ProfileView({ username }: { username: string }) {
         {owned.length ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
             {owned.map((l) => (
-              <ListingCard key={l.id} listing={l} dense />
+              <ListingCard key={l.id} listing={l} size="medium" />
             ))}
           </div>
         ) : (
