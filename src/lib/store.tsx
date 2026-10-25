@@ -497,7 +497,6 @@ async function writeReply(chat: Negotiation, me: string, listing: Listing): Prom
           gradeLabel: listing.gradeLabel,
           certNumber: listing.certNumber,
           asking: listing.price,
-          marketValue: listing.fmv,
         },
         pendingOffer: pending?.offer
           ? `${pending.from === me ? "the user" : bot} offered ${usd(bidValue(pending.offer), { cents: true })} (${offerMix(pending.offer)})`

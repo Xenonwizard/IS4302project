@@ -266,12 +266,6 @@ function chipList(f: Filters): Chip[] {
       remove: (prev) => ({ ...prev, priceMin: "", priceMax: "" }),
     });
   }
-  if (f.fmvMin || f.fmvMax) {
-    chips.push({
-      key: "fmv",
-      label: `FMV ${f.fmvMin || "0"}–${f.fmvMax || "∞"}`,
-      remove: (prev) => ({ ...prev, fmvMin: "", fmvMax: "" }),
-    });
-  }
+
   return chips;
 }

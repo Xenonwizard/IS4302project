@@ -20,7 +20,7 @@ export function ProfileView({ username }: { username: string }) {
     );
   }, [inventory, userLower]);
 
-  const value = useMemo(() => owned.reduce((sum, l) => sum + l.fmv, 0), [owned]);
+  const value = useMemo(() => owned.reduce((sum, l) => sum + l.price, 0), [owned]);
 
   const recent = useMemo(() => {
     return slabs
@@ -60,8 +60,8 @@ export function ProfileView({ username }: { username: string }) {
         <Stat label="Listings" value={String(owned.length)} />
         <Stat label="Listed value" value={usd(value)} />
         <Stat
-          label="Best slab"
-          value={owned.length ? usd(Math.max(...owned.map((l) => l.price || l.fmv))) : "—"}
+          label="Highest ask"
+          value={owned.length ? usd(Math.max(...owned.map((l) => l.price))) : "—"}
         />
         <Stat label="Status" value="Verified collector" />
       </div>

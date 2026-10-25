@@ -11,11 +11,8 @@ import type { ChatMessage, Listing, Negotiation, TradeBid } from "./types";
  */
 
 export function bidValue(bid: TradeBid): number {
-  return (
-    Math.round(
-      (bid.cash + bid.slabIds.reduce((sum, id) => sum + (getListing(id)?.fmv ?? 0), 0)) * 100,
-    ) / 100
-  );
+  // Cash only: slabs are negotiated individually and have no assigned dollar value.
+  return Math.round(bid.cash * 100) / 100;
 }
 
 /** "full cash" or what a trade is made of, e.g. "trade: Mew ex + $40.00 cash". */
@@ -179,10 +176,10 @@ function buyerBid(listing: Listing, value: number, me: string, rand: () => numbe
   const round = (n: number) => (n >= 100 ? Math.round(n) : Math.round(n * 100) / 100);
   if (rand() < 0.3) {
     const pool = LISTINGS.filter(
-      (l) => l.id !== listing.id && l.owner !== me && l.fmv < value * 0.6 && l.fmv > value * 0.15,
+      (l) => l.id !== listing.id && l.owner !== me && l.price < value * 0.6 && l.price > value * 0.15,
     );
     const slab = pool[Math.floor(rand() * pool.length)];
-    if (slab) return { cash: round(Math.max(0, value - slab.fmv)), slabIds: [slab.id] };
+    if (slab) return { cash: round(Math.max(0, value * 0.5)), slabIds: [slab.id] };
   }
   return { cash: round(value), slabIds: [] };
 }

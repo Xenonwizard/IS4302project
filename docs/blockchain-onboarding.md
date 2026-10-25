@@ -435,9 +435,9 @@ a 176-slab marketplace you would index these events with Ponder or The Graph (se
 
 **Multi-slab trade demo (2 minutes).** `npm run chain` seeds the demo. Log in with the **test1 wallet**
 → **Negotiation rooms** → **Chat** next to **@test2** → send a message → **Make a trade offer**: the slab the
-chat is about is already picked; add slabs from your vault, cash if you like, and choose for each slab
-whether it counts at its market value or its stated value (the listing price, if it's listed). The balance
-shows who comes out ahead → **Send offer** (Chain log: `TradeEscrow.createOffer`; your Vault shows
+chat is about is already picked; add slabs from your vault and cash if you like. Review the same card's
+Pokechain listings and completed transactions using each slab's comparison link. No FMV or fairness score
+is assigned; both collectors choose their own terms → **Send offer** (Chain log: `TradeEscrow.createOffer`; your Vault shows
 **In offer #1**). Sign out, log in with the **test2 wallet**, open the chat → **Accept trade** (or
 **Counter** / **Decline**). The slab's page then shows **Sold**.
 

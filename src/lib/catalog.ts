@@ -12,9 +12,7 @@ import {
   syntheticHandle,
 } from "./pools";
 import type {
-  ActivityEvent,
   Comment,
-  Confidence,
   Grader,
   Listing,
   Offer,
@@ -23,7 +21,7 @@ import type {
 
 /**
  * Real cards from the Pokémon TCG API (pokemontcg.io): set, number, rarity,
- * hi-res scan and the raw (ungraded) TCGplayer market price at build time.
+ * hi-res scan. Imported raw-price fields are not used for pricing.
  * Everything else about a listing — grade, owner, ask, history — is generated.
  */
 interface CardRecord {
@@ -38,25 +36,9 @@ interface CardRecord {
   image: string;
   thumb: string;
   types: string[];
-  raw: number;
 }
 
 const CARDS = cards as CardRecord[];
-
-/** Graded premium over the raw price. Vintage gem mints are scarce, so they carry more. */
-const GRADE_MULT: Record<string, [vintage: number, modern: number]> = {
-  "10": [12, 3.4],
-  "9.5": [5.5, 2.2],
-  "9": [2.8, 1.45],
-  "8.5": [2, 1.2],
-  "8": [1.6, 1.05],
-  "7.5": [1.3, 0.95],
-  "7": [1.1, 0.88],
-  "6.5": [0.95, 0.8],
-  "6": [0.85, 0.75],
-};
-
-const GRADER_MULT: Record<Grader, number> = { PSA: 1, BGS: 0.95, CGC: 0.84, SGC: 0.8 };
 
 const TYPE_HUE: Record<string, number> = {
   Fire: 12,
@@ -82,72 +64,6 @@ function variantLabel(rarity: string): string {
   if (rarity === "Rare Holo") return "Holo";
   if (rarity === "Rare") return "Rare";
   return rarity.replace(/^Rare /, "");
-}
-
-function buildSales(
-  rnd: ReturnType<typeof makeRandom>,
-  fmv: number,
-): Sale[] {
-  const count = rnd.int(3, 8);
-  const sales: Sale[] = [];
-  let cursor = NOW_MS - rnd.int(4, 40) * DAY;
-  let value = fmv * rnd.float(0.93, 1.07);
-  for (let i = 0; i < count; i++) {
-    sales.push({
-      date: new Date(cursor).toISOString(),
-      price: money(value),
-    });
-    cursor -= rnd.int(12, 95) * DAY;
-    value = value * rnd.float(0.82, 1.02);
-  }
-  return sales;
-}
-
-function buildActivity(
-  rnd: ReturnType<typeof makeRandom>,
-  owner: string,
-  price: number,
-  sales: Sale[],
-): ActivityEvent[] {
-  const events: ActivityEvent[] = [];
-  const mintAt = NOW_MS - rnd.int(40, 420) * DAY;
-  events.push({
-    kind: "Mint",
-    price: money(price * rnd.float(0.7, 1.05)),
-    from: "0x0000...0000",
-    to: owner,
-    at: new Date(mintAt).toISOString(),
-    txHash: `0x${hexId(hashString(owner + mintAt), 8)}`,
-  });
-
-  const flips = rnd.int(0, 2);
-  let holder = owner;
-  for (let i = 0; i < flips; i++) {
-    const next = rnd.chance(0.5) ? rnd.pick(HANDLES) : syntheticHandle(rnd.next);
-    const at = mintAt + (i + 1) * rnd.int(6, 60) * DAY;
-    if (at > NOW_MS) break;
-    events.push({
-      kind: "Sale",
-      price: sales[Math.min(i, sales.length - 1)]?.price ?? money(price),
-      from: holder,
-      to: next,
-      at: new Date(at).toISOString(),
-      txHash: `0x${hexId(hashString(next + at), 8)}`,
-    });
-    holder = next;
-  }
-
-  const listedAt = NOW_MS - rnd.int(1, 26) * DAY;
-  events.push({
-    kind: "Listed",
-    price: money(price),
-    from: holder,
-    to: `${BRAND.name} Marketplace`,
-    at: new Date(listedAt).toISOString(),
-    txHash: `0x${hexId(hashString(holder + listedAt), 8)}`,
-  });
-
-  return events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
 function buildOffers(
@@ -185,13 +101,6 @@ function buildComments(rnd: ReturnType<typeof makeRandom>, listingId: string): C
   }));
 }
 
-/** Graded market value: raw price times the grade and grader premiums, with some noise. */
-function gradedValue(card: CardRecord, grader: Grader, grade: number, rnd: ReturnType<typeof makeRandom>): number {
-  const [mv, mm] = GRADE_MULT[String(grade)] ?? [1, 1];
-  const vintage = card.year < 2004;
-  return money(Math.max(8, card.raw * (vintage ? mv : mm) * GRADER_MULT[grader] * rnd.float(0.92, 1.08)));
-}
-
 function titleFor(card: CardRecord, grader: Grader, grade: number, label: string): string {
   return `${card.year} Pokémon ${card.set} #${card.number}/${card.printedTotal} ${card.name} - ${variantLabel(card.rarity)} (${grader} ${grade} ${label})`;
 }
@@ -207,15 +116,12 @@ function makeListing(card: CardRecord, index: number): Listing {
     : rnd.pick(rnd.chance(0.7) ? [9, 9.5, 10, 10] : [8, 8.5, 9]);
   const label = gradeLabel(grader, grade);
 
-  const fmv = gradedValue(card, grader, grade, rnd);
-  const skew = rnd.float(-0.3, 0.26);
-  const price = money(Math.max(6, fmv * (1 - skew)));
+  // Arbitrary demo seller asks, independent of external card prices.
+  const price = money(rnd.float(25, 5000));
 
   const id = hexId(0xc0de + index * 104729);
   const owner = rnd.chance(0.45) ? rnd.pick(HANDLES) : syntheticHandle(rnd.next);
-  const sales = buildSales(rnd, fmv);
-  const confidence: Confidence =
-    sales.length >= 6 ? "High" : sales.length >= 4 ? "Medium" : "Low";
+  const sales: Sale[] = [];
 
   const cardNumber = `${card.number}/${card.printedTotal}`;
   const variant = card.rarity;
@@ -236,8 +142,6 @@ function makeListing(card: CardRecord, index: number): Listing {
     language: "English",
     variant,
     price,
-    fmv,
-    confidence,
     owner,
     certNumber: String(rnd.int(1_000_000, 9_999_999)) + String(rnd.int(10, 99)),
     listedAt: new Date(NOW_MS - rnd.int(1, 600) * 3_600_000).toISOString(),
@@ -245,7 +149,7 @@ function makeListing(card: CardRecord, index: number): Listing {
     likes: rnd.int(0, 84),
     offers: buildOffers(rnd, id, price),
     sales,
-    activity: buildActivity(rnd, owner, price, sales),
+    activity: [],
     comments: buildComments(rnd, id),
     tokenId: String(rnd.int(100_000, 999_999)) + String(rnd.int(1000, 9999)),
     contract: `0x${hexId(0x251b, 20)}`,
@@ -296,9 +200,8 @@ export function buildOnChainListing(input: {
   contract?: string;
 }): Listing {
   const id = `token-${input.tokenId}`;
-  // Market value from the catalogue (the card matched by its image or cert); the asking price if it isn't there.
-  const fmv = marketValueFor(input) ?? input.price ?? 0;
-  const price = input.price ?? fmv;
+  // An unlisted slab has no price until its owner chooses one.
+  const price = input.price ?? 0;
 
   // Try to parse grade and grade label from title if present, e.g. "(PSA 10 GEM MT)" or "(PSA 9.5 MINT+)"
   const gradeMatch = input.title.match(/\((?:PSA|BGS|CGC|SGC)\s+([\d.]+)(?:\s+([^)]+))?\)/i);
@@ -338,8 +241,6 @@ export function buildOnChainListing(input: {
     language: "English",
     variant: "Holo",
     price,
-    fmv,
-    confidence: "High",
     owner: input.owner,
     ownerAddress: input.ownerAddress || "",
     certNumber: input.certNumber,
@@ -366,27 +267,6 @@ export function buildOnChainListing(input: {
     holo: true,
     hue: 200,
   };
-}
-
-const CARD_BY_IMAGE = new Map(CARDS.flatMap((c) => [[c.image, c] as const, [c.thumb, c] as const]));
-
-/**
- * Market value of a tokenised slab: the same graded estimate the marketplace gives a listing (the card's
- * TCGplayer raw price × grade and grader premium, with the same per-slab seed), found from what the chain
- * records about it. The card is matched by its image first (seeded and vaulted slabs carry the card's
- * pokemontcg.io image), then by its cert. Null when the card isn't in the catalogue.
- */
-export function marketValueFor(input: { image?: string; title?: string; grader: Grader; certNumber: string }): number | null {
-  const card = (input.image && CARD_BY_IMAGE.get(input.image)) || null;
-  if (card) {
-    // The grade is printed in the title, e.g. "(PSA 9.5 MINT+)".
-    const graded = input.title?.match(/\((?:PSA|BGS|CGC|SGC)\s+([\d.]+)/i);
-    const grade = graded ? Number(graded[1]) : (lookupCert(input.grader, input.certNumber)?.grade ?? 10);
-    const rnd = makeRandom(hashString(`${card.id}${input.grader}${grade}${input.certNumber}`));
-    return gradedValue(card, input.grader, grade, rnd);
-  }
-  const hit = lookupCert(input.grader, input.certNumber);
-  return hit ? makeOwnedListing({ ...hit, grader: input.grader, certNumber: input.certNumber, owner: "-", nowMs: 0 }).fmv : null;
 }
 
 /**
@@ -451,8 +331,7 @@ function makeOwnedListing(input: {
   const { card, grader, grade, owner, nowMs } = input;
   const rnd = makeRandom(hashString(`${card.id}${grader}${grade}${input.certNumber}`));
   const label = gradeLabel(grader, grade);
-  const fmv = gradedValue(card, grader, grade, rnd);
-  const sales = buildSales(rnd, fmv);
+  const sales: Sale[] = [];
   const id = `sub-${hashString(`${grader}${input.certNumber}`).toString(36)}`;
   return {
     id,
@@ -468,9 +347,7 @@ function makeOwnedListing(input: {
     gradeLabel: label,
     language: "English",
     variant: card.rarity,
-    price: fmv,
-    fmv,
-    confidence: sales.length >= 6 ? "High" : sales.length >= 4 ? "Medium" : "Low",
+    price: 0,
     owner,
     certNumber: input.certNumber.trim(),
     listedAt: new Date(nowMs).toISOString(),
@@ -529,7 +406,7 @@ export const FACETS = {
 
 export const PRICE_BOUNDS = {
   min: 0,
-  max: Math.ceil(Math.max(...LISTINGS.map((l) => Math.max(l.price, l.fmv))) / 100) * 100,
+  max: Math.ceil(Math.max(...LISTINGS.map((l) => l.price)) / 100) * 100,
 };
 
 /** Slabs collectors are watching and bidding on the most. */
@@ -537,36 +414,7 @@ export const MOST_WATCHED = [...LISTINGS]
   .sort((a, b) => b.likes + b.offers.length * 10 - (a.likes + a.offers.length * 10))
   .slice(0, 18);
 
-export const GRAILS = [...LISTINGS].sort((a, b) => b.fmv - a.fmv).slice(0, 12);
-
-export const RECENT_SALES = LISTINGS.flatMap((l) =>
-  l.activity
-    .filter((a) => a.kind === "Sale")
-    .map((a) => ({ listing: l, event: a })),
-)
-  .sort((a, b) => Date.parse(b.event.at) - Date.parse(a.event.at))
-  .slice(0, 30);
-
-/** Deterministic comparable-sales series for any grader/grade combination. */
-export function salesFor(listing: Listing, grader: Grader, grade: number): Sale[] {
-  if (grader === listing.grader && grade === listing.grade) return listing.sales;
-  const rnd = makeRandom(hashString(`${listing.id}${grader}${grade}`));
-  const gradeDelta = grade - listing.grade;
-  const anchor = Math.max(
-    3,
-    listing.fmv * Math.pow(1.34, gradeDelta) * (grader === "PSA" ? 1.12 : grader === "BGS" ? 1.05 : 0.94),
-  );
-  const count = rnd.int(0, 7);
-  const sales: Sale[] = [];
-  let cursor = NOW_MS - rnd.int(5, 70) * DAY;
-  let value = anchor * rnd.float(0.9, 1.1);
-  for (let i = 0; i < count; i++) {
-    sales.push({ date: new Date(cursor).toISOString(), price: Math.round(value * 100) / 100 });
-    cursor -= rnd.int(10, 120) * DAY;
-    value *= rnd.float(0.8, 1.04);
-  }
-  return sales;
-}
+export const GRAILS = [...LISTINGS].sort((a, b) => b.price - a.price).slice(0, 12);
 
 /** Population report rows for the details panel. */
 export function population(listing: Listing): { grade: string; count: number }[] {

@@ -17,7 +17,6 @@ interface ReplyRequest {
     gradeLabel: string;
     certNumber: string;
     asking: number;
-    marketValue: number;
   };
   pendingOffer?: string;
   messages: { from: "them" | "me" | "system"; text: string }[];
@@ -49,7 +48,7 @@ export async function POST(request: Request) {
   const system = [
     `You are ${clip(body.name, 40)}, a ${body.role} chatting one-to-one on Pokechain, a marketplace for graded Pokémon card slabs, much like Carousell in Singapore.`,
     `The slab: ${clip(s.title, 200)}. ${s.grader} ${s.grade} (${clip(s.gradeLabel, 20)}), cert ${clip(s.certNumber, 20)}.`,
-    `Asking price ${usd(s.asking)}, market value ${usd(s.marketValue)}. It sits in the Delaware vault, insured, and ownership moves as an on-chain token, so nothing is shipped during the deal.`,
+    `Seller asking price ${usd(s.asking)}. It sits in the Delaware vault, insured, and ownership moves as an on-chain token, so nothing is shipped during the deal.`,
     body.pendingOffer
       ? `An offer is already sent through the app and waiting: ${clip(body.pendingOffer, 160)}. Don't ask for it to be sent again; at most hint it could be edited.`
       : "There is no offer on the table right now; to make one the buyer uses the app's Make offer button.",

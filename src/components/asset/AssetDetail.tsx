@@ -1,12 +1,13 @@
 "use client";
 
+import { CardComparables } from "./CardComparables";
+
 import clsx from "clsx";
 import Link from "next/link";
 import {
   MessagesSquare,
   BadgeCheck,
   Clock,
-  ExternalLink,
   Gavel,
   Heart,
   Play,
@@ -16,12 +17,9 @@ import {
   Tag,
   Truck,
 } from "lucide-react";
-import Image from "next/image";
 import { useMemo, useState } from "react";
-import { BRAND } from "@/lib/brand";
-import { GRADERS, GRADE_STEPS } from "@/lib/pools";
-import { population, salesFor } from "@/lib/catalog";
-import { shortDate, truncMiddle, usd } from "@/lib/format";
+import { population } from "@/lib/catalog";
+import { truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
@@ -29,12 +27,10 @@ import { DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ActivityEvent, Grader, Listing, Sale } from "@/lib/types";
+import type { ActivityEvent, Listing } from "@/lib/types";
 import { CopyText } from "../chain/ChainConsole";
-import { TokenRecord } from "../chain/TokenRecord";
 import { OfferModal } from "../modals/OfferModal";
 import { SoldBanner } from "../negotiations/SoldBanner";
-import { CardBack } from "../slab/CardBack";
 import { Slab, SlabStage } from "../slab/Slab";
 import {
   Avatar,
@@ -42,9 +38,7 @@ import {
   Button,
   Countdown,
   Modal,
-  Sparkline,
   TimeAgo,
-  inputClass,
 } from "../ui/primitives";
 
 export function AssetDetail({ listing: base }: { listing: Listing }) {
@@ -168,7 +162,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
   const displayPrice = enabledOnChain && onChainMarketListing
     ? onChainMarketListing.price
-    : (listed || !owned ? listing.price : listing.fmv);
+    : listing.price;
 
   const effectiveListing = useMemo(
     () => ({
@@ -409,7 +403,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const [buyBusy, setBuyBusy] = useState(false);
   const [delisting, setDelisting] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
-  const [view, setView] = useState<"slab" | "front" | "back">("slab");
+  const [view, setView] = useState<"slab" | "back">("slab");
   const [spin, setSpin] = useState(false);
 
   const handleBuy = async () => {
@@ -460,31 +454,19 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
       <div className="mb-4 empty:hidden">
         <SoldBanner tokenId={listing.tokenId} relisted={listed} />
       </div>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* ---------------- left ---------------- */}
         <div className="min-w-0">
-          <div className="relative overflow-hidden rounded-card border border-hairline bg-[#0c0c10]">
-            <div className="aspect-[4/3] w-full sm:aspect-[16/11]">
-              {view === "slab" ? (
-                <SlabStage listing={listing} spinning={spin} />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center p-8">
-                  <div className="@container relative aspect-[63/88] h-[86%] max-h-[460px] overflow-hidden rounded-[4.5cqw] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.9)]">
-                    {view === "front" ? (
-                      <Image
-                        src={listing.image}
-                        alt={`${listing.subject} card front`}
-                        fill
-                        sizes="(min-width: 1280px) 340px, 60vw"
-                        className="object-cover"
-                        preload
-                      />
-                    ) : (
-                      <CardBack />
-                    )}
-                  </div>
-                </div>
-              )}
+          <div
+            className="relative mx-auto flex aspect-square w-full flex-col overflow-hidden rounded-card border border-hairline bg-[#0c0c10]"
+            style={{ maxWidth: "min(100%, 80vh)" }}
+          >
+            <div className="relative min-h-0 w-full flex-1">
+              <SlabStage
+                listing={listing}
+                spinning={view === "slab" && spin}
+                side={view === "slab" ? undefined : "back"}
+              />
             </div>
 
             <div className="flex items-center gap-2.5 border-t border-hairline p-3">
@@ -502,16 +484,13 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
                 <Play size={17} />
               </button>
               <Thumb active={view === "slab"} onClick={() => setView("slab")}>
-                <Slab listing={listing} flat />
-              </Thumb>
-              <Thumb active={view === "front"} onClick={() => setView("front")}>
-                <div className="relative aspect-[63/88] w-full overflow-hidden rounded">
-                  <Image src={listing.image} alt="" fill sizes="56px" className="object-cover" />
+                <div className="relative h-full aspect-[0.62]">
+                  <Slab listing={listing} flat fit />
                 </div>
               </Thumb>
               <Thumb active={view === "back"} onClick={() => setView("back")}>
-                <div className="@container aspect-[63/88] w-full overflow-hidden rounded">
-                  <CardBack />
+                <div className="relative h-full aspect-[0.62]">
+                  <Slab listing={listing} fit side="back" />
                 </div>
               </Thumb>
               <p className="ml-auto hidden text-[12px] text-dim sm:block">
@@ -519,37 +498,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               </p>
             </div>
           </div>
-
-          {/* activity */}
-          <section className="mt-6">
-            <h2 className="mb-3 text-base font-bold">Activity history</h2>
-            <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-              {allActivity.map((e, i) => (
-                <li key={`${e.txHash}-${i}`} className="flex items-center gap-4 p-4">
-                  <Badge tone={e.kind === "Mint" ? "accent" : e.kind === "Sale" ? "good" : "neutral"}>
-                    {e.kind}
-                  </Badge>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold">{e.price ? usd(e.price) : "—"}</p>
-                    <p className="truncate text-[12px] text-muted">
-                      From <span className="text-white/80">{e.from}</span> to{" "}
-                      <span className="text-white/80">{e.to}</span>
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[12px] text-dim">
-                    <TimeAgo value={e.at} />
-                  </span>
-                  <span className="hidden shrink-0 items-center gap-1 text-[12px] text-dim sm:flex">
-                    <CopyText text={e.txHash} title={truncMiddle(e.txHash, 6, 4)} />
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
         </div>
 
         {/* ---------------- right ---------------- */}
-        <div className="min-w-0 space-y-4">
+        <div className="min-w-0 space-y-4 xl:flex xl:h-full xl:flex-col xl:justify-between xl:space-y-0">
           <div className="flex items-center justify-between gap-3">
             <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
               <ShieldCheck size={13} className="text-good" />
@@ -616,93 +568,62 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </button>
           </div>
 
-          {/* purchase box */}
+          {/* listing status and actions */}
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
-            <div className="flex items-center gap-2 border-b border-hairline px-4 py-3 text-[13px] text-muted">
-              <Clock size={14} />
-              {!listed ? (
-                <span>{owned ? "Held in your vault, not listed" : "Not listed right now"}</span>
-              ) : (
-                <span>
-                  Listing renews in:{" "}
-                  <Countdown to={listing.endsAt} every={7 * 86_400_000} className="font-semibold text-white" />
-                </span>
-              )}
-            </div>
-
-            <div className="p-4">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <p className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                    {listed ? "Asking" : owned ? "Market value" : "Last asked"}
+            <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] sm:items-center sm:p-5">
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold text-muted">{listed ? "Listed for" : "Listing status"}</p>
+                <p className="mt-1 text-[30px] font-bold leading-tight">
+                  {listed ? usd(displayPrice, { cents: Boolean(onChainTokenId) }) : "Not listed"}
+                </p>
+                {!listed ? (
+                  <p className="mt-2 text-[12px] leading-relaxed text-muted">
+                    {owned ? "Held in your vault and ready to list." : "This slab is not for sale right now."}
                   </p>
-                  <p className="mt-1 text-[30px] font-bold leading-none">
-                    {usd(displayPrice, { cents: Boolean(onChainTokenId) })}
-                  </p>
-                </div>
+                ) : null}
               </div>
 
-              {owned ? (
-                <div className="mt-4 grid gap-2">
-                  {listed ? (
-                    <>
-                      <Link href={`/trades?listing=${listing.id}`}>
-                        <Button size="lg" className="w-full">
-                          <MessagesSquare size={16} />
-                          Offers on this slab{openChats ? ` (${openChats})` : ""}
-                        </Button>
-                      </Link>
-                      <Button
-                        size="lg"
-                        variant="secondary"
-                        className="w-full"
-                        disabled={delisting}
-                        onClick={handleDelist}
-                      >
-                        {delisting ? "Delisting..." : "Delist from Marketplace"}
+              <div className="grid min-w-0 gap-2">
+                {owned ? listed ? (
+                  <>
+                    <Link href={`/trades?listing=${listing.id}`}>
+                      <Button size="lg" className="w-full">
+                        <MessagesSquare size={16} />
+                        Offers on this slab{openChats ? ` (${openChats})` : ""}
                       </Button>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-[12px] text-muted">
-                        List this slab from your Vault to put it on the marketplace and receive offers.
-                      </p>
-                      <Link href="/vault">
-                        <Button size="lg" className="w-full">
-                          <Tag size={16} />
-                          List it from your Vault
-                        </Button>
-                      </Link>
-                    </>
-                  )}
-                </div>
-              ) : listed ? (
-                <div className="mt-4 grid gap-2">
-                  <Button
-                    size="lg"
-                    className="w-full"
-                    onClick={() => requireAuth(() => setBuyOpen(true)) && setBuyOpen(true)}
-                  >
-                    <ShoppingCart size={16} />
-                    Buy now for {usd(displayPrice)}
-                  </Button>
-                  <Button
-                    size="lg"
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}
-                  >
-                    <Gavel size={16} />
-                    Make an offer
-                  </Button>
-                  <p className="text-center text-[11px] text-dim">
-                    0% platform fee · Atomic on-chain settlement
-                  </p>
-                </div>
-              ) : (
-                <p className="mt-4 text-[12px] text-muted">This slab is not for sale right now.</p>
-              )}
+                    </Link>
+                    <Button size="lg" variant="secondary" className="w-full" disabled={delisting} onClick={handleDelist}>
+                      {delisting ? "Delisting..." : "Delist from Marketplace"}
+                    </Button>
+                  </>
+                ) : (
+                  <Link href="/vault">
+                    <Button size="lg" className="w-full">
+                      <Tag size={16} />
+                      List it from your Vault
+                    </Button>
+                  </Link>
+                ) : listed ? (
+                  <>
+                    <Button size="lg" className="w-full" onClick={() => requireAuth(() => setBuyOpen(true)) && setBuyOpen(true)}>
+                      <ShoppingCart size={16} />
+                      Buy now
+                    </Button>
+                    <Button size="lg" variant="secondary" className="w-full" onClick={() => requireAuth(() => setOfferOpen(true)) && setOfferOpen(true)}>
+                      <Gavel size={16} />
+                      Make an offer
+                    </Button>
+                  </>
+                ) : null}
+              </div>
             </div>
+
+            {listed ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-4 py-3 text-[11px] text-muted sm:px-5">
+                <span className="flex items-center gap-1.5"><ShieldCheck size={13} className="text-good" />0% platform fee · Atomic on-chain settlement</span>
+                <span className="flex items-center gap-1.5"><Clock size={13} />Renews in <Countdown to={listing.endsAt} every={7 * 86_400_000} className="font-semibold text-white" /></span>
+              </div>
+            ) : null}
           </div>
 
           {/* trust strip */}
@@ -712,48 +633,38 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             <Trust icon={<Truck size={15} />} text="Ship to you anytime" />
           </div>
 
-          {/* pricing */}
-          <section className="rounded-card border border-hairline bg-surface">
-            <h2 className="border-b border-hairline px-4 py-3 text-sm font-bold">
-              {BRAND.name} pricing
-            </h2>
-            <div className="space-y-3 p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-[13px] text-muted">Market value</span>
-                <span className="text-lg font-bold">{usd(listing.fmv, { cents: Boolean(onChainTokenId) })}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[13px] text-muted">Confidence</span>
-                <span className="flex items-center gap-2 text-[13px] font-semibold">
-                  {listing.confidence}
-                  <span className="flex gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        className={clsx(
-                          "h-2 w-2 rounded-full",
-                          i <
-                            (listing.confidence === "High" ? 3 : listing.confidence === "Medium" ? 2 : 1)
-                            ? "bg-good"
-                            : "bg-surface-3",
-                        )}
-                      />
-                    ))}
-                  </span>
-                </span>
-              </div>
-              <Sparkline
-                values={[...listing.sales].reverse().map((s) => s.price)}
-                className="h-10 w-full"
-              />
-            </div>
-          </section>
+          <CardComparables key={listing.id} card={listing} tokenId={onChainTokenId ?? undefined} />
 
-          {onChainTokenId ? <TokenRecord tokenId={onChainTokenId} /> : null}
-          <PriceHistory listing={listing} />
           <Details listing={effectiveListing} />
         </div>
       </div>
+
+      {/* Full-width history sits below the gallery and listing details. */}
+      <section className="mt-8">
+        <h2 className="mb-3 text-base font-bold">Activity history</h2>
+        <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
+          {allActivity.map((e, i) => (
+            <li key={`${e.txHash}-${i}`} className="flex items-center gap-4 p-4">
+              <Badge tone={e.kind === "Mint" ? "accent" : e.kind === "Sale" ? "good" : "neutral"}>
+                {e.kind}
+              </Badge>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold">{e.price ? usd(e.price) : "—"}</p>
+                <p className="truncate text-[12px] text-muted">
+                  From <span className="text-white/80">{e.from}</span> to{" "}
+                  <span className="text-white/80">{e.to}</span>
+                </p>
+              </div>
+              <span className="shrink-0 text-[12px] text-dim">
+                <TimeAgo value={e.at} />
+              </span>
+              <span className="hidden shrink-0 items-center gap-1 text-[12px] text-dim sm:flex">
+                <CopyText text={e.txHash} title={truncMiddle(e.txHash, 6, 4)} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       {/* Buy Confirmation Modal */}
       <Modal open={buyOpen} onClose={() => !buyBusy && setBuyOpen(false)} title="Confirm Purchase">
@@ -864,103 +775,6 @@ function Trust({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
-function PriceHistory({ listing }: { listing: Listing }) {
-  const [grader, setGrader] = useState<Grader>(listing.grader);
-  const [grade, setGrade] = useState<number>(listing.grade);
-  const [allOpen, setAllOpen] = useState(false);
-  const sales = useMemo(() => {
-    const raw = salesFor(listing, grader, grade);
-    const seen = new Set<string>();
-    const deduped: Sale[] = [];
-    for (const s of raw) {
-      const key = `${s.date}-${s.price}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduped.push(s);
-      }
-    }
-    return deduped;
-  }, [listing, grader, grade]);
-
-  return (
-    <section className="rounded-card border border-hairline bg-surface">
-      <h2 className="border-b border-hairline px-4 py-3 text-sm font-bold">Price history</h2>
-      <div className="space-y-3 p-4">
-        <div className="flex gap-1.5 rounded-xl bg-surface-2 p-1">
-          {GRADERS.map((g) => (
-            <button
-              key={g}
-              onClick={() => setGrader(g)}
-              className={clsx(
-                "h-8 flex-1 rounded-lg text-[12px] font-bold transition",
-                grader === g ? "bg-accent text-white" : "text-muted hover:text-white",
-              )}
-            >
-              {g}
-            </button>
-          ))}
-        </div>
-        <div className="no-scrollbar flex gap-1.5 overflow-x-auto">
-          {GRADE_STEPS.map((g) => (
-            <button
-              key={g}
-              onClick={() => setGrade(g)}
-              className={clsx(
-                "h-8 min-w-[42px] shrink-0 rounded-lg text-[12px] font-bold transition",
-                grade === g ? "bg-accent text-white" : "bg-surface-2 text-muted hover:text-white",
-              )}
-            >
-              {g}
-            </button>
-          ))}
-        </div>
-
-        {sales.length ? <Sparkline values={[...sales].reverse().map((s) => s.price)} className="h-12 w-full" /> : null}
-
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-[13px] font-bold">
-            {grader} {grade}
-          </span>
-          {sales.length > 3 ? (
-            <button
-              onClick={() => setAllOpen(true)}
-              className="text-[12px] font-semibold text-accent hover:underline"
-            >
-              View all sales
-            </button>
-          ) : null}
-        </div>
-
-        {sales.length ? (
-          <ul className="divide-y divide-[rgba(255,255,255,0.08)]">
-            {sales.slice(0, 3).map((s, idx) => (
-              <li key={`${s.date}-${s.price}-${idx}`} className="flex items-center justify-between py-2.5 text-[13px]">
-                <span className="text-muted">{shortDate(s.date)}</span>
-                <span className="font-semibold">{usd(s.price)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="py-6 text-center text-[13px] text-dim">
-            No recorded sales for {grader} {grade}.
-          </p>
-        )}
-      </div>
-
-      <Modal open={allOpen} onClose={() => setAllOpen(false)} title={`${grader} ${grade} sales`}>
-        <ul className="divide-y divide-[rgba(255,255,255,0.08)] p-5 pt-0">
-          {sales.map((s, idx) => (
-            <li key={`${s.date}-${s.price}-${idx}`} className="flex items-center justify-between py-3 text-[13px]">
-              <span className="text-muted">{shortDate(s.date)}</span>
-              <span className="font-semibold">{usd(s.price)}</span>
-            </li>
-          ))}
-        </ul>
-      </Modal>
-    </section>
-  );
-}
-
 function Details({ listing }: { listing: Listing }) {
   const [open, setOpen] = useState(false);
   // Older sets share their era's name (e.g. Base, Platinum), so drop the repeat.
@@ -989,15 +803,6 @@ function Details({ listing }: { listing: Listing }) {
               {c}
             </span>
           ))}
-        </div>
-
-        <div className="mt-4 space-y-2.5 border-t border-hairline pt-4 text-[13px]">
-          <Row label="Token standard" value="ERC-721" />
-          <Row label="Chain" value={listing.chain} />
-          <Row label="Token ID" value={truncMiddle(listing.tokenId, 6, 4)} />
-          <Row label="Contract" value={truncMiddle(listing.contract, 6, 4)} />
-          <Row label="Owner address" value={truncMiddle(listing.ownerAddress, 6, 4)} />
-          <Row label="Card data" value="pokemontcg.io" />
         </div>
 
         {open ? (
@@ -1030,14 +835,5 @@ function Details({ listing }: { listing: Listing }) {
         </button>
       </div>
     </section>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-muted">{label}</span>
-      <span className="font-semibold">{value}</span>
-    </div>
   );
 }

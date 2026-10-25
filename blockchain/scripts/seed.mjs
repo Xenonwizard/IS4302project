@@ -163,6 +163,93 @@ const SEED_SLABS = [
     image: "https://images.pokemontcg.io/sv8pt5/161_hires.png",
     custodianRef: "SolanaMintUmbreonEx161",
     listPriceUsdc: 2800, // Listed
+    saleTo: TEST1,
+  },
+  // Local demo comparables: repeated printings with varied grades so the comparison panel has
+  // real SlabMarket listings and CardPurchased events to read. These are fictional test records.
+  {
+    recipient: ASH,
+    grader: "PSA",
+    certNumber: "14141414",
+    title: "2003 Pokémon Skyridge #11/144 Gyarados (PSA 10 GEM MT)",
+    image: "https://images.pokemontcg.io/ecard3/11_hires.png",
+    custodianRef: "DemoGyaradosSkyridgePSA10",
+    listPriceUsdc: 2400,
+  },
+  {
+    recipient: MISTY,
+    grader: "PSA",
+    certNumber: "15151515",
+    title: "2003 Pokémon Skyridge #11/144 Gyarados (PSA 9 MINT)",
+    image: "https://images.pokemontcg.io/ecard3/11_hires.png",
+    custodianRef: "DemoGyaradosSkyridgePSA9",
+    listPriceUsdc: 1850,
+    saleTo: TEST1,
+  },
+  {
+    recipient: BROCK,
+    grader: "BGS",
+    certNumber: "16161616",
+    title: "2003 Pokémon Skyridge #11/144 Gyarados (BGS 9.5 GEM MINT)",
+    image: "https://images.pokemontcg.io/ecard3/11_hires.png",
+    custodianRef: "DemoGyaradosSkyridgeBGS95",
+    listPriceUsdc: 2100,
+  },
+  {
+    recipient: ASH,
+    grader: "PSA",
+    certNumber: "17171717",
+    title: "2017 Pokémon Shining Legends #40/73 Shining Mew - Shining (PSA 10 GEM MT)",
+    image: "https://images.pokemontcg.io/sm35/40_hires.png",
+    custodianRef: "DemoShiningMewPSA10",
+    listPriceUsdc: 1250,
+  },
+  {
+    recipient: MISTY,
+    grader: "PSA",
+    certNumber: "18181818",
+    title: "2017 Pokémon Shining Legends #40/73 Shining Mew - Shining (PSA 8 NM-MT)",
+    image: "https://images.pokemontcg.io/sm35/40_hires.png",
+    custodianRef: "DemoShiningMewPSA8",
+    listPriceUsdc: 720,
+    saleTo: TEST2,
+  },
+  {
+    recipient: BROCK,
+    grader: "BGS",
+    certNumber: "19191919",
+    title: "2017 Pokémon Shining Legends #40/73 Shining Mew - Shining (BGS 9.5 GEM MINT)",
+    image: "https://images.pokemontcg.io/sm35/40_hires.png",
+    custodianRef: "DemoShiningMewBGS95",
+    listPriceUsdc: 1100,
+  },
+  {
+    recipient: ASH,
+    grader: "PSA",
+    certNumber: "20202020",
+    title: "2025 Pokémon Prismatic Evolutions #161/131 Umbreon ex (PSA 9 MINT)",
+    image: "https://images.pokemontcg.io/sv8pt5/161_hires.png",
+    custodianRef: "DemoUmbreonPSA9",
+    listPriceUsdc: 1950,
+  },
+  {
+    recipient: MISTY,
+    grader: "BGS",
+    certNumber: "21212121",
+    title: "2025 Pokémon Prismatic Evolutions #161/131 Umbreon ex (BGS 9.5 GEM MINT)",
+    image: "https://images.pokemontcg.io/sv8pt5/161_hires.png",
+    custodianRef: "DemoUmbreonBGS95",
+    listPriceUsdc: 2250,
+    saleTo: TEST1,
+  },
+  {
+    recipient: BROCK,
+    grader: "PSA",
+    certNumber: "22222223",
+    title: "2025 Pokémon Prismatic Evolutions #161/131 Umbreon ex (PSA 10 GEM MT)",
+    image: "https://images.pokemontcg.io/sv8pt5/161_hires.png",
+    custodianRef: "DemoUmbreonPSA10",
+    listPriceUsdc: 3100,
   },
 ];
 
@@ -178,6 +265,7 @@ async function seed() {
   const usdcAbi = parseAbi([
     "function faucet(uint256 amount) external",
     "function balanceOf(address account) external view returns (uint256)",
+    "function approve(address spender, uint256 amount) external returns (bool)",
   ]);
 
   const vaultAbi = parseAbi([
@@ -190,7 +278,9 @@ async function seed() {
 
   const marketAbi = parseAbi([
     "function list(uint256 tokenId, uint256 price) external",
+    "function buy(uint256 tokenId) external",
     "function isListed(uint256 tokenId) external view returns (bool)",
+    "function getSalesForToken(uint256 tokenId) external view returns ((uint256 tokenId, address seller, address buyer, uint256 price, uint256 fee, uint64 settledAt)[])",
     "function getActiveListings() external view returns ((uint256 tokenId, address seller, string sellerHandle, uint256 price, uint64 listedAt, string grader, string certNumber, string title, string image)[])",
   ]);
 
@@ -287,8 +377,17 @@ async function seed() {
 
     tokenMap.set(slab.certNumber, tokenId);
 
+    const priorSales = tokenId > 0n
+      ? await publicClient.readContract({
+          address: slabMarketAddress,
+          abi: marketAbi,
+          functionName: "getSalesForToken",
+          args: [tokenId],
+        })
+      : [];
+
     // 3. List on SlabMarket if listPriceUsdc > 0
-    if (slab.listPriceUsdc > 0 && tokenId > 0n) {
+    if (slab.listPriceUsdc > 0 && tokenId > 0n && priorSales.length === 0) {
       const alreadyListed = await publicClient.readContract({
         address: slabMarketAddress,
         abi: marketAbi,
@@ -307,6 +406,29 @@ async function seed() {
         });
         await publicClient.waitForTransactionReceipt({ hash });
         console.log(`  ✓ Listed Token #${tokenId} on SlabMarket for $${slab.listPriceUsdc.toLocaleString()} USDC`);
+      }
+    }
+
+    // Seed a few completed, on-chain demo sales. The sold slab remains unlisted on reruns;
+    // checking its sales history makes this safe to run repeatedly.
+    if (slab.saleTo && tokenId > 0n) {
+      if (priorSales.length === 0) {
+        const buyer = getWallet(slab.saleTo);
+        const approveHash = await buyer.writeContract({
+          address: mockUSDCAddress,
+          abi: usdcAbi,
+          functionName: "approve",
+          args: [slabMarketAddress, parseUnits(String(slab.listPriceUsdc), 6)],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        const buyHash = await buyer.writeContract({
+          address: slabMarketAddress,
+          abi: marketAbi,
+          functionName: "buy",
+          args: [tokenId],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: buyHash });
+        console.log(`  ✓ Recorded demo sale for Token #${tokenId} at $${slab.listPriceUsdc.toLocaleString()} USDC`);
       }
     }
   }

@@ -18,7 +18,7 @@ export function ListForSaleForm({
 }) {
   const { user, listFromVault, pushToast } = useStore();
   const { listCard } = useMarketChain();
-  const [price, setPrice] = useState(String(listing.fmv));
+  const [price, setPrice] = useState("");
   const [busy, setBusy] = useState(false);
   const value = Math.max(0, Number(price) || 0);
 
@@ -45,8 +45,8 @@ export function ListForSaleForm({
   return (
     <div>
       <Field
-        label="Asking price (Pokechain credits)"
-        hint="Set your fixed asking price for the Pokéchain marketplace."
+        label="Asking price (USDC)"
+        hint="Choose your asking price. Compare Pokechain listings and transactions on the slab page."
       >
         <div className="relative">
           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">$</span>
@@ -62,17 +62,13 @@ export function ListForSaleForm({
 
       <dl className="mt-4 space-y-2.5 rounded-2xl bg-surface p-4 text-[13px]">
         <div className="flex justify-between">
-          <dt className="text-muted">Market value</dt>
-          <dd className="font-semibold">{usd(listing.fmv, { cents: true })}</dd>
-        </div>
-        <div className="flex justify-between">
           <dt className="text-muted">Pokéchain platform fee (Rule 2)</dt>
           <dd className="font-semibold text-good">0% ($0.00)</dd>
         </div>
         <div className="h-px bg-hairline" />
         <div className="flex justify-between">
           <dt className="text-muted">You receive upon settlement</dt>
-          <dd className="font-bold text-accent">{usd(value, { cents: true })} Pokechain credits</dd>
+          <dd className="font-bold text-accent">{usd(value, { cents: true })} USDC</dd>
         </div>
       </dl>
 
@@ -86,7 +82,7 @@ export function ListForSaleForm({
       <Button
         size="lg"
         className="mt-5 w-full"
-        disabled={value <= 0 || busy}
+        disabled={!Number.isFinite(Number(price)) || value <= 0 || busy}
         onClick={handleSubmit}
       >
         {busy ? "Broadcasting transaction..." : `List for ${usd(value, { cents: true })}`}

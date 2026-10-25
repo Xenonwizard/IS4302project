@@ -9,8 +9,6 @@ export interface Filters {
   years: string[];
   priceMin: string;
   priceMax: string;
-  fmvMin: string;
-  fmvMax: string;
 }
 
 export const EMPTY_FILTERS: Filters = {
@@ -22,8 +20,6 @@ export const EMPTY_FILTERS: Filters = {
   years: [],
   priceMin: "",
   priceMax: "",
-  fmvMin: "",
-  fmvMax: "",
 };
 
 export const SORTS = [
@@ -45,7 +41,6 @@ export function activeFilterCount(f: Filters): number {
   n += f.sets.length;
   n += f.years.length;
   if (f.priceMin || f.priceMax) n += 1;
-  if (f.fmvMin || f.fmvMax) n += 1;
   return n;
 }
 
@@ -76,7 +71,6 @@ export function applyFilters(
     if (filters.sets.length && !filters.sets.includes(l.set)) return false;
     if (filters.years.length && !filters.years.includes(String(l.year))) return false;
     if (!inRange(l.price, filters.priceMin, filters.priceMax)) return false;
-    if (!inRange(l.fmv, filters.fmvMin, filters.fmvMax)) return false;
     return true;
   });
 }

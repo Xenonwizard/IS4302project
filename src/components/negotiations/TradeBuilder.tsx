@@ -9,7 +9,6 @@ import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { ChatTrade, ChatTradeSide, ChatTradeSlab } from "@/lib/types";
-import { type ValueBasis } from "@/lib/valuation";
 import { Button, Modal, inputClass } from "../ui/primitives";
 import { BalancePanel, SlabTile } from "./TradeParts";
 
@@ -24,9 +23,8 @@ export interface CounterOf {
 const exact = (n: number) => usd(n, { cents: true });
 
 /**
- * Builds a trade inside a chat: pick slabs from both vaults, choose for each whether it counts at its
- * market value or at the value its owner stated, add cash either way, and watch the balance before
- * sending. Sending locks your side in TradeEscrow and drops the offer into the chat.
+ * Builds a trade inside a chat: pick slabs from both vaults, compare their Pokechain records,
+ * and add cash either way. Sending locks your side in TradeEscrow and drops the offer into the chat.
  */
 export function TradeBuilder({
   open,
@@ -43,7 +41,7 @@ export function TradeBuilder({
   negotiationId: string;
   me: { address: Address; handle: string };
   them: { address: Address; handle: string };
-  /** Pokechain credits in my account, the cash I can put in an offer */
+  /** USDC in my Pokechain account, the cash I can put in an offer */
   cash: number;
   counterOf?: CounterOf;
   /** a new offer starts with these picked, e.g. the slab the chat is about */
@@ -82,9 +80,6 @@ function Form({
 
   const [give, setGive] = useState<string[]>(counterOf?.mySide.slabs.map((s) => s.tokenId) ?? preselect?.mine ?? []);
   const [get, setGet] = useState<string[]>(counterOf?.theirSide.slabs.map((s) => s.tokenId) ?? preselect?.theirs ?? []);
-  const [basis, setBasis] = useState<Record<string, ValueBasis>>(() =>
-    Object.fromEntries([...(counterOf?.mySide.slabs ?? []), ...(counterOf?.theirSide.slabs ?? [])].map((s) => [s.tokenId, s.basis])),
-  );
   // Strings, so the fields can be cleared and retyped.
   const [giveCash, setGiveCash] = useState(counterOf?.mySide.cash ? String(counterOf.mySide.cash) : "");
   const [getCash, setGetCash] = useState(counterOf?.theirSide.cash ? String(counterOf.theirSide.cash) : "");
@@ -98,20 +93,13 @@ function Form({
     return [...theirs, ...fromOffer];
   }, [theirs, counterOf]);
 
-  const face = (s: TradeSlab): ChatTradeSlab => valuedSlab(s, basis[s.tokenId] ?? "market");
+  const face = (s: TradeSlab): ChatTradeSlab => valuedSlab(s);
   const toggle = (list: string[], set: (v: string[]) => void, id: string) => set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
   const myCash = Number(giveCash || 0);
   const theirCash = Number(getCash || 0);
   const giveSide: ChatTradeSide = { slabs: mine.filter((s) => give.includes(s.tokenId)).map(face), cash: Number.isFinite(myCash) ? myCash : 0 };
   const getSide: ChatTradeSide = { slabs: theirPool.filter((s) => get.includes(s.tokenId)).map(face), cash: Number.isFinite(theirCash) ? theirCash : 0 };
-
-  const evenOut = (side: "give" | "get", extra: number) => {
-    const add = (v: string) => String(Math.round((Number(v || 0) + extra) * 100) / 100);
-    if (side === "give") setGiveCash(add);
-    else setGetCash(add);
-  };
-
   const submit = async () => {
     const problem =
       !Number.isFinite(myCash) || !Number.isFinite(theirCash) || myCash < 0 || theirCash < 0
@@ -155,6 +143,10 @@ function Form({
 
   return (
     <div className="space-y-4 p-5">
+      <p className="text-[13px] leading-relaxed text-muted">
+        Pick slabs from both vaults and choose any cash to add. Open each card&apos;s comparison records to review Pokechain listings and completed transactions, then agree on your terms.
+      </p>
+
       <div className="grid gap-3 md:grid-cols-2">
         <Column
           title="You give"
@@ -162,7 +154,6 @@ function Form({
           face={face}
           selected={give}
           onToggle={(id) => toggle(give, setGive, id)}
-          onBasis={(id, b) => setBasis((p) => ({ ...p, [id]: b }))}
           cash={giveCash}
           onCash={setGiveCash}
           hint={`You have ${exact(cash)} in your Pokechain account`}
@@ -175,7 +166,6 @@ function Form({
           face={face}
           selected={get}
           onToggle={(id) => toggle(get, setGet, id)}
-          onBasis={(id, b) => setBasis((p) => ({ ...p, [id]: b }))}
           cash={getCash}
           onCash={setGetCash}
           hint="Cash they add"
@@ -184,7 +174,7 @@ function Form({
         />
       </div>
 
-      <BalancePanel give={giveSide} get={getSide} onEvenOut={evenOut} />
+      <BalancePanel give={giveSide} get={getSide} />
 
       {error ? <p role="alert" className="rounded-lg bg-bad/10 px-3 py-2 text-[12.5px] text-bad">{error}</p> : null}
 
@@ -194,6 +184,7 @@ function Form({
           {busy ? "Signing…" : counterOf ? "Send counter-offer" : "Send offer"}
         </Button>
       </div>
+
     </div>
   );
 }
@@ -204,7 +195,6 @@ function Column({
   face,
   selected,
   onToggle,
-  onBasis,
   cash,
   onCash,
   hint,
@@ -216,7 +206,6 @@ function Column({
   face: (s: TradeSlab) => ChatTradeSlab;
   selected: string[];
   onToggle: (id: string) => void;
-  onBasis: (id: string, b: ValueBasis) => void;
   cash: string;
   onCash: (v: string) => void;
   hint: string;
@@ -236,7 +225,6 @@ function Column({
               selected={selected.includes(s.tokenId)}
               note={s.listed ? `Listed at ${exact(s.listedPrice ?? 0)}: ${listedNote}` : undefined}
               onClick={() => onToggle(s.tokenId)}
-              onBasis={(b) => onBasis(s.tokenId, b)}
             />
           ))
         ) : (
@@ -244,7 +232,7 @@ function Column({
         )}
       </div>
       <label className="mt-3 block text-[12px] font-semibold text-muted">
-          Plus cash (Pokechain credits)
+        Plus cash (USDC)
         <input
           className={clsx(inputClass, "mt-1 h-10")}
           inputMode="decimal"

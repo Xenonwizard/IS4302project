@@ -32,6 +32,7 @@ export function Slab({
   fit = false,
   interactive = false,
   spinning = false,
+  side = "front",
   maxTilt = 14,
   sizes = "(min-width: 1024px) 240px, 45vw",
 }: {
@@ -45,6 +46,8 @@ export function Slab({
   interactive?: boolean;
   /** slow turntable spin that shows the back */
   spinning?: boolean;
+  /** show the front or back face while keeping the slab casing */
+  side?: "front" | "back";
   maxTilt?: number;
   sizes?: string;
 }) {
@@ -67,6 +70,7 @@ export function Slab({
       <div
         ref={bodyRef}
         className={clsx("slab-body relative h-full w-full", spinning && "spin-slab")}
+        style={!spinning && side ? { transform: side === "back" ? "rotateY(180deg)" : "rotateY(0deg)" } : undefined}
       >
         {!flat
           ? Array.from({ length: THICKNESS_LAYERS }, (_, i) => (
@@ -146,10 +150,7 @@ function useTilt(
     const root = rootRef.current;
     const body = bodyRef.current;
     if (!root || !body) return;
-    if (!enabled) {
-      body.style.transform = "";
-      return;
-    }
+    if (!enabled) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) return;
 
@@ -387,9 +388,11 @@ function SlabBack({ listing }: { listing: Listing }) {
 export function SlabStage({
   listing,
   spinning = false,
+  side,
 }: {
   listing: Listing;
   spinning?: boolean;
+  side?: "front" | "back";
 }) {
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
@@ -399,12 +402,13 @@ export function SlabStage({
           background: `radial-gradient(55% 55% at 50% 40%, hsl(${listing.hue} 60% 45% / 0.22), transparent 70%), radial-gradient(40% 18% at 50% 92%, rgba(255,255,255,0.05), transparent 70%)`,
         }}
       />
-      <div className="relative aspect-[0.62] h-[84%] max-h-[480px]">
+      <div className="relative aspect-[0.62] h-[90%] max-h-[640px]">
         <Slab
           listing={listing}
           fit
-          interactive
-          spinning={spinning}
+          interactive={!side}
+          spinning={!side && spinning}
+          side={side}
           maxTilt={18}
           sizes="(min-width: 1280px) 420px, 70vw"
         />

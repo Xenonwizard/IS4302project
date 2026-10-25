@@ -194,7 +194,7 @@ export function syntheticHandle(rnd: () => number): string {
 export const COMMENT_TEXT = [
   "Centering on this one is unreal.",
   "Grail. Congrats to whoever grabs it.",
-  "FMV feels light, comps are trending up.",
+  "I am comparing the recent Pokechain transactions.",
   "Been hunting this exact parallel for months.",
   "Surface is clean under a loupe, no print lines.",
   "Vault it, don't ship it. This one only goes up.",
@@ -205,10 +205,10 @@ export const COMMENT_TEXT = [
 ];
 
 export const NOTES = [
-  "Strong eye appeal for the grade — corners are sharp and the holo pattern is centred cleanly. Population at this grade is thin relative to demand, which has kept sale prices tight to market value over the past quarter.",
+  "Strong eye appeal for the grade — corners are sharp and the holo pattern is centred cleanly. Population at this grade is thin relative to demand, so compare other listings for the same card.",
   "Recent comps show steady appreciation with low volatility. The last three sales all cleared within 8% of each other, so this listing is priced inside the normal band.",
-  "A softer grade on a widely collected subject. These tend to move fast at or below market value because they are the accessible entry point into the set.",
-  "Low population parallel. Sales are infrequent, so market value carries wider error bars than a base card from the same set.",
+  "A softer grade on a widely collected subject. These tend to move fast when priced competitively because they are the accessible entry point into the set.",
+  "Low population parallel. Sales are infrequent, so there may be fewer comparable transactions to review.",
   "Vintage cardboard with honest centring. Grader notes no evidence of trimming or restoration; the cert verifies against the grader registry.",
   "Modern chase card still inside its release window. Expect price discovery to continue as more copies are graded and the population report fills in.",
 ];
