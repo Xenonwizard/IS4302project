@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowLeft, Check, Gavel, Send } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Check, Gavel, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { keccak256, toBytes, zeroAddress } from "viem";
@@ -10,7 +10,10 @@ import { usePublicClient } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
 import { contracts } from "@/lib/chain/config";
+import { marketValueOf } from "@/lib/chain/slabValue";
+import { useHandleAddress, useTradeEvents, useTradeOffers } from "@/lib/chain/trades";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { usd } from "@/lib/format";
 import { bidValue, offerMix, pendingOffer } from "@/lib/negotiation";
@@ -21,14 +24,24 @@ import { Slab } from "../slab/Slab";
 import { Avatar, Badge, Button, TimeAgo, inputClass } from "../ui/primitives";
 import { INBOX_URL_KEY } from "./NegotiationsInbox";
 import { ReportLostModal, reportItemLabel } from "./ReportLostModal";
+import { TradeBuilder, type CounterOf } from "./TradeBuilder";
+import { SoldBanner } from "./SoldBanner";
+import { TradeCard } from "./TradeCard";
 
 const exact = (n: number) => usd(n, { cents: true });
 
 const BUYER_QUICK = ["Is this still available?", "Any flaws on the slab?", "Is the price negotiable?"];
 const SELLER_QUICK = ["Yes, it's available.", "Price is firm, sorry.", "Can you go a bit higher?"];
 
-/** A one-to-one chat between a buyer and the seller about one listing. */
-export function NegotiationView({ id }: { id: string }) {
+/**
+ * A one-to-one chat between two collectors about one slab. Between two wallet accounts it also carries
+ * multi-slab trade offers, settled on-chain by TradeEscrow.
+ */
+export function NegotiationView({ id, openTrade = false }: { id: string; openTrade?: boolean }) {
+  return <ListingChat id={id} openTrade={openTrade} />;
+}
+
+function ListingChat({ id, openTrade }: { id: string; openTrade: boolean }) {
   const { ready, user, negotiations, requireAuth, slabs } = useStore();
   const n = negotiations[id];
   const base = n
@@ -70,11 +83,11 @@ export function NegotiationView({ id }: { id: string }) {
       </div>
     );
   }
-  return <Chat negotiation={n} base={base} me={user.username} />;
+  return <Chat negotiation={n} base={base} me={user.username} openTrade={openTrade} />;
 }
 
-function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Listing; me: string }) {
-  const { resolve, sendMessage, respondToOffer, withdrawOffer, lostReports, user, pushToast } = useStore();
+function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiation; base: Listing; me: string; openTrade: boolean }) {
+  const { resolve, isListed, sendMessage, respondToOffer, withdrawOffer, lostReports, user, pushToast } = useStore();
   const { transfer } = useSlabChain();
   const { cancelListing } = useMarketChain();
   const client = usePublicClient();
@@ -88,6 +101,27 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
   const [editOpen, setEditOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const reports = lostReports.filter((r) => r.negotiationId === n.id);
+
+  // Between two wallet accounts the offers are on-chain trades; with anyone else they stay the simple kind.
+  const wallet = useOnchainAccount();
+  const { data: otherAddress } = useHandleAddress(other);
+  const chainMode = Boolean(user?.address && wallet.address && otherAddress && otherAddress.toLowerCase() !== wallet.address.toLowerCase());
+  useTradeEvents(chainMode);
+  const { data: chainOffers = [] } = useTradeOffers(wallet.address, otherAddress ?? undefined);
+  // "Make an offer" on the asset page lands here with the builder already open.
+  const [builder, setBuilder] = useState<{ counter?: CounterOf } | null>(openTrade ? {} : null);
+  const openTrades = chainOffers.filter((o) => o.status === "Open");
+
+
+  const counterTrade = (trade: NonNullable<ChatMessage["trade"]>) =>
+    setBuilder({
+      counter: {
+        offerId: trade.offerId,
+        // I'm answering, so what they wanted from me is now what I give.
+        mySide: trade.get,
+        theirSide: trade.give,
+      },
+    });
   const [backHref] = useState(() => {
     try {
       return window.sessionStorage.getItem(INBOX_URL_KEY) ?? "/trades";
@@ -98,10 +132,18 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const count = n.messages.length;
+  const lastKind = n.messages.at(-1)?.kind;
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [count]);
+    if (!el) return;
+    const last = el.lastElementChild as HTMLElement | null;
+    // A trade offer is taller than the chat, so show it from its top instead of its bottom edge.
+    if (last && lastKind === "trade") {
+      el.scrollTo({ top: el.scrollTop + last.getBoundingClientRect().top - el.getBoundingClientRect().top - 8, behavior: "smooth" });
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, [count, lastKind]);
 
   const sendingRef = useRef(false);
   const send = (value: string) => {
@@ -219,6 +261,10 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
             </div>
           </header>
 
+          {/* the slab this chat is about, once it has gone to someone in a trade */}
+          <div className="border-b border-hairline px-4 py-2 empty:hidden">
+            <SoldBanner tokenId={listing.tokenId} from={n.seller} />
+          </div>
           {/* the listing and the offer on the table */}
           <div className="flex flex-wrap items-center gap-3 border-b border-hairline bg-surface-2/50 px-4 py-3">
             <Link href={`/asset/${listing.id}`} className="w-10 shrink-0">
@@ -229,24 +275,55 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
                 {listing.title}
               </Link>
               <p className="text-[12px] text-muted">
-                Asking {exact(listing.price)} · market value {exact(listing.fmv)}
+                {chainMode
+                  ? `${isListed(listing.id) ? "Asking" : "Stated"} ${exact(listing.price)} · market value ${exact(marketValueOf({ grader: listing.grader, certNumber: listing.certNumber, title: listing.title, image: listing.image, declaredValueCents: listing.price * 100 }))}`
+                  : `Asking ${exact(listing.price)} · market value ${exact(listing.fmv)}`}
               </p>
             </div>
-            <OfferBar
-              n={n}
-              iAmBuyer={iAmBuyer}
-              pending={pending}
-              busy={busy}
-              onEdit={() => setEditOpen(true)}
-              onWithdraw={() => pending && withdrawOffer(n.id, pending.id)}
-              onAccept={handleAccept}
-              onDecline={() => pending && respondToOffer(n.id, pending.id, false)}
-            />
+            {chainMode ? (
+              n.status === "open" ? (
+                <div className="flex items-center gap-2">
+                  {openTrades.length ? <Badge tone="accent">{openTrades.length} open trade{openTrades.length === 1 ? "" : "s"}</Badge> : null}
+                  <Button size="sm" onClick={() => setBuilder({})}>
+                    <ArrowLeftRight size={14} />
+                    Make a trade offer
+                  </Button>
+                </div>
+              ) : (
+                <Badge tone="neutral">Closed</Badge>
+              )
+            ) : (
+              <OfferBar
+                n={n}
+                iAmBuyer={iAmBuyer}
+                pending={pending}
+                busy={busy}
+                onEdit={() => setEditOpen(true)}
+                onWithdraw={() => pending && withdrawOffer(n.id, pending.id)}
+                onAccept={handleAccept}
+                onDecline={() => pending && respondToOffer(n.id, pending.id, false)}
+              />
+            )}
           </div>
 
           <div ref={scrollRef} className="cy-scroll flex-1 space-y-3 overflow-y-auto px-4 py-4">
             {n.messages.map((m) => (
-              <MessageRow key={m.id} message={m} me={me} />
+              <MessageRow
+                key={m.id}
+                message={m}
+                me={me}
+                trade={
+                  m.kind === "trade" && m.trade && wallet.address ? (
+                    <TradeCard
+                      message={m}
+                      negotiationId={n.id}
+                      me={{ address: wallet.address, handle: me }}
+                      offer={chainOffers.find((o) => o.id === m.trade!.offerId)}
+                      onCounter={counterTrade}
+                    />
+                  ) : null
+                }
+              />
             ))}
           </div>
 
@@ -296,12 +373,21 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
           </div>
           <div className="rounded-card border border-hairline bg-surface p-4 text-[12px] leading-relaxed text-muted">
             <p className="mb-2 text-[13px] font-bold text-white">How negotiating works</p>
-            <ul className="list-disc space-y-1 pl-4">
-              <li>Offers are full cash, or slabs from your vault plus a cash top-up.</li>
-              <li>The seller accepts or declines. The buyer can edit or cancel a pending offer.</li>
-              <li>On accept the token moves on-chain and the vault updates custody. Nothing ships.</li>
-              <li>The seller pays a {BRAND.sellerFee * 100}% fee on the cash part only.</li>
-            </ul>
+            {chainMode ? (
+              <ul className="list-disc space-y-1 pl-4">
+                <li>Chat as long as you like, then make a trade offer: slabs from both vaults, plus cash either way.</li>
+                <li>Count each slab at its market value or the value its owner stated. The balance shows who comes out ahead, only to you.</li>
+                <li>Your side is locked in TradeEscrow. They accept, counter or decline; accepting swaps everything in one transaction.</li>
+                <li>Nothing ships: only the tokens change hands, the slabs stay vaulted.</li>
+              </ul>
+            ) : (
+              <ul className="list-disc space-y-1 pl-4">
+                <li>Offers are full cash, or slabs from your vault plus a cash top-up.</li>
+                <li>The seller accepts or declines. The buyer can edit or cancel a pending offer.</li>
+                <li>On accept the token moves on-chain and the vault updates custody. Nothing ships.</li>
+                <li>The seller pays a {BRAND.sellerFee * 100}% fee on the cash part only.</li>
+              </ul>
+            )}
           </div>
           {reports.length ? (
             <div className="rounded-card border border-hairline bg-surface p-4">
@@ -324,7 +410,21 @@ function Chat({ negotiation: n, base, me }: { negotiation: Negotiation; base: Li
         </aside>
       </div>
 
-      <OfferModal listing={listing} open={editOpen} onClose={() => setEditOpen(false)} editing />
+      {chainMode && wallet.address && otherAddress ? (
+        <TradeBuilder
+          open={builder !== null}
+          onClose={() => setBuilder(null)}
+          negotiationId={n.id}
+          me={{ address: wallet.address, handle: me }}
+          them={{ address: otherAddress, handle: other }}
+          cash={wallet.custodyBalance}
+          counterOf={builder?.counter}
+          // A new offer starts with the slab this chat is about, on whichever side owns it.
+          preselect={listing.tokenId ? (iAmBuyer ? { mine: [], theirs: [listing.tokenId] } : { mine: [listing.tokenId], theirs: [] }) : undefined}
+        />
+      ) : (
+        <OfferModal listing={listing} open={editOpen} onClose={() => setEditOpen(false)} editing />
+      )}
       <ReportLostModal negotiation={n} open={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );
@@ -400,7 +500,10 @@ const STATUS_LABEL: Record<OfferStatus, string> = {
   replaced: "Replaced",
 };
 
-function MessageRow({ message: m, me }: { message: ChatMessage; me: string }) {
+function MessageRow({ message: m, me, trade }: { message: ChatMessage; me: string; trade?: React.ReactNode }) {
+  if (m.kind === "trade") {
+    return <div className={clsx("flex", m.from === me && "justify-end")}>{trade}</div>;
+  }
   if (m.kind === "system") {
     return (
       <p className="mx-auto max-w-md rounded-full bg-surface-2 px-3 py-1.5 text-center text-[11px] font-medium text-muted">

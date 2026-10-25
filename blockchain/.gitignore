@@ -32,3 +32,4 @@
 
 # Local chain deployments are recreated by `npm run chain`; keep Amoy (chain-80002) ones
 /ignition/deployments/chain-31337/
+

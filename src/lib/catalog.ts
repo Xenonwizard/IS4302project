@@ -368,6 +368,27 @@ export function buildOnChainListing(input: {
   };
 }
 
+const CARD_BY_IMAGE = new Map(CARDS.flatMap((c) => [[c.image, c] as const, [c.thumb, c] as const]));
+
+/**
+ * Market value of a tokenised slab: the same graded estimate the marketplace gives a listing (the card's
+ * TCGplayer raw price × grade and grader premium, with the same per-slab seed), found from what the chain
+ * records about it. The card is matched by its image first (seeded and vaulted slabs carry the card's
+ * pokemontcg.io image), then by its cert. Null when the card isn't in the catalogue.
+ */
+export function marketValueFor(input: { image?: string; title?: string; grader: Grader; certNumber: string }): number | null {
+  const card = (input.image && CARD_BY_IMAGE.get(input.image)) || null;
+  if (card) {
+    // The grade is printed in the title, e.g. "(PSA 9.5 MINT+)".
+    const graded = input.title?.match(/\((?:PSA|BGS|CGC|SGC)\s+([\d.]+)/i);
+    const grade = graded ? Number(graded[1]) : (lookupCert(input.grader, input.certNumber)?.grade ?? 10);
+    const rnd = makeRandom(hashString(`${card.id}${input.grader}${grade}${input.certNumber}`));
+    return gradedValue(card, input.grader, grade, rnd);
+  }
+  const hit = lookupCert(input.grader, input.certNumber);
+  return hit ? makeOwnedListing({ ...hit, grader: input.grader, certNumber: input.certNumber, owner: "-", nowMs: 0 }).fmv : null;
+}
+
 /**
  * Stand-in for the grader's cert registry: a cert number always resolves to the
  * same card and grade, the way PSA's lookup returns what is printed on the label.

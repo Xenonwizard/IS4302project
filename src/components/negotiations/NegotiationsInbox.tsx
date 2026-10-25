@@ -13,6 +13,7 @@ import type { Listing, Negotiation } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 import { Avatar, Badge, Button, TimeAgo } from "../ui/primitives";
 import { reportItemLabel } from "./ReportLostModal";
+import { CollectorChats } from "./CollectorChats";
 
 type Tab = "all" | "buying" | "selling";
 
@@ -182,10 +183,12 @@ export function NegotiationsInbox() {
       <div>
         <h1 className="text-[24px] font-bold">Negotiation rooms</h1>
         <p className="mt-1.5 max-w-2xl text-[14px] text-muted">
-          Every offer opens a private chat between the buyer and the seller. Accept, decline or edit
-          offers here.
+          Every offer opens a private chat between the buyer and the seller. Between collectors the chat also carries
+          trade offers: slabs and cash both ways, with a balance showing who comes out ahead.
         </p>
       </div>
+
+      {user?.address ? <CollectorChats me={user.address} /> : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {(["all", "buying", "selling"] as const).map((t) => (
@@ -286,7 +289,9 @@ function Row({ n, me, slabs }: { n: Negotiation; me: string; slabs: Listing[] })
   const last = n.messages.at(-1);
   const offer = latestOffer(n);
   const preview =
-    last?.kind === "offer" && last.offer
+    last?.kind === "trade" && last.trade
+      ? `${last.from === me ? "You" : last.from} offered a trade (#${last.trade.offerId})`
+      : last?.kind === "offer" && last.offer
       ? `${last.from === me ? "You" : last.from} offered ${usd(bidValue(last.offer), { cents: true })} (${offerMix(last.offer)})`
       : last?.kind === "system"
         ? last.text
@@ -296,6 +301,8 @@ function Row({ n, me, slabs }: { n: Negotiation; me: string; slabs: Listing[] })
       ? { tone: "good" as const, label: n.buyer === me ? "Bought" : "Sold" }
       : n.status === "closed"
         ? { tone: "neutral" as const, label: "Closed" }
+        : last?.kind === "trade"
+          ? { tone: "accent" as const, label: last.from === me ? "Trade sent" : "Trade to review" }
         : offer?.status === "pending"
           ? { tone: "accent" as const, label: iAmBuyer ? "Offer sent" : "Offer to review" }
           : { tone: "neutral" as const, label: "Open" };

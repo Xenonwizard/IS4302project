@@ -20,6 +20,7 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   UserRejectedRequestError,
+  decodeErrorResult,
   type ContractFunctionArgs,
   type ContractFunctionName,
   type TransactionReceipt,
@@ -51,14 +52,13 @@ const ERROR_TEXT: Record<string, string> = {
   SlabsStillVaulted: "Withdraw or transfer every vaulted slab before closing the account.",
   AccountNotActive: "That wallet has no active Pokechain account.",
   CertAlreadyTokenised: "That cert is already tokenised.",
-  CertAlreadyPending: "That cert already has a pending submission.",
   NotSlabOwner: "Only the slab's owner can do that.",
   WrongCustody: "The slab isn't in the right custody state for that.",
   SlabLocked: "The slab is locked because it has left the vault.",
   SelfTransfer: "You can't transfer a slab to yourself.",
   FaucetLimit: "The faucet mints at most 100,000 USDC at a time.",
   ERC20InsufficientBalance: "Your wallet doesn't hold enough USDC.",
-  SlabIsListed: "This slab is currently listed on the marketplace. Delist it first.",
+  SlabIsListed: "That slab is listed for sale on the marketplace, so it can't move until the listing is cancelled.",
   NotListed: "This slab is not listed on the marketplace.",
   AlreadyListed: "This slab is already listed for sale.",
   SelfPurchase: "You cannot purchase your own listed slab.",
@@ -67,14 +67,39 @@ const ERROR_TEXT: Record<string, string> = {
   NotSeller: "Only the seller can cancel this listing.",
   InvalidPrice: "Listing price must be greater than zero.",
   ERC20InsufficientAllowance: "The USDC allowance is too low.",
+  OffersStillOpen: "Withdraw your open trade offers before closing the account.",
+  SelfTrade: "You can't trade with yourself.",
+  EmptySide: "Each side of a trade needs at least one slab or some cash.",
+  TooManySlabs: "At most 10 slabs on each side of a trade.",
+  DuplicateSlab: "The same slab is in the offer twice.",
+  NotYourSlab: "One of those slabs isn't owned by that collector any more (it may be in another offer).",
+  SlabNotVaulted: "One of those slabs isn't in the vault (pending, withdrawn or lost), so it can't be traded.",
+  NotEnoughCash: "Not enough USDC in the Pokechain account for that offer.",
+  OfferNotOpen: "That offer is no longer open.",
+  NotTaker: "Only the collector the offer was made to can do that.",
+  NotMaker: "Only the collector who made the offer can withdraw it.",
 };
+
+function errorNameFromAnyAbi(raw: `0x${string}` | undefined): string | undefined {
+  if (!raw) return undefined;
+  for (const c of Object.values(contracts)) {
+    try {
+      return decodeErrorResult({ abi: c.abi, data: raw }).errorName;
+    } catch {
+      /* not this contract's error */
+    }
+  }
+  return undefined;
+}
 
 export function describeError(e: unknown): string {
   if (e instanceof BaseError) {
     if (e.walk((x) => x instanceof UserRejectedRequestError)) return "You rejected the request in your wallet.";
     const revert = e.walk((x) => x instanceof ContractFunctionRevertedError);
     if (revert instanceof ContractFunctionRevertedError) {
-      const name = revert.data?.errorName;
+      // A contract that calls another (TradeEscrow → SlabVault) bubbles up an error the called ABI doesn't
+      // list, so look its selector up in every contract's ABI.
+      const name = revert.data?.errorName ?? errorNameFromAnyAbi(revert.raw);
       if (name) return ERROR_TEXT[name] ?? `Reverted with ${name}`;
       return revert.reason ?? revert.shortMessage;
     }

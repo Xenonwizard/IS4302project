@@ -1,5 +1,5 @@
 /**
- * Which chain the app talks to, and where the three Pokechain contracts live on it.
+ * Which chain the app talks to, and where the Pokechain contracts live on it.
  * Shared by the browser (wagmi) and the server (the vault operator), so both always point
  * at the same deployment.
  *
@@ -8,7 +8,7 @@
  */
 import { defineChain, formatUnits, parseUnits, type Address, type Chain, type Hash } from "viem";
 import { hardhat, polygonAmoy } from "viem/chains";
-import { accountRegistryAbi, deployments, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "./generated";
+import { accountRegistryAbi, deployments, mockUSDCAbi, slabMarketAbi, slabVaultAbi, tradeEscrowAbi } from "./generated";
 
 export const CHAIN_KEY = process.env.NEXT_PUBLIC_CHAIN === "amoy" ? "amoy" : "local";
 export const IS_LOCAL = CHAIN_KEY === "local";
@@ -21,7 +21,7 @@ export const chain: Chain = defineChain({
   ...(rpcOverride ? { rpcUrls: { default: { http: [rpcOverride] } } } : {}),
 });
 
-type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; SlabMarket?: Address; fromBlock: number };
+type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; TradeEscrow: Address; SlabMarket?: Address; fromBlock: number };
 const deployment = (deployments as Record<string, Deployment>)[String(chain.id)];
 
 /** False until `npm run deploy:local` (or deploy:amoy) has exported addresses for this chain. */
@@ -34,6 +34,7 @@ export const contracts = {
   usdc: { address: deployment?.MockUSDC ?? ZERO, abi: mockUSDCAbi },
   accounts: { address: deployment?.AccountRegistry ?? ZERO, abi: accountRegistryAbi },
   slabVault: { address: deployment?.SlabVault ?? ZERO, abi: slabVaultAbi },
+  tradeEscrow: { address: deployment?.TradeEscrow ?? ZERO, abi: tradeEscrowAbi },
   slabMarket: { address: deployment?.SlabMarket ?? ZERO, abi: slabMarketAbi },
 } as const;
 
@@ -43,6 +44,7 @@ export const CONTRACT_LABEL: Record<ContractName, string> = {
   usdc: "MockUSDC",
   accounts: "AccountRegistry",
   slabVault: "SlabVault",
+  tradeEscrow: "TradeEscrow",
   slabMarket: "SlabMarket",
 };
 
@@ -58,12 +60,28 @@ export const fromUsdcUnits = (units: bigint) => Number(formatUnits(units, USDC_D
 /* ---------------- on-chain enums, in Solidity declaration order ---------------- */
 
 export const ACCOUNT_STATUS = ["None", "Active", "Closed"] as const;
-export const CUSTODY = ["None", "Vaulted", "Redemption requested", "Shipped", "Delivered", "Lost"] as const;
-export const SUBMISSION_STATUS = ["None", "Pending", "Received by Pokechain", "At Collector Crypt", "Minted", "Rejected"] as const;
+export const CUSTODY = [
+  "None",
+  "Vaulted",
+  "Redemption requested",
+  "Shipped",
+  "Delivered",
+  "Lost",
+  "Posted to Pokechain",
+  "At Pokechain",
+  "Sent to Collector Crypt",
+  "Rejected",
+] as const;
+export const SUBMISSION_STATUS = ["None", "Pending", "Received by Pokechain", "At Collector Crypt", "Vaulted", "Rejected"] as const;
 export type SubmissionStatusName = (typeof SUBMISSION_STATUS)[number];
-/** submission stages that are still in flight (not minted or rejected) */
+/** submission stages that are still in flight (not vaulted or rejected) */
 export const OPEN_SUBMISSION = new Set([1, 2, 3]);
 export type CustodyName = (typeof CUSTODY)[number];
+/** Custody states of a token minted at submission that hasn't reached the vault yet. */
+export const PENDING_CUSTODY = new Set<CustodyName>(["Posted to Pokechain", "At Pokechain", "Sent to Collector Crypt"]);
+/** TradeEscrow.Status */
+export const OFFER_STATUS = ["None", "Open", "Accepted", "Declined", "Withdrawn", "Countered"] as const;
+export type OfferStatusName = (typeof OFFER_STATUS)[number];
 
 /* ---------------- explorer links ---------------- */
 

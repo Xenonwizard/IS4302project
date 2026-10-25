@@ -1,14 +1,16 @@
 /**
  * Local chain only: roll the whole demo back to "contracts just deployed".
  *
- *   POST /api/dev/reset
+ *   POST /api/dev/reset            back to the seeded demo (accounts, slabs and listings from scripts/seed.mjs)
+ *   POST /api/dev/reset?clean=1    back to the empty chain, as the smoke tests want it
  *
  * `npm run chain` takes an EVM snapshot right after deploying. This reverts the Hardhat node to
  * it (evm_revert: every account, deposit, slab and transfer since is gone; contract addresses stay
  * the same), takes a fresh snapshot for next time (a snapshot is used up by reverting to it), and
- * clears the mock Collector Crypt records and stored intake evidence, which describe the
+ * clears the mock Collector Crypt records, stored intake evidence and saved chats, which describe the
  * rolled-back chain.
  */
+import { spawnSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { IS_LOCAL, chain } from "@/lib/chain/config";
@@ -27,7 +29,8 @@ async function rpc<T>(method: string, params: unknown[] = []): Promise<T> {
   return body.result as T;
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const clean = new URL(request.url).searchParams.get("clean") === "1";
   if (!IS_LOCAL) return Response.json({ error: "Reset only exists for the local chain" }, { status: 400 });
   let snapshotId: string;
   try {
@@ -50,8 +53,15 @@ export async function POST() {
     writeFileSync(SNAPSHOT_FILE, JSON.stringify({ snapshotId: next }));
     rmSync(join(DATA, "collector-crypt.json"), { force: true });
     rmSync(join(DATA, "evidence"), { recursive: true, force: true });
+    rmSync(join(DATA, "pokechain-forward-records.json"), { force: true });
+    // Chats carry trade offers by their on-chain id, and those ids restart with the chain.
+    rmSync(join(DATA, "negotiations.json"), { force: true });
+    if (!clean) {
+      const seed = spawnSync(process.execPath, [join(process.cwd(), "blockchain", "scripts", "seed.mjs")], { encoding: "utf8" });
+      if (seed.status !== 0) return Response.json({ error: `Reset worked, but seeding the demo failed: ${seed.stderr || seed.stdout}` }, { status: 500 });
+    }
     const block = await rpc<string>("eth_blockNumber");
-    return Response.json({ reset: true, block: Number(block), snapshotId: next });
+    return Response.json({ reset: true, seeded: !clean, block: Number(block), snapshotId: next });
   } catch (e) {
     return Response.json({ error: `Can't reach the local chain: ${(e as Error).message}. Start it with npm run chain.` }, { status: 503 });
   }

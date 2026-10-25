@@ -1,0 +1,125 @@
+import { createPublicClient, createWalletClient, http, parseEventLogs, type Address } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { hardhat } from "viem/chains";
+import type { APIRequestContext, Page } from "@playwright/test";
+import { accountRegistryAbi, deployments, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
+import { expect } from "./fixtures";
+
+const local = deployments["31337"];
+
+/** Back to "contracts just deployed", without the seeded demo data (the Reset button re-seeds it). */
+export async function resetDemo(request: APIRequestContext) {
+  const res = await request.post("/api/dev/reset?clean=1");
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** Back to the seeded demo: test1 / test2 (wallets #1 / #2), ash, misty, brock, their slabs and listings. */
+export async function resetSeeded(request: APIRequestContext) {
+  const res = await request.post("/api/dev/reset");
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+export const TEST1: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+export const TEST2: Address = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+
+/** Opens @ash (test collector #1) and @misty (#2) with vaulted slabs and $1,000 each, on-chain. */
+export async function loadDemoTraders(request: APIRequestContext) {
+  const res = await request.post("/api/dev/demo-traders");
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** Logs in with a test wallet that already has an on-chain account (no handle to type). */
+export async function logIn(page: Page, wallet: 1 | 2, handle: string) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Log in" }).first().click();
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByText(`Hardhat test collector #${wallet}`).click();
+  await expect(page.locator("header")).toContainText(handle);
+}
+
+export const ASH: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+export const MISTY: Address = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+
+/** Who owns a token right now, straight from SlabVault. */
+export async function ownerOf(tokenId: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  return pub.readContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "ownerOf", args: [BigInt(tokenId)] });
+}
+
+/** Hardhat's published test key for account #2 (@misty). It only exists on the local test chain. */
+const MISTY_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
+
+/** @misty lists one of her slabs for sale on the marketplace (SlabMarket.list), at a dollar price. */
+export async function listAsMisty(tokenId: number, dollars: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const wallet = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(MISTY_KEY) });
+  await pub.waitForTransactionReceipt({
+    hash: await wallet.writeContract({ address: local.SlabMarket, abi: slabMarketAbi, functionName: "list", args: [BigInt(tokenId), BigInt(dollars * 1_000_000)] }),
+  });
+}
+
+/** Whether SlabVault says a slab is currently listed for sale. */
+export async function isListed(tokenId: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  return pub.readContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "isListed", args: [BigInt(tokenId)] });
+}
+
+/** Custody balance in AccountRegistry, in dollars. */
+export async function custodyDollars(who: Address) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const units = await pub.readContract({ address: local.AccountRegistry, abi: accountRegistryAbi, functionName: "balanceOf", args: [who] });
+  return Number(units) / 1e6;
+}
+
+/** Signs up in the UI with one of the built-in Hardhat test wallets. */
+export async function openAccount(page: Page, handle: string, wallet: 1 | 2 = 1) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Sign up" }).click();
+  await page.getByRole("button", { name: "Connect wallet" }).click();
+  await page.getByText(`Hardhat test collector #${wallet}`).click();
+  await page.getByPlaceholder("vaultedcharizard").fill(handle);
+  await page.getByRole("button", { name: "Open account" }).click();
+  await expect(page.locator("header")).toContainText(handle);
+}
+
+/**
+ * A slab that has reached step 3 (forwarded to Collector Crypt), set up straight against the
+ * chain and the API with Hardhat account #3, so a test can look at what Collector Crypt sees.
+ */
+export async function forwardedSubmission(request: APIRequestContext, cert: string) {
+  const who: Address = "0x90F79bf6EB2c4f870365E785982E1f101E93b906";
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const wallet = createWalletClient({ chain: hardhat, transport: http(), account: who });
+  await pub.waitForTransactionReceipt({
+    hash: await wallet.writeContract({ address: local.AccountRegistry, abi: accountRegistryAbi, functionName: "register", args: ["smoke_three"] }),
+  });
+  const evidence = await request.post("/api/evidence", {
+    multipart: {
+      meta: JSON.stringify({
+        grader: "PSA",
+        certNumber: cert,
+        declaredValueCents: 50_000,
+        condition: { caseCracked: false, caseScratched: false, labelDamaged: false, notes: "" },
+        shipping: { method: "dropoff", carrier: "", tracking: "" },
+        declarations: { owner: true, authentic: true, terms: true },
+        submittedBy: who,
+        source: "already-vaulted",
+      }),
+    },
+  });
+  const { evidenceHash } = await evidence.json();
+  const receipt = await pub.waitForTransactionReceipt({
+    hash: await wallet.writeContract({
+      address: local.SlabVault,
+      abi: slabVaultAbi,
+      functionName: "requestSubmission",
+      args: ["PSA", cert, BigInt(50_000), evidenceHash, "Drop-off", ""],
+    }),
+  });
+  const [ev] = parseEventLogs({ abi: slabVaultAbi, logs: receipt.logs, eventName: "SubmissionRequested" });
+  const submissionId = ev.args.submissionId.toString();
+  expect((await (await request.post("/api/chain/receive", { data: { submissionId } })).json()).result).toBe("received");
+  const forwarded = await (await request.post("/api/chain/forward", { data: { submissionId } })).json();
+  expect(forwarded.trackingNumber, JSON.stringify(forwarded)).toBeTruthy();
+  return { submissionId, trackingNumber: forwarded.trackingNumber as string };
+}

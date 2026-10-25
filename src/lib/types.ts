@@ -1,3 +1,5 @@
+import type { ValuedSlab } from "./valuation";
+
 export type Grader = "PSA" | "CGC" | "BGS" | "SGC";
 
 export type Confidence = "High" | "Medium" | "Low";
@@ -131,13 +133,44 @@ export interface TradeBid {
 
 export type OfferStatus = "pending" | "accepted" | "declined" | "withdrawn" | "replaced";
 
+/** A slab in an on-chain trade, with both values it can be counted at and the one its sender picked. */
+export interface ChatTradeSlab extends ValuedSlab {
+  title: string;
+  image: string;
+  grader: string;
+  certNumber: string;
+}
+
+export interface ChatTradeSide {
+  slabs: ChatTradeSlab[];
+  cash: number;
+}
+
+/**
+ * A multi-slab trade offer sitting in the chat. The terms are locked in TradeEscrow on-chain (the chain
+ * is the source of truth for whether it is open, accepted or withdrawn); this keeps what the chat needs
+ * to show it, and the values the sender counted each slab at. Written from the sender's chair.
+ */
+export interface ChatTrade {
+  offerId: string;
+  /** the sender's and the receiver's wallets */
+  maker: string;
+  taker: string;
+  give: ChatTradeSide;
+  get: ChatTradeSide;
+  /** the earlier offer this one answers */
+  counterOf?: string;
+}
+
 export interface ChatMessage {
   id: string;
   from: string;
   at: string;
-  kind: "text" | "offer" | "system";
+  kind: "text" | "offer" | "trade" | "system";
   text?: string;
   offer?: TradeBid;
+  /** trade offers only */
+  trade?: ChatTrade;
   /** offers only */
   status?: OfferStatus;
   /** system messages: who caused it, so the other side can react */

@@ -133,11 +133,13 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
             <PendingSubmissions />
           ) : (
             <>
-              <OnChainNote title="Tokenise it first">
-                This slab is in your vault but has no token on-chain yet, so there is nothing to lock or trace.
-                Submitting it runs the usual onboarding: <Fn>requestSubmission</Fn>, Pokechain receives and
-                forwards it, Collector Crypt vaults it, then the Solana check and <Fn>mintSlab</Fn>. After that you
-                can withdraw it.
+              <OnChainNote
+                title="Tokenise it first"
+                tech={<><Fn>requestSubmission</Fn> → <Fn>markReceived</Fn> → <Fn>markForwarded</Fn> → Solana check → <Fn>confirmVaulted</Fn>.</>}
+              >
+                This slab is in your vault but has no token on the chain yet, so there is nothing to lock or trace. Submit it
+                first: it gets a token, Pokechain receives it and passes it to Collector Crypt, and once Collector Crypt has
+                vaulted it you can withdraw it.
               </OnChainNote>
               <Button className="w-full" onClick={tokenise} disabled={busy}>
                 {busy ? "Confirm in your wallet…" : "Tokenise this slab"}

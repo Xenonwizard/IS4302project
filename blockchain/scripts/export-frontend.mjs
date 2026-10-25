@@ -19,7 +19,7 @@ if (!chainId) throw new Error("usage: node scripts/export-frontend.mjs <chainId>
 
 const dir = join(root, "ignition", "deployments", `chain-${chainId}`);
 const MODULE = "PokechainModule";
-const CONTRACTS = ["MockUSDC", "AccountRegistry", "SlabVault", "SlabMarket"];
+const CONTRACTS = ["MockUSDC", "AccountRegistry", "SlabVault", "TradeEscrow", "SlabMarket"];
 
 const addresses = JSON.parse(readFileSync(join(dir, "deployed_addresses.json"), "utf8"));
 const blocks = readFileSync(join(dir, "journal.jsonl"), "utf8")

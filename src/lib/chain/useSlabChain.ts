@@ -9,16 +9,18 @@
  *   receive()         SlabVault.markReceived                          operator (Pokechain warehouse)
  *   forward()         SlabVault.markForwarded                         operator (ships to CC)
  *   simulateVault()   Collector Crypt intake: mints CC's NFT to Pokechain's escrow (= the Postman call)
- *   verifyAndMint()   CC API + Solana getAsset, then SlabVault.mintSlab   operator
+ *   verifyAndMint()   CC API + Solana getAsset, then SlabVault.confirmVaulted   operator
+ *                     (the NFT itself was minted, locked, by requestSubmission)
  *
- *  Trading (this round: a direct transfer; paid offers come with TradeEscrow)
+ *  Trading (multi-slab + cash offers are in useTradeEscrow)
  *   transfer()        SlabVault.safeTransferFrom(me, to, tokenId)     collector's wallet
  *
  *  Outbound (owner → Collector Crypt ships to them)
  *   redeem()          SlabVault.requestRedemption, then the operator asks CC to ship and
  *                     records it with SlabVault.markShipped
  *   confirmDelivery() SlabVault.confirmDelivery                       collector's wallet
- *   reportLost()      SlabVault.reportLost                            collector's wallet
+ *   reportLost()      SlabVault.reportLost (inbound or outbound post)  collector's wallet
+ *   resolveLost()     SlabVault.resolveLostReport                     operator (simulated carrier finds it)
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
@@ -28,7 +30,7 @@ import type { Grader } from "../types";
 import { usePublicClient } from "wagmi";
 import { contracts, CUSTODY } from "./config";
 import { useChainLog } from "./log";
-import type { OperatorTx } from "./operator";
+import type { LostOutcome, OperatorTx } from "./operator";
 import { useChainTx } from "./useChainTx";
 
 export type MintOutcome =
@@ -207,5 +209,11 @@ export function useSlabChain() {
     [send],
   );
 
-  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost };
+  const resolveLost = useCallback(
+    (tokenId: string, outcome: LostOutcome) =>
+      operator<{ custody: string; tx: OperatorTx }>("Carrier found the parcel", "/api/chain/resolve-lost", { tokenId, outcome }),
+    [operator],
+  );
+
+  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost, resolveLost };
 }

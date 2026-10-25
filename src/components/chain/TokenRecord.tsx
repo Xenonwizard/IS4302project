@@ -5,7 +5,7 @@ import clsx from "clsx";
 import Link from "next/link";
 import { CheckCircle2, Route, XCircle } from "lucide-react";
 import { usePublicClient, useReadContracts } from "wagmi";
-import { CUSTODY, DEPLOY_BLOCK, contracts, shortHash } from "@/lib/chain/config";
+import { CUSTODY, contracts, shortHash } from "@/lib/chain/config";
 import type { Manifest } from "@/lib/evidence/store";
 import { usd } from "@/lib/format";
 import { CopyText } from "./ChainConsole";
@@ -47,20 +47,11 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
   const owner = reads?.[1]?.result;
   const meta = reads?.[2]?.result ? decodeTokenUri(reads[2].result) : null;
 
-  // The submission this token was minted from (SlabMinted is indexed by tokenId).
+  // The submission this token was minted from: same id, since the NFT is minted at submission.
   const { data: submission } = useQuery({
     queryKey: ["token-submission", tokenId],
     enabled: Boolean(client),
-    queryFn: async () => {
-      const [minted] = await client!.getContractEvents({
-        ...contracts.slabVault,
-        eventName: "SlabMinted",
-        args: { tokenId: id },
-        fromBlock: DEPLOY_BLOCK,
-      });
-      if (!minted) return null;
-      return client!.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [minted.args.submissionId!] });
-    },
+    queryFn: () => client!.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [id] }),
   });
 
   const { data: evidence } = useQuery({
@@ -68,13 +59,15 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
     enabled: Boolean(slab?.evidenceHash),
     queryFn: async () => {
       const res = await fetch(`/api/evidence/${slab!.evidenceHash}`, { cache: "no-store" });
-      return res.ok ? ((await res.json()) as { manifest: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
+      const body = res.ok ? ((await res.json()) as { manifest?: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
+      // Only a full record counts; "nothing stored" (seeded slabs) and partial answers mean no evidence.
+      return body?.manifest && body.verified ? (body as { manifest: Manifest; verified: { manifest: boolean; all: boolean } }) : null;
     },
   });
 
   if (!slab) return null;
   const m = evidence?.manifest;
-  const trusted = Boolean(evidence?.verified.all);
+  const trusted = Boolean(evidence?.verified?.all);
   const attr = (name: string) => meta?.attributes.find((a) => a.trait_type === name)?.value;
 
   const formRows: { field: string; entered: string; onChain: string; ok: boolean }[] = m

@@ -19,13 +19,17 @@ import {
   parseEther,
   parseEventLogs,
   toBytes,
+  toHex,
   type Address,
   type Hash,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { certPreview, getListing } from "../catalog";
 import { requestShipment, verifyCustody, type CheckStep } from "../collectorCrypt/client";
+import { publishKeyIfNeeded, ccPublicKey } from "../collectorCrypt/keys";
 import { loadEvidence } from "../evidence/store";
+import { commit, randomSalt, seal } from "../sealed/envelope";
+import { getForwardRecord, saveForwardRecord } from "./forwardRecords";
 import type { Grader } from "../types";
 import { CUSTODY, IS_LOCAL, SUBMISSION_STATUS, chain, contracts } from "./config";
 
@@ -58,7 +62,7 @@ export function operatorError(e: unknown, fallback: string): string {
 }
 
 export interface OperatorTx {
-  /** e.g. "SlabVault.mintSlab" */
+  /** e.g. "SlabVault.confirmVaulted" */
   call: string;
   args: string[];
   hash: Hash;
@@ -121,25 +125,89 @@ export async function receiveSubmission(submissionId: bigint) {
   return { result: "received" as const, checks, tx };
 }
 
-/** Slab onboarding, step 3: Pokechain ships the slab on to Collector Crypt and records the tracking number. */
+/**
+ * Slab onboarding, step 3: Pokechain ships the slab on to Collector Crypt and tells CC which
+ * parcel to expect, privately:
+ *   a. reads CC's public key from the contract (SlabVault.encryptionKey(custodian))
+ *   b. encrypts the parcel details to that key (sealed envelope) and commits to them with a
+ *      fresh salt: commitment = keccak256(salt ‖ message)
+ *   c. markForwarded(id, ciphertext, commitment): only ciphertext and commitment go on-chain
+ * The message and salt stay in Pokechain's own records, for a dispute.
+ */
 export async function forwardSubmission(submissionId: bigint) {
-  await submissionAt(submissionId, 2);
+  const sub = await submissionAt(submissionId, 2);
+  const checks: CheckStep[] = [];
+
+  // Simulated: Collector Crypt publishes its key the first time it's needed.
+  const published = await publishKeyIfNeeded();
+  if (published.published) {
+    checks.push({
+      call: "Collector Crypt → SlabVault.setEncryptionKey",
+      ok: true,
+      detail: `CC published its X25519 public key ${ccPublicKey.slice(0, 10)}… on-chain (tx ${published.hash.slice(0, 10)}…)`,
+    });
+  }
+
+  const custodian = await publicClient.readContract({ ...contracts.slabVault, functionName: "custodian" });
+  const recipientKey = await publicClient.readContract({ ...contracts.slabVault, functionName: "encryptionKey", args: [custodian] });
+  if (/^0x0+$/.test(recipientKey)) throw new Error("Collector Crypt hasn't published an encryption key");
+
   const carrier = "SingPost Registered";
   const trackingNumber = `RR${Date.now().toString().slice(-9)}SG`;
+  const message = JSON.stringify({
+    submissionId: submissionId.toString(),
+    grader: sub.grader,
+    certNumber: sub.certNumber,
+    carrier,
+    trackingNumber,
+    sentAt: new Date().toISOString(),
+  });
+  const salt = randomSalt();
+  const commitment = commit(message, salt);
+  const ciphertext = seal(recipientKey, message);
+  saveForwardRecord(submissionId.toString(), { message, salt, commitment });
+  checks.push({
+    call: "Pokechain encrypts the parcel details",
+    ok: true,
+    detail: `Encrypted to Collector Crypt's on-chain key ${recipientKey.slice(0, 10)}…: ${(ciphertext.length - 2) / 2} bytes of ciphertext, commitment ${commitment.slice(0, 10)}…`,
+  });
+
   const wallet = walletClient();
   const hash = await wallet.writeContract({
     ...contracts.slabVault,
     functionName: "markForwarded",
-    args: [submissionId, carrier, trackingNumber],
+    args: [submissionId, ciphertext, commitment],
   });
-  const tx = await receiptOf("SlabVault.markForwarded", [submissionId.toString(), carrier, trackingNumber], hash, wallet.account.address);
-  return { carrier, trackingNumber, tx };
+  const tx = await receiptOf(
+    "SlabVault.markForwarded",
+    [submissionId.toString(), `${ciphertext.slice(0, 18)}… (${(ciphertext.length - 2) / 2} bytes, encrypted)`, commitment],
+    hash,
+    wallet.account.address,
+  );
+  return { carrier, trackingNumber, commitment, checks, tx };
+}
+
+/**
+ * A dispute over what was forwarded: Pokechain reveals the message and salt from its records,
+ * and the contract itself (SlabVault.verifyForwardCommitment) says whether they match the
+ * commitment made at the time.
+ */
+export async function disputeForward(submissionId: bigint) {
+  const record = getForwardRecord(submissionId.toString());
+  if (!record) throw new Error(`Pokechain has no forwarding record for submission ${submissionId}`);
+  const verified = await publicClient.readContract({
+    ...contracts.slabVault,
+    functionName: "verifyForwardCommitment",
+    args: [submissionId, toHex(record.message), record.salt],
+  });
+  return { ...record, details: JSON.parse(record.message) as Record<string, string>, verified };
 }
 
 /**
  * Slab onboarding, step 4. Once Collector Crypt has vaulted the slab, checks CC's API and the
  * Solana NFT (DAS getAsset: held by Pokechain's escrow, CC collection, same cert, Vaulted), then
- * mints the Polygon token with CC's asset id. If CC hasn't vaulted it yet, nothing happens.
+ * confirms the Polygon token (minted pending at submission) as Vaulted with CC's asset id, which
+ * unlocks it for trading. If CC hasn't vaulted it yet, nothing happens.
  * `listingId` is passed when tokenising a slab already in the user's vault, to keep its title and image.
  */
 export async function mintSubmission(origin: string, submissionId: bigint, listingId?: string) {
@@ -155,17 +223,17 @@ export async function mintSubmission(origin: string, submissionId: bigint, listi
   const wallet = walletClient();
   const hash = await wallet.writeContract({
     ...contracts.slabVault,
-    functionName: "mintSlab",
+    functionName: "confirmVaulted",
     args: [submissionId, card.title, card.image, custody.assetId],
   });
   const tx = await receiptOf(
-    "SlabVault.mintSlab",
+    "SlabVault.confirmVaulted",
     [submissionId.toString(), card.title, card.image, custody.assetId],
     hash,
     wallet.account.address,
   );
   const receipt = await publicClient.getTransactionReceipt({ hash });
-  const [minted] = parseEventLogs({ abi: contracts.slabVault.abi, logs: receipt.logs, eventName: "SlabMinted" });
+  const [minted] = parseEventLogs({ abi: contracts.slabVault.abi, logs: receipt.logs, eventName: "SlabVaulted" });
   return {
     result: "minted" as const,
     tokenId: minted.args.tokenId.toString(),
@@ -204,6 +272,32 @@ export async function shipSlab(origin: string, tokenId: bigint, shipTo: string) 
     wallet.account.address,
   );
   return { redemptionRef: r.id, carrier: r.carrier, trackingNumber: r.trackingNumber, checks: [check], tx };
+}
+
+/** What the operator found after a lost report, and the custody it records. */
+export const LOST_OUTCOMES = { "at-pokechain": 7, delivered: 4, vaulted: 1 } as const;
+export type LostOutcome = keyof typeof LOST_OUTCOMES;
+
+/**
+ * Closes a lost report (SlabVault.resolveLostReport). "at-pokechain": an inbound parcel turned up
+ * at the warehouse and onboarding carries on; "delivered": an outbound one reached the owner;
+ * "vaulted": it went back into Collector Crypt's vault.
+ */
+export async function resolveLost(tokenId: bigint, outcome: LostOutcome) {
+  const slab = await publicClient.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [tokenId] });
+  if (CUSTODY[slab.custody] !== "Lost") throw new Error(`Slab #${tokenId} is ${CUSTODY[slab.custody]}, not reported lost`);
+  const inbound = slab.custodianRef === "";
+  if (inbound !== (outcome === "at-pokechain")) {
+    throw new Error(inbound ? "This parcel was on its way in: it can only turn up at Pokechain" : "This slab had already been vaulted");
+  }
+  const wallet = walletClient();
+  const hash = await wallet.writeContract({
+    ...contracts.slabVault,
+    functionName: "resolveLostReport",
+    args: [tokenId, LOST_OUTCOMES[outcome]],
+  });
+  const tx = await receiptOf("SlabVault.resolveLostReport", [tokenId.toString(), CUSTODY[LOST_OUTCOMES[outcome]]], hash, wallet.account.address);
+  return { custody: CUSTODY[LOST_OUTCOMES[outcome]], tx };
 }
 
 /**

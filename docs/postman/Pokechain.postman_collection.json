@@ -105,6 +105,39 @@
           ]
         },
         {
+          "name": "1x · Parcel lost on the way, found at Pokechain (resolveLostReport)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/chain/resolve-lost",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chain",
+                "resolve-lost"
+              ]
+            },
+            "description": "After the collector reports the inbound parcel lost in the app (SlabVault.reportLost on the pending NFT), the operator records that the carrier found it at Pokechain's warehouse. Custody Lost → AtPokechain; onboarding carries on from step 2. Outcomes: at-pokechain (inbound), delivered or vaulted (outbound).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tokenId\": \"{{submissionId}}\",\n  \"outcome\": \"at-pokechain\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "1 · Pokechain warehouse receives the slab (markReceived)",
           "request": {
             "method": "POST",
@@ -177,7 +210,59 @@
                 "forward"
               ]
             },
-            "description": "Operator tx: SlabVault.markForwarded(submissionId, carrier, tracking). This records the Pokechain → CC parcel.",
+            "description": "Operator tx: SlabVault.markForwarded(submissionId, ciphertext, commitment). The parcel details are encrypted to Collector Crypt's public key (read from SlabVault.encryptionKey(custodian)); only the ciphertext and keccak256(salt ‖ message) go on-chain. The response shows Pokechain's own copy of the tracking number.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "2a · Collector Crypt inbox: decrypt incoming parcels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/collector-crypt/inbox",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "collector-crypt",
+                "inbox"
+              ]
+            },
+            "description": "Simulated Collector Crypt: reads every SubmissionForwarded event addressed to its wallet and decrypts it with its private key. Compare each item's ciphertext (what anyone sees on-chain) with decrypted (what only CC sees)."
+          }
+        },
+        {
+          "name": "2b · Dispute check: verifyForwardCommitment on-chain",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/chain/dispute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chain",
+                "dispute"
+              ]
+            },
+            "description": "Pokechain reveals the message and salt it committed to; SlabVault.verifyForwardCommitment (an eth_call into the contract) returns verified: true only if they match the on-chain commitment.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"submissionId\": \"{{submissionId}}\"\n}",
@@ -210,7 +295,7 @@
                 "intake"
               ]
             },
-            "description": "What Collector Crypt does when the parcel arrives. It vaults the slab and mints its Solana NFT straight to Pokechain's escrow wallet. Within seconds the app checks it (Solana getAsset) and calls SlabVault.mintSlab.",
+            "description": "What Collector Crypt does when the parcel arrives. It vaults the slab and mints its Solana NFT straight to Pokechain's escrow wallet. Within seconds the app checks it (Solana getAsset) and calls SlabVault.confirmVaulted: the token minted at submission becomes tradeable.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"grader\": \"{{grader}}\",\n  \"certNumber\": \"{{certNumber}}\",\n  \"depositorRef\": \"pokechain-submission-{{submissionId}}\"\n}",
@@ -269,7 +354,7 @@
           }
         },
         {
-          "name": "Operator: verify custody and mint (mintSlab)",
+          "name": "Operator: verify custody and confirm vaulted (confirmVaulted)",
           "request": {
             "method": "POST",
             "header": [
@@ -592,6 +677,44 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"getSignaturesForAsset\",\n  \"params\": {\n    \"id\": \"{{assetId}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Trading (local demo)",
+      "item": [
+        {
+          "name": "Load demo traders: @ash and @misty with vaulted slabs + $1,000",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/demo-traders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dev",
+                "demo-traders"
+              ]
+            },
+            "description": "Local chain only. Opens @ash (Hardhat test collector #1: 3 Pikachus + a Charizard) and @misty (#2: 2 Articunos + a Charizard-GX), each with $1,000 USDC in custody, through the real onboarding calls. Then trade in the app: Negotiation rooms → @misty → Make an offer. Offers are TradeEscrow.createOffer / accept / decline / withdraw / counter, signed by each collector's wallet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"

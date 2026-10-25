@@ -33,6 +33,7 @@ import type { ActivityEvent, Grader, Listing, Sale } from "@/lib/types";
 import { CopyText } from "../chain/ChainConsole";
 import { TokenRecord } from "../chain/TokenRecord";
 import { OfferModal } from "../modals/OfferModal";
+import { SoldBanner } from "../negotiations/SoldBanner";
 import { CardBack } from "../slab/CardBack";
 import { Slab, SlabStage } from "../slab/Slab";
 import {
@@ -217,7 +218,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
   useWatchContractEvent({
     ...contracts.slabVault,
-    eventName: "SlabMinted",
+    eventName: "SlabVaulted",
     enabled: enabledOnChain,
     poll: true,
     pollingInterval: 1000,
@@ -268,7 +269,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           client
             .getContractEvents({
               ...contracts.slabVault,
-              eventName: "SlabMinted",
+              eventName: "SlabVaulted",
               args: { tokenId: tokenIdBigInt },
               ...from,
             })
@@ -456,6 +457,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
   return (
     <div className="px-4 py-5 lg:px-6">
+      <div className="mb-4 empty:hidden">
+        <SoldBanner tokenId={listing.tokenId} relisted={listed} />
+      </div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         {/* ---------------- left ---------------- */}
         <div className="min-w-0">

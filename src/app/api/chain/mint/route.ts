@@ -1,6 +1,6 @@
 /**
  * Pokechain operator: once Collector Crypt has vaulted the slab, check CC's API and the Solana NFT
- * (held by Pokechain's escrow?) and mint the Polygon token (SlabVault.mintSlab). The browser
+ * (held by Pokechain's escrow?) and confirm the Polygon token as Vaulted (SlabVault.confirmVaulted). The browser
  * polls this while a submission is at Collector Crypt.
  *
  *   POST /api/chain/mint   { "submissionId": "1" }
