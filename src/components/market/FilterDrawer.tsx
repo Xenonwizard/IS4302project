@@ -78,14 +78,6 @@ export function FilterDrawer({
         expanded={expanded === "price"}
         onToggle={() => setExpanded(expanded === "price" ? null : "price")}
       />
-      <Range
-        label="Fair market value"
-        min={filters.fmvMin}
-        max={filters.fmvMax}
-        onChange={(min, max) => setFilters({ ...filters, fmvMin: min, fmvMax: max })}
-        expanded={expanded === "fmv"}
-        onToggle={() => setExpanded(expanded === "fmv" ? null : "fmv")}
-      />
 
       {GROUPS.map((g) => (
         <Group

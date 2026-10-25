@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { ArrowLeftRight } from "lucide-react";
-import { marketValueOf } from "@/lib/chain/slabValue";
 import { useHandleAddress } from "@/lib/chain/trades";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
@@ -38,12 +37,10 @@ export function OfferModal({
         <div className="space-y-4 p-5">
           <p className="text-[13px] leading-relaxed text-muted">
             <span className="font-semibold text-white">{listing.owner}</span> is a collector on Pokechain. Offers to them are made in a private
-            chat: pick slabs from both vaults, add cash either way, and count each slab at its market value or the value its owner stated. You see
-            the balance before you send anything.
+            chat: pick slabs from both vaults and choose any cash to add. Review comparable Pokechain listings and transactions before agreeing to a trade.
           </p>
           <dl className="grid grid-cols-2 gap-2 text-center text-[12px]">
-            <Fact label="Asking / stated" value={usd(listing.price, { cents: true })} />
-            <Fact label="Market value" value={usd(marketValueOf({ grader: listing.grader, certNumber: listing.certNumber, title: listing.title, image: listing.image, fallback: listing.price }), { cents: true })} />
+            <Fact label="Seller asking price" value={listing.price > 0 ? usd(listing.price, { cents: true }) : "Not listed"} />
           </dl>
           <Button
             size="lg"
@@ -75,14 +72,12 @@ export function OfferModal({
 
         <dl className="mb-4 grid grid-cols-2 gap-2 text-center text-[12px]">
           <Fact label="Asking" value={usd(listing.price, { cents: true })} />
-          <Fact label="Market value" value={usd(listing.fmv, { cents: true })} />
         </dl>
 
         <DealBuilder
           listing={listing}
           presets={[
             { label: "Asking", value: listing.price },
-            { label: "Market", value: listing.fmv },
           ]}
           submitLabel={(value) => `${editing ? "Send new offer" : "Send offer"} · ${usd(value, { cents: true })}`}
           onSubmit={(bid, available) => {

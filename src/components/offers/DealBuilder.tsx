@@ -18,8 +18,7 @@ const exact = (n: number) => usd(n, { cents: true });
 
 /**
  * Builds an offer that is either full cash or slabs plus a cash top-up. For a
- * trade the buyer sets the total value, picks slabs, and the cash needed to reach
- * that value is worked out from the slabs' market values.
+ * trade the buyer picks slabs and separately chooses the cash to add.
  */
 export function DealBuilder({
   listing,
@@ -54,14 +53,13 @@ export function DealBuilder({
 
   const targetValue = cents(Number(target) || 0);
   const slabs = kind === "trade" ? mySlabs.filter((l) => picked.includes(l.id)) : [];
-  const slabsValue = cents(slabs.reduce((sum, l) => sum + l.fmv, 0));
-  const cash = kind === "cash" ? targetValue : cents(Math.max(0, targetValue - slabsValue));
-  const total = cents(cash + slabsValue);
+  const cash = targetValue;
+  const total = cash;
   const after = cents(availableBalance - cash);
   const short = after < 0;
   const topUpBy = Math.ceil(-after / 100) * 100;
   const needsSlab = kind === "trade" && slabs.length === 0;
-  const blocked = total <= 0 || short || needsSlab;
+  const blocked = !Number.isFinite(Number(target)) || (cash <= 0 && !slabs.length) || short || needsSlab;
 
   const submit = () => {
     if (blocked) return;
@@ -97,7 +95,7 @@ export function DealBuilder({
 
       <div>
         <p className="mb-1.5 text-[12px] font-semibold text-muted">
-          {kind === "cash" ? "Cash offer" : "Total value of your offer (slabs + cash)"}
+          {kind === "cash" ? "Cash offer" : "Cash to add to your slabs"}
         </p>
         <div className="flex flex-wrap gap-2">
           <div className="relative min-w-[150px] flex-1">
@@ -127,7 +125,7 @@ export function DealBuilder({
         mySlabs.length ? (
           <div>
             <p className="mb-1.5 text-[12px] font-semibold text-muted">
-              Slabs to trade <span className="font-normal text-dim">· counted at market value</span>
+              Slabs to trade <span className="font-normal text-dim">· agree their value with the seller</span>
             </p>
             <div className="cy-scroll flex gap-2 overflow-x-auto pb-1">
               {mySlabs.map((l) => {
@@ -150,7 +148,7 @@ export function DealBuilder({
                     <span className="min-w-0">
                       <span className="block truncate text-[11px] font-semibold">{l.shortName}</span>
                       <span className="block text-[11px] text-muted">
-                        {l.grader} {l.grade} · {exact(l.fmv)}
+                        {l.grader} {l.grade}
                       </span>
                     </span>
                     {on ? (
@@ -177,24 +175,7 @@ export function DealBuilder({
       {/* how the cash is worked out, then what it does to the wallet */}
       <div className="rounded-2xl bg-surface p-3.5 text-[13px]">
         <dl className="space-y-2">
-          {kind === "trade" ? (
-            <>
-              <Line label="Total value of your offer" value={exact(total)} />
-              {slabs.map((l) => (
-                <Line
-                  key={l.id}
-                  label={`${l.shortName} (${l.grader} ${l.grade}) at market value`}
-                  value={`− ${exact(l.fmv)}`}
-                  indent
-                />
-              ))}
-              {targetValue > 0 && slabsValue > targetValue ? (
-                <p className="pl-3 text-[11px] text-dim">
-                  Your slabs are worth more than the value you typed, so the offer is the slabs alone.
-                </p>
-              ) : null}
-            </>
-          ) : null}
+          {kind === "trade" ? <Line label="Slabs included" value={String(slabs.length)} /> : null}
           <Line label="Cash you pay" value={exact(cash)} strong />
         </dl>
 
@@ -229,7 +210,7 @@ export function DealBuilder({
             {user?.address
               ? "Lower the offer or get more Pokechain credits available."
               : kind === "trade"
-              ? "Add more slabs, lower the value, or top up."
+              ? "Lower the cash amount or top up."
               : "Lower the offer or top up."}
           </p>
           {user?.address ? (
@@ -247,7 +228,7 @@ export function DealBuilder({
       ) : null}
 
       <Button size="lg" className="w-full" disabled={blocked} onClick={submit}>
-        {submitLabel(total)}
+        {kind === "trade" ? `Send offer · ${slabs.length} slab${slabs.length === 1 ? "" : "s"} + ${exact(cash)}` : submitLabel(total)}
       </Button>
     </div>
   );

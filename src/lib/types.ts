@@ -1,8 +1,4 @@
-import type { ValuedSlab } from "./valuation";
-
 export type Grader = "PSA" | "CGC" | "BGS" | "SGC";
-
-export type Confidence = "High" | "Medium" | "Low";
 
 export interface Sale {
   date: string; // ISO
@@ -59,8 +55,6 @@ export interface Listing {
   /** printed rarity, e.g. "Rare Holo" */
   variant: string;
   price: number;
-  fmv: number;
-  confidence: Confidence;
   owner: string;
   certNumber: string;
   listedAt: string;
@@ -132,8 +126,11 @@ export interface TradeBid {
 
 export type OfferStatus = "pending" | "accepted" | "declined" | "withdrawn" | "replaced";
 
-/** A slab in an on-chain trade, with both values it can be counted at and the one its sender picked. */
-export interface ChatTradeSlab extends ValuedSlab {
+/** A slab in an on-chain trade, with an optional seller asking price for reference. */
+export interface ChatTradeSlab {
+  tokenId: string;
+  /** Seller asking price at offer creation, for reference only. */
+  stated: number | null;
   title: string;
   image: string;
   grader: string;
@@ -148,7 +145,7 @@ export interface ChatTradeSide {
 /**
  * A multi-slab trade offer sitting in the chat. The terms are locked in TradeEscrow on-chain (the chain
  * is the source of truth for whether it is open, accepted or withdrawn); this keeps what the chat needs
- * to show it, and the values the sender counted each slab at. Written from the sender's chair.
+ * to show it, and the asking prices shown when the offer was sent. Written from the sender's chair.
  */
 export interface ChatTrade {
   offerId: string;

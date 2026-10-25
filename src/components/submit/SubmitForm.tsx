@@ -7,7 +7,6 @@ import { Archive, BadgeCheck, Check, ShieldCheck, Tag } from "lucide-react";
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { certPreview } from "@/lib/catalog";
-import { usd } from "@/lib/format";
 import { GRADERS } from "@/lib/pools";
 import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
@@ -73,7 +72,7 @@ export function SubmitForm() {
           <div className="min-w-0">
             <p className="text-[13px] font-semibold leading-snug">{vaulted.title}</p>
             <p className="mt-1.5 text-[12px] text-muted">
-              Market value {usd(vaulted.fmv)} · confidence {vaulted.confidence}
+              {vaulted.grader} {vaulted.grade} · Ready to list or trade
             </p>
           </div>
         </div>

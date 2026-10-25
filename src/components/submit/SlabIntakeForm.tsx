@@ -3,13 +3,12 @@
 import clsx from "clsx";
 import Image from "next/image";
 import { BadgeCheck, Camera, Dices, ImagePlus, Loader2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { keccak256 } from "viem";
 import { usePublicClient } from "wagmi";
-import { certPreview, makeSubmittedListing } from "@/lib/catalog";
+import { certPreview } from "@/lib/catalog";
 import { contracts, shortHash } from "@/lib/chain/config";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
-import { usd } from "@/lib/format";
 import { GRADERS } from "@/lib/pools";
 import { useStore } from "@/lib/store";
 import type { Grader } from "@/lib/types";
@@ -54,10 +53,6 @@ export function SlabIntakeForm() {
   const [stage, setStage] = useState<"idle" | "uploading" | "signing">("idle");
 
   const preview = certPreview(grader, cert);
-  const estimate = useMemo(
-    () => (preview ? makeSubmittedListing({ grader, certNumber: cert, owner: "-", nowMs: 0 })?.fmv ?? 0 : 0),
-    [preview, grader, cert],
-  );
 
   // Revoke preview URLs when photos change or the form unmounts.
   useEffect(() => () => Object.values(photos).forEach((p) => p && URL.revokeObjectURL(p.url)), [photos]);
@@ -192,7 +187,6 @@ export function SlabIntakeForm() {
                 <BadgeCheck size={13} /> Found in the {grader} registry
               </p>
               <p className="mt-1 text-[13px] font-semibold leading-snug">{preview.title}</p>
-              <p className="mt-0.5 text-[12px] text-muted">Estimated market value {usd(estimate)}</p>
             </div>
           </div>
         ) : cert ? (

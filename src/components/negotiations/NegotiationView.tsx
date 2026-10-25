@@ -10,13 +10,12 @@ import { usePublicClient } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
 import { contracts } from "@/lib/chain/config";
-import { marketValueOf } from "@/lib/chain/slabValue";
 import { useHandleAddress, useTradeEvents, useTradeOffers } from "@/lib/chain/trades";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { usd } from "@/lib/format";
-import { bidValue, offerMix, pendingOffer } from "@/lib/negotiation";
+import { offerMix, pendingOffer } from "@/lib/negotiation";
 import { sellerFee, useStore } from "@/lib/store";
 import type { ChatMessage, Listing, Negotiation, OfferStatus } from "@/lib/types";
 import { OfferModal } from "../modals/OfferModal";
@@ -276,8 +275,8 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
               </Link>
               <p className="text-[12px] text-muted">
                 {chainMode
-                  ? `${isListed(listing.id) ? "Asking" : "Stated"} ${exact(listing.price)} · market value ${exact(marketValueOf({ grader: listing.grader, certNumber: listing.certNumber, title: listing.title, image: listing.image, fallback: listing.price }))}`
-                  : `Asking ${exact(listing.price)} · market value ${exact(listing.fmv)}`}
+                  ? (isListed(listing.id) ? `Asking ${exact(listing.price)}` : "Not listed")
+                  : `Asking ${exact(listing.price)}`}
               </p>
             </div>
             {chainMode ? (
@@ -376,7 +375,7 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
             {chainMode ? (
               <ul className="list-disc space-y-1 pl-4">
                 <li>Chat as long as you like, then make a trade offer: slabs from both vaults, plus cash either way.</li>
-                <li>Count each slab at its market value or the value its owner stated. The balance shows who comes out ahead, only to you.</li>
+                <li>Compare listings and completed Pokechain transactions on each slab page, then agree on slabs and cash with the other collector.</li>
                 <li>Your side is locked in TradeEscrow. They accept, counter or decline; accepting swaps everything in one transaction.</li>
                 <li>Nothing ships: only the tokens change hands, the slabs stay vaulted.</li>
               </ul>
@@ -480,7 +479,7 @@ function OfferBar({
           Decline
         </Button>
         <Button size="sm" onClick={onAccept} disabled={busy}>
-          {busy ? "Accepting…" : `Accept ${exact(bidValue(pending.offer))}`}
+          {busy ? "Accepting…" : "Accept offer"}
         </Button>
       </div>
       <p className="text-[11px] text-dim">
@@ -561,7 +560,7 @@ function OfferCard({ message: m, mine }: { message: ChatMessage; mine: boolean }
         </Badge>
       </div>
       <p className={clsx("mt-1 text-[20px] font-bold leading-tight", faded && "line-through")}>
-        {exact(bidValue(offer))}
+        {offer.slabIds.length ? `${offer.slabIds.length} slab${offer.slabIds.length === 1 ? "" : "s"} + ${exact(offer.cash)} cash` : exact(offer.cash)}
       </p>
       <p className="text-[12px] text-muted">{offerMix(offer)}</p>
       {slabs.length ? (
@@ -574,7 +573,6 @@ function OfferCard({ message: m, mine }: { message: ChatMessage; mine: boolean }
               <Link href={`/asset/${s.id}`} className="min-w-0 truncate text-[12px] font-semibold hover:underline">
                 {s.shortName} · {s.grader} {s.grade}
               </Link>
-              <span className="ml-auto shrink-0 text-[11px] text-muted">{exact(s.fmv)}</span>
             </li>
           ))}
           {offer.cash > 0 ? (

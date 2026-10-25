@@ -127,16 +127,10 @@ async function ashOffersFromChat(page: Page) {
   await page.getByLabel("You give: cash").fill("50");
   await page.getByRole("button", { name: /Articuno.*#6$/ }).click();
 
-  // The offer contains 3 Pikachus ($104.96 + $8.00 + $207.22) + $50 for 2 Articunos ($1,057.00 + $445.05).
-  const balance = page.getByTestId("trade-balance");
-  // That is hugely in ash's favour, and the panel says so before he sends it.
-  await expect(balance).toContainText("Lopsided, in your favour");
-  await expect(balance.getByTestId("trade-net")).toHaveText("+$1,131.87");
-  await expect(balance).not.toContainText("Everything at market");
-  await expect(balance).not.toContainText("Everything at stated (unlisted at market)");
-  // None of these slabs is listed for sale, so none has a stated (asking) price: they count at market.
-  await expect(page.getByText("Not listed: counts at market").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: /^stated / })).toHaveCount(0);
+  const terms = page.getByTestId("trade-terms");
+  await expect(terms).toContainText("3 slabs + $50.00 USDC");
+  await expect(terms).toContainText("2 slabs + $0.00 USDC");
+  await expect(page.getByTestId("trade-verdict")).toHaveCount(0);
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
 }
@@ -169,10 +163,8 @@ test("two collectors: negotiate in a chat, then 3 Pikachus + $50 for 2 Articunos
   await expect(misty.getByText("Would you swap my Pikachus for them?")).toBeVisible();
   const card = misty.getByTestId("trade-card");
   await expect(card.getByTestId("trade-status")).toHaveText("Your move");
-  // From her side the same offer reads the other way: she'd give $1,502.05 of Articunos for $370.18.
-  // Only she sees this; ash isn't told how she reads it.
-  await expect(card.getByTestId("trade-verdict")).toHaveText("Lopsided");
-  await expect(card.getByTestId("trade-net")).toHaveText("−$1,131.87");
+  await expect(card.getByTestId("trade-terms")).toContainText("2 slabs + $0.00 USDC");
+  await expect(card.getByTestId("trade-terms")).toContainText("3 slabs + $50.00 USDC");
   await card.getByRole("button", { name: "Accept trade" }).click();
   await expect(card.getByTestId("trade-status")).toHaveText("Accepted");
   await expect(misty.getByText(/misty accepted trade #1/)).toBeVisible();
@@ -260,13 +252,13 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
   await page.getByRole("button", { name: "Open chat and build a trade" }).click();
   await expect(page.getByRole("heading", { name: "Trade offer to @misty" })).toBeVisible();
 
-  // His Charizard (market $1,207) for her listed Articuno (market $1,057): ash is giving more, and the panel says so.
+  // Review exact slab terms; the app assigns no monetary value to either card.
   await page.getByRole("button", { name: /Charizard.*#4$/ }).click();
   await expect(page.getByRole("button", { name: /Articuno.*#5$/ })).toHaveAttribute("aria-pressed", "true"); // the listed slab
   // Her stated value is what she's asking for it ($900).
   await expect(page.getByText("Listed at $900.00: it is delisted if they accept")).toBeVisible();
-  await expect(page.getByRole("button", { name: "stated $900.00" })).toBeVisible();
-  await expect(page.getByTestId("trade-balance").getByTestId("trade-net")).toHaveText("−$150.00");
+  await expect(page.getByTestId("trade-terms")).toContainText("1 slab + $0.00 USDC");
+  await expect(page.getByTestId("trade-verdict")).toHaveCount(0);
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");
 
@@ -295,7 +287,7 @@ test("seeded demo: an offer on a listed slab, a counter that includes your own l
   await page.getByRole("button", { name: "Chat with @test2" }).click();
   await page.getByRole("button", { name: "Make a trade offer" }).click();
   await expect(page.getByRole("button", { name: /Dark Dragonite.*#3$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByText(/Stated value is (above|below) market/).first()).toBeVisible(); // no percentage
+  await expect(page.getByText("Seller ask $1,150.00").first()).toBeVisible();
   await page.getByRole("button", { name: /Charizard.*#2$/ }).click();
   await page.getByRole("button", { name: "Send offer" }).click();
   await expect(page.getByTestId("trade-status")).toHaveText("Waiting for them");

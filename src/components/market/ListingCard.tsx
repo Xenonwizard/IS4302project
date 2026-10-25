@@ -60,9 +60,7 @@ export function ListingCard({
           <span className={clsx("font-bold", dense ? "text-sm" : "text-[15px]")}>
             {usd(listing.price)}
           </span>
-          <span className="shrink-0 whitespace-nowrap rounded-md bg-surface-2 px-2 py-1 text-[11px] font-semibold text-muted">
-            FMV {usd(listing.fmv)}
-          </span>
+          <span className="text-[11px] text-muted">Asking price</span>
         </div>
       </div>
     </div>

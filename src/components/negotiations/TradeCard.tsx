@@ -18,8 +18,7 @@ const exact = (n: number) => usd(n, { cents: true });
 
 /**
  * A multi-slab trade offer in the chat. The chain says whether it is still open; the message says
- * what it is made of and what the sender counted each slab at. The balance is worked out for whoever
- * is looking and shown only to them.
+ * the slabs and cash in the trade. No platform value is assigned to a slab.
  */
 export function TradeCard({
   message,
@@ -103,7 +102,7 @@ export function TradeCard({
 
       <div className="mt-3">
         <BalancePanel give={mine} get={theirs} compact />
-        <p className="mt-1.5 text-[11px] text-dim">Only you see this balance. The other side is not told how you read the offer.</p>
+        <p className="mt-1.5 text-[11px] text-dim">Review every slab and cash amount before accepting.</p>
       </div>
 
       {open ? (

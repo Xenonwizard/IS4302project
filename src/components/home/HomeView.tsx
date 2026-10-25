@@ -55,8 +55,8 @@ export function HomeView() {
       <Rail title="Fresh listings" href="/marketplace?sort=recent" listings={newest} />
 
       <Rail
-        title="Highest value"
-        subtitle="The most valuable slabs on the marketplace."
+        title="Highest asking prices"
+        subtitle="Slabs with the highest seller asking prices."
         href="/marketplace?sort=price-desc"
         listings={highestValue}
       />

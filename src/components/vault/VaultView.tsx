@@ -99,7 +99,7 @@ export function VaultView() {
   const items = allItems.filter((i) => i.entry.status !== "Withdrawn");
   const withdrawn = allItems.filter((i) => i.entry.status === "Withdrawn");
 
-  const totalValue = items.reduce((sum, i) => sum + i.listing.fmv, 0);
+  const totalValue = items.reduce((sum, i) => sum + (i.entry.status === "Listed" ? i.entry.listedPrice ?? i.listing.price : 0), 0);
   const awaiting = items.filter((i) => i.entry.status === "Awaiting vaulting");
   const listed = items.filter((i) => i.entry.status === "Listed");
   const unlisted = items.filter((i) => i.entry.status === "Vaulted");
@@ -144,7 +144,7 @@ export function VaultView() {
       <p className="mt-1 text-[13px] text-muted">
         {user.address
           ? "Stored by Collector Crypt. Each slab's token is yours on Polygon, and its Collector Crypt NFT is held in Pokechain's escrow."
-          : `Held in the ${BRAND.vaultCity} vault, insured at full market value.`}
+          : `Held in the ${BRAND.vaultCity} vault, insured.`}
       </p>
 
       {user.address ? (
@@ -155,7 +155,7 @@ export function VaultView() {
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Slabs owned" value={String(items.length)} />
-        <Stat label="Collection value" value={usd(totalValue, { cents: items.some((i) => i.entry.token) })} />
+        <Stat label="Total asking prices" value={usd(totalValue, { cents: items.some((i) => i.entry.token) })} />
         <Stat label="Listed for sale" value={String(listed.length)} />
         <Stat label="Wallet balance" value={usd(balance, { cents: true })} href="/wallet" />
       </div>
@@ -253,7 +253,7 @@ export function VaultView() {
                         {listing.title}
                       </Link>
                       <p className="mt-1 text-[12px] text-muted">
-                        Asking {usd(entry.listedPrice ?? listing.price)} · FMV {usd(listing.fmv)}
+                        Asking {usd(entry.listedPrice ?? listing.price)}
                       </p>
                       <p className="mt-1 text-[12px] text-muted">
                         {offers.length
@@ -312,7 +312,7 @@ export function VaultView() {
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold leading-snug">{sellTarget.title}</p>
                 <p className="mt-1.5 text-[12px] text-muted">
-                  Market value {usd(sellTarget.fmv)} · confidence {sellTarget.confidence}
+                  {sellTarget.grader} {sellTarget.grade} · Set your own asking price
                 </p>
               </div>
             </div>
@@ -372,7 +372,7 @@ function SlabCard({
         <div className="p-3.5">
           <p className="line-clamp-2 text-[12px] font-semibold leading-snug">{listing.title}</p>
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-[13px] font-bold">{usd(listing.fmv, { cents: true })}</span>
+            <span className="text-[13px] font-bold">In trade</span>
             <Badge tone="accent"><Lock size={11} /> In offer #{inOffer.offerId}</Badge>
           </div>
           <p className="mt-1.5 text-[11px] text-dim">
@@ -398,7 +398,7 @@ function SlabCard({
           {listing.title}
         </Link>
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-[13px] font-bold">{usd(listing.fmv, { cents: Boolean(entry.token) })}</span>
+          <span className="text-[13px] font-bold">{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : entry.status === "Awaiting vaulting" ? "Locked until vaulted" : "Not listed"}</span>
           <Badge tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" || entry.status === "Awaiting vaulting" ? "warn" : "good"}>
             {entry.status}
           </Badge>
