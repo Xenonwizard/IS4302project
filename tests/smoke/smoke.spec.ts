@@ -93,11 +93,13 @@ async function ashOffersFromChat(page: Page) {
   await page.getByLabel("You give: cash").fill("50");
   await page.getByRole("button", { name: /Articuno.*#6$/ }).click();
 
-  // Everything at market: 3 Pikachus ($104.96 + $8.00 + $207.22) + $50 for 2 Articunos ($1,057.00 + $445.05).
+  // The offer contains 3 Pikachus ($104.96 + $8.00 + $207.22) + $50 for 2 Articunos ($1,057.00 + $445.05).
   const balance = page.getByTestId("trade-balance");
   // That is hugely in ash's favour, and the panel says so before he sends it.
   await expect(balance).toContainText("Lopsided, in your favour");
   await expect(balance.getByTestId("trade-net")).toHaveText("+$1,131.87");
+  await expect(balance).not.toContainText("Everything at market");
+  await expect(balance).not.toContainText("Everything at stated (unlisted at market)");
   // None of these slabs is listed for sale, so none has a stated (asking) price: they count at market.
   await expect(page.getByText("Not listed: counts at market").first()).toBeVisible();
   await expect(page.getByRole("button", { name: /^stated / })).toHaveCount(0);

@@ -36,6 +36,7 @@ contract PokechainTest is Test {
         vm.prank(collectorCrypt);
         vault.setEncryptionKey(CC_KEY);
         market = new SlabMarket(vault, usdc, accounts);
+        accounts.setSlabMarket(address(market));
         vault.setMarketplace(address(market));
 
         vm.prank(alice);
@@ -738,6 +739,7 @@ contract PokechainTest is Test {
 
         vm.prank(bob);
         usdc.faucet(500 * USD);
+        _deposit(bob, 500 * USD);
 
         vm.prank(alice);
         market.list(tokenId, 200 * USD);
@@ -746,8 +748,6 @@ contract PokechainTest is Test {
         uint256 bobUsdcBefore = usdc.balanceOf(bob);
 
         vm.startPrank(bob);
-        usdc.approve(address(market), 200 * USD);
-
         vm.expectEmit(true, true, true, true);
         emit SlabMarket.CardPurchased(tokenId, alice, bob, 200 * USD, 0, uint64(block.timestamp));
         market.buy(tokenId);
@@ -760,9 +760,11 @@ contract PokechainTest is Test {
         assertFalse(market.isListed(tokenId));
         assertFalse(vault.isRestricted(tokenId));
 
-        // 2. Exact payment settled: 0% platform fee
-        assertEq(usdc.balanceOf(bob), bobUsdcBefore - 200 * USD);
-        assertEq(usdc.balanceOf(alice), aliceUsdcBefore + 200 * USD);
+        // 2. Exact payment settled from custody: wallet USDC is untouched, and 0% fee is charged.
+        assertEq(usdc.balanceOf(bob), bobUsdcBefore);
+        assertEq(usdc.balanceOf(alice), aliceUsdcBefore);
+        assertEq(accounts.balanceOf(bob), 300 * USD);
+        assertEq(accounts.balanceOf(alice), 200 * USD);
 
         // 3. Physical card remains vaulted (Rule 4)
         assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Vaulted));
@@ -785,8 +787,6 @@ contract PokechainTest is Test {
         market.list(tokenId, 100 * USD);
 
         vm.startPrank(bob);
-        usdc.faucet(100 * USD);
-        usdc.approve(address(market), 100 * USD);
         vm.expectRevert(abi.encodeWithSelector(SlabMarket.AccountNotActive.selector, bob));
         market.buy(tokenId);
         vm.stopPrank();
@@ -800,10 +800,10 @@ contract PokechainTest is Test {
         vm.prank(alice);
         market.list(tokenId, 100 * USD);
 
-        // Bob has 0 USDC
+        // Bob has wallet USDC but no money in his Pokechain account.
         vm.startPrank(bob);
-        usdc.approve(address(market), 100 * USD);
-        vm.expectRevert();
+        usdc.faucet(100 * USD);
+        vm.expectRevert(abi.encodeWithSelector(AccountRegistry.InsufficientBalance.selector, 100 * USD, 0));
         market.buy(tokenId);
         vm.stopPrank();
 
@@ -838,14 +838,16 @@ contract PokechainTest is Test {
 
         vm.prank(bob);
         usdc.faucet(price);
+        _deposit(bob, price);
 
         vm.startPrank(bob);
-        usdc.approve(address(market), price);
         market.buy(tokenId);
         vm.stopPrank();
 
         assertEq(vault.ownerOf(tokenId), bob);
-        assertEq(usdc.balanceOf(alice), 1_000 * USD + price);
+        assertEq(usdc.balanceOf(alice), 1_000 * USD);
+        assertEq(accounts.balanceOf(alice), price);
+        assertEq(accounts.balanceOf(bob), 0);
     }
 
     /// The cert and the fingerprint of the intake evidence are part of the NFT's own metadata.

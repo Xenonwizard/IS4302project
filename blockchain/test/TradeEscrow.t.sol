@@ -255,7 +255,7 @@ contract TradeEscrowTest is Test {
 
     function test_OnlyEscrowMovesBalances() public {
         vm.prank(ash);
-        vm.expectRevert(AccountRegistry.OnlyTradeEscrow.selector);
+        vm.expectRevert(AccountRegistry.OnlyBalanceMover.selector);
         accounts.moveBalance(misty, ash, 1);
     }
 

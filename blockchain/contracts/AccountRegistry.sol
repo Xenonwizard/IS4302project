@@ -33,9 +33,9 @@ interface ITradeEscrowOffers {
  *                             they must be redeemed (shipped out) or transferred first.
  *                             Also refused while it has trade offers open (assets in escrow).
  *
- *  Trading
- *      `moveBalance`         TradeEscrow (and only it) moves custody balances: it locks the cash
- *                            in an offer and pays both sides when a trade settles.
+ *  Trading and marketplace purchases
+ *      `moveBalance`         TradeEscrow and SlabMarket move custody balances: it locks the cash
+ *                            in an offer or pays a seller without taking USDC out of custody.
  *
  *  Nothing is deleted. A closed account keeps its record and its handle stays reserved to that
  *  address, so the history of who owned what stays traceable on-chain.
@@ -58,8 +58,10 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
 
     IERC20 public immutable usdc;
     ISlabVaultCustody public slabVault;
-    /// @notice The TradeEscrow contract, the only caller allowed to move balances between accounts.
+    /// @notice The TradeEscrow contract, which may move balances for offers.
     address public tradeEscrow;
+    /// @notice The SlabMarket contract, which may move balances for marketplace purchases.
+    address public slabMarket;
 
     mapping(address => Account) private _accounts;
     /// @notice keccak256(handle) => the address that claimed it. Handles are never released.
@@ -75,6 +77,7 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     event AccountClosed(address indexed account, uint256 refunded, uint64 at);
     event SlabVaultSet(address slabVault);
     event TradeEscrowSet(address tradeEscrow);
+    event SlabMarketSet(address slabMarket);
     event BalanceMoved(address indexed from, address indexed to, uint256 amount);
 
     error InvalidHandle();
@@ -86,7 +89,8 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     error SlabsStillVaulted(uint256 count);
     error SlabVaultAlreadySet();
     error TradeEscrowAlreadySet();
-    error OnlyTradeEscrow();
+    error SlabMarketAlreadySet();
+    error OnlyBalanceMover();
     error OffersStillOpen(uint256 count);
 
     constructor(IERC20 usdc_) Ownable(msg.sender) {
@@ -107,13 +111,22 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         emit TradeEscrowSet(escrow);
     }
 
+    /// @notice One-time wiring to the fixed-price marketplace.
+    function setSlabMarket(address market) external onlyOwner {
+        if (slabMarket != address(0)) revert SlabMarketAlreadySet();
+        slabMarket = market;
+        emit SlabMarketSet(market);
+    }
+
     /**
      * @notice Moves custody balance from one holder to another without any USDC leaving this
-     *         contract, so `totalCustody` is unchanged. Only TradeEscrow calls it, inside a
-     *         transaction the paying side signed (creating its offer, or accepting one).
+     *         contract, so `totalCustody` is unchanged. TradeEscrow calls it inside a transaction
+     *         the paying side signed, and SlabMarket calls it for fixed-price purchases.
      */
     function moveBalance(address from, address to, uint256 amount) external {
-        if (msg.sender != tradeEscrow || tradeEscrow == address(0)) revert OnlyTradeEscrow();
+        if ((msg.sender != tradeEscrow || tradeEscrow == address(0)) && (msg.sender != slabMarket || slabMarket == address(0))) {
+            revert OnlyBalanceMover();
+        }
         uint256 available = balanceOf[from];
         if (amount > available) revert InsufficientBalance(amount, available);
         balanceOf[from] = available - amount;

@@ -9,7 +9,7 @@ import { IS_LOCAL, chain, shortHash } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useChainTx } from "@/lib/chain/useChainTx";
 import { useStore } from "@/lib/store";
-import { Fn, OnChainNote, Step, type StepState } from "../chain/ui";
+import { Step, type StepState } from "../chain/ui";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
 
 /**
@@ -102,11 +102,6 @@ function Onboarding() {
             <Wallet size={17} />
             Connect wallet
           </Button>
-          <OnChainNote>
-            Nothing yet. Your wallet address becomes your account id. MetaMask holds the private
-            key, and {BRAND.name} never sees it.
-            {IS_LOCAL ? " For a quick demo, pick the test1 or test2 wallet." : ""}
-          </OnChainNote>
         </Step>
         {acct.isConnected && acct.status !== "Active" ? (
           <button onClick={() => disconnect()} className="-mt-2 ml-10 text-[12px] font-semibold text-accent hover:underline">
@@ -144,12 +139,6 @@ function Onboarding() {
               </Button>
             </a>
           )}
-          <OnChainNote>
-            Every transaction pays a small gas fee in the chain&apos;s native coin ({acct.gasSymbol}).{" "}
-            {IS_LOCAL
-              ? "The local Hardhat chain has no public faucet, so the vault operator sends you 10 test ETH."
-              : "Amoy POL is free from the faucet."}
-          </OnChainNote>
         </Step>
 
         <Step n={3} title={acct.status === "Active" ? `Account @${acct.handle} is open` : "Open your account on-chain"} state={s3}>
@@ -168,11 +157,6 @@ function Onboarding() {
               {busy === "register" ? "Confirm in your wallet…" : "Open account"}
             </Button>
           </form>
-          <OnChainNote tech={<><Fn>AccountRegistry.register(handle)</Fn>, which emits <Fn>AccountOpened</Fn>.</>}>
-            Your handle is saved on the chain against your wallet address, and your account becomes{" "}
-            <b className="text-white">Active</b>. A handle is 3 to 20 characters of a-z, 0-9 or _, and nobody else
-            can take it, even after you close your account.
-          </OnChainNote>
         </Step>
       </ol>
 

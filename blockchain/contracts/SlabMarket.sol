@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SlabVault} from "./SlabVault.sol";
@@ -16,7 +15,7 @@ import {AccountRegistry} from "./AccountRegistry.sol";
  *   Rule 1: Only the holder of a vaulted Pokéchain NFT may list it for sale, provided it is
  *           not locked or frozen and its vault custody is still confirmed.
  *   Rule 2: Listings use Pokéchain's supported stablecoin (USDC). Pokéchain charges 0% platform fee.
- *   Rule 3: Payment (USDC) and NFT transfer settle atomically. If either fails, the entire transaction reverts.
+ *   Rule 3: Payment from the buyer's Pokechain account and NFT transfer settle atomically. If either fails, the entire transaction reverts.
  *   Rule 4: Successful settlement transfers the Pokéchain NFT to the buyer and distributes proceeds
  *           to the seller. The physical card and backing NFT remain in custody.
  *   Rule 5: A listed NFT cannot simultaneously be pledged, redeemed, or independently transferred.
@@ -26,8 +25,6 @@ import {AccountRegistry} from "./AccountRegistry.sol";
  *   Rule 7: Non-sale transfers, loans, or cancellations are excluded from completed-sales data.
  */
 contract SlabMarket is Ownable, ReentrancyGuard {
-    using SafeERC20 for IERC20;
-
     struct Listing {
         address seller;
         uint256 price;
@@ -144,7 +141,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
 
     /**
      * @notice Purchases a listed slab atomically.
-     * @dev Transfers USDC directly from buyer to seller (0% platform fee, Rule 2),
+     * @dev Moves USDC inside Pokechain custody from buyer to seller (0% platform fee, Rule 2),
      *      releases the listing lock, and transfers the NFT to the buyer (Rules 3, 4).
      *      Records the completed purchase into the sales history (Rule 6).
      */
@@ -176,9 +173,9 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         );
         _tokenSaleIndices[tokenId].push(saleIdx);
 
-        // 2. Interactions: Atomic payment & token transfer
-        // Buyer pays seller full price in USDC (0 platform fee per Rule 2)
-        usdc.safeTransferFrom(msg.sender, l.seller, l.price);
+        // 2. Interactions: Atomic custody payment & token transfer.
+        // Buyer pays seller from their Pokechain account; wallet USDC is never touched.
+        accounts.moveBalance(msg.sender, l.seller, l.price);
 
         // SlabVault executes transfer from seller to buyer
         vault.settleMarketTransfer(l.seller, msg.sender, tokenId);

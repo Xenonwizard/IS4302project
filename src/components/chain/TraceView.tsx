@@ -11,7 +11,7 @@ import type { SlabTrace } from "@/lib/chain/trace";
 import { Badge, Button, inputClass } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
 import { EvidencePanel } from "./EvidencePanel";
-import { Fn, OnChainNote } from "./ui";
+import { Fn } from "./ui";
 
 type Source = "Polygon" | "Solana" | "Collector Crypt";
 
@@ -219,13 +219,6 @@ export function TraceView({ tokenId }: { tokenId: string }) {
             </ol>
           </section>
 
-          <OnChainNote title="Why this is traceable">
-            Nothing is burned. The Polygon token stays locked with its owner. Collector Crypt&apos;s Solana NFT stays frozen in
-            Pokechain&apos;s escrow, marked with the redemption. Each record carries the other&apos;s id: the token stores CC&apos;s
-            asset id and redemption id, and CC&apos;s record carries the tracking number. If the real Collector Crypt burned
-            its NFT on redemption, the burn would be one more Solana transaction in this timeline, and the Polygon side
-            would be unchanged.
-          </OnChainNote>
         </>
       ) : null}
     </div>

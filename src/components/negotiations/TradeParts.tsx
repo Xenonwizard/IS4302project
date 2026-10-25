@@ -132,9 +132,8 @@ const VERDICT: Record<Verdict, { label: string; tone: string; bar: string }> = {
 };
 
 /**
- * What a trade comes to, from the viewer's side: what they give, what they get, who is ahead, by how
- * much, and what that looks like if every slab were counted at market or at its stated (asking) price. Nothing
- * is sent to the other side; this is only for the person looking.
+ * What a trade comes to, from the viewer's side: what they give, what they get, and who is ahead. Nothing is
+ * sent to the other side; this is only for the person looking.
  */
 export function BalancePanel({
   give,
@@ -160,8 +159,6 @@ export function BalancePanel({
   }
   const rows: { label: string; b: Balance }[] = [
     { label: "As priced in this offer", b: asPriced },
-    { label: "Everything at market", b: balance(give, get, "market") },
-    { label: "Everything at stated (unlisted at market)", b: balance(give, get, "stated") },
   ];
   // Coming out ahead isn't a warning for the viewer, so it reads in the accent colour instead of red or amber.
   const v = !asPriced.against && asPriced.verdict !== "fair" ? { ...VERDICT[asPriced.verdict], tone: "text-accent", bar: "bg-accent" } : VERDICT[asPriced.verdict];
@@ -232,7 +229,7 @@ export function BalancePanel({
 
       {compact ? (
         <details className="mt-2">
-          <summary className="cursor-pointer text-[12px] font-semibold text-accent hover:underline">See it at market and at stated values</summary>
+          <summary className="cursor-pointer text-[12px] font-semibold text-accent hover:underline">See offer breakdown</summary>
           {detail}
         </details>
       ) : (

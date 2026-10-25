@@ -16,7 +16,7 @@ import { Button } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
 import { usd } from "@/lib/format";
 import { EvidencePanel } from "./EvidencePanel";
-import { Fn, OnChainNote } from "./ui";
+import { Fn } from "./ui";
 
 interface Pending {
   submissionId: string;
@@ -347,9 +347,6 @@ function PendingCard({ sub, onChange, onDone }: { sub: Pending; onChange: () => 
             </Link>
           </p>
         ) : null}
-      </div>
-      <div className="mt-3">
-        <OnChainNote title="This step" tech={next.tech}>{next.note}</OnChainNote>
       </div>
     </div>
   );

@@ -13,7 +13,7 @@ import { Badge, Button } from "../ui/primitives";
 import { LoginPrompt } from "../vault/shared";
 import { ChainHistory } from "./ChainHistory";
 import { CopyText } from "./ChainConsole";
-import { Fn, OnChainNote } from "./ui";
+import { Fn } from "./ui";
 
 /** /account: the on-chain account record, offboarding (close account) and the event history. */
 export function AccountView() {
@@ -38,7 +38,7 @@ export function AccountView() {
         <h1 className="text-[22px] font-bold">@{user.username} is an off-chain demo account</h1>
         <p className="text-[13px] text-muted">
           It lives only in this browser. Open an on-chain account with a wallet to register a handle in{" "}
-          <Fn>AccountRegistry</Fn>, deposit USDC and tokenise slabs.
+          <Fn>AccountRegistry</Fn>, deposit Pokechain credits and tokenise slabs.
         </p>
         <Button onClick={() => setAuthOpen(true)}>
           <Wallet size={15} /> Open an on-chain account
@@ -59,7 +59,7 @@ export function AccountView() {
         </div>
         <Link href="/wallet">
           <Button variant="secondary" size="sm">
-            <Wallet size={14} /> Deposit or withdraw USDC
+            <Wallet size={14} /> Deposit or withdraw Pokechain credits
           </Button>
         </Link>
       </div>
@@ -120,25 +120,11 @@ function CloseAccount({ acct }: { acct: Acct }) {
           <CheckCircle2 size={16} className="mt-0.5 text-good" />
           <span>
             {acct.custodyBalance > 0
-              ? `${usd(acct.custodyBalance, { cents: true })} USDC goes back to ${shortHash(acct.address!)} in the same transaction.`
-              : "No USDC in custody to refund."}
+              ? `${usd(acct.custodyBalance, { cents: true })} Pokechain credits go back to ${shortHash(acct.address!)} in the same transaction.`
+              : "No Pokechain credits in custody to refund."}
           </span>
         </li>
       </ul>
-      <div className="mt-3">
-        <OnChainNote
-          tech={
-            <>
-              <Fn>AccountRegistry.closeAccount()</Fn>: reverts with <Fn>SlabsStillVaulted</Fn> while <Fn>SlabVault.vaultedCount</Fn> is above
-              zero, otherwise pays out and emits <Fn>AccountClosed</Fn>.
-            </>
-          }
-        >
-          You can only close the account once no slabs are left in the vault (withdraw or transfer them first). Closing pays
-          your whole balance back to your wallet and marks the account <b className="text-white">Closed</b>. Nothing is
-          deleted: your handle stays yours, your history stays readable, and you keep the tokens of slabs you withdrew.
-        </OnChainNote>
-      </div>
       <div className="mt-3 flex gap-2">
         {confirm ? (
           <>

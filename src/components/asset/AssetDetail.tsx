@@ -782,21 +782,21 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </div>
             <div className="h-px bg-hairline" />
             <div className="flex justify-between">
-              <dt className="text-muted">Total payment</dt>
-              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} USDC</dd>
+              <dt className="text-muted">Total payment from your Pokechain account</dt>
+              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} Pokechain credits</dd>
             </div>
           </dl>
 
           <div className="mt-4 flex items-center justify-between rounded-xl border border-hairline p-3 text-[12px]">
-            <span className="text-muted">Your available balance:</span>
+            <span className="text-muted">Your Pokechain account balance:</span>
             <span className="font-bold">
-              {user?.address ? `${usd(acct.walletUsdc, { cents: true })} USDC` : usd(balance, { cents: true })}
+              {user?.address ? `${usd(acct.custodyBalance, { cents: true })} Pokechain credits` : usd(balance, { cents: true })}
             </span>
           </div>
 
-          {user?.address && acct.walletUsdc < displayPrice ? (
+          {user?.address && acct.custodyBalance < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
-              You need {usd(displayPrice - acct.walletUsdc, { cents: true })} more USDC. Top up or mint test USDC in your wallet.
+              You need {usd(displayPrice - acct.custodyBalance, { cents: true })} more Pokechain credits in your Pokechain account. Deposit more before buying.
             </p>
           ) : !user?.address && balance < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
@@ -818,7 +818,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               className="flex-1"
               disabled={
                 buyBusy ||
-                (user?.address ? acct.walletUsdc < displayPrice : balance < displayPrice)
+                (user?.address ? acct.custodyBalance < displayPrice : balance < displayPrice)
               }
               onClick={handleBuy}
             >

@@ -29,6 +29,7 @@ export default buildModule("PokechainModule", (m) => {
 
   // Fixed-price listings: SlabMarket settles a sale and is the only other contract SlabVault lets move a slab.
   const slabMarket = m.contract("SlabMarket", [slabVault, usdc, accounts]);
+  m.call(accounts, "setSlabMarket", [slabMarket]);
   m.call(slabVault, "setMarketplace", [slabMarket]);
 
   // Seed default test USDC balance for Hardhat test collectors (accounts #1 and #2)

@@ -10,7 +10,6 @@ import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { ChatTrade, ChatTradeSide, ChatTradeSlab } from "@/lib/types";
 import { type ValueBasis } from "@/lib/valuation";
-import { Fn, OnChainNote } from "../chain/ui";
 import { Button, Modal, inputClass } from "../ui/primitives";
 import { BalancePanel, SlabTile } from "./TradeParts";
 
@@ -44,7 +43,7 @@ export function TradeBuilder({
   negotiationId: string;
   me: { address: Address; handle: string };
   them: { address: Address; handle: string };
-  /** USDC in my Pokechain account, the cash I can put in an offer */
+  /** Pokechain credits in my account, the cash I can put in an offer */
   cash: number;
   counterOf?: CounterOf;
   /** a new offer starts with these picked, e.g. the slab the chat is about */
@@ -156,11 +155,6 @@ function Form({
 
   return (
     <div className="space-y-4 p-5">
-      <p className="text-[13px] leading-relaxed text-muted">
-        Pick slabs from both vaults and add cash if you like. Count each slab at its <b className="text-white">market</b> value or the value
-        its owner <b className="text-white">stated</b> (their asking price, for a slab listed for sale; one that isn&apos;t listed counts at market). The balance below shows who comes out ahead, only to you.
-      </p>
-
       <div className="grid gap-3 md:grid-cols-2">
         <Column
           title="You give"
@@ -200,28 +194,6 @@ function Form({
           {busy ? "Signing…" : counterOf ? "Send counter-offer" : "Send offer"}
         </Button>
       </div>
-
-      <OnChainNote
-        tech={
-          counterOf ? (
-            <>
-              <Fn>TradeEscrow.counter(#{counterOf.offerId}, mySlabs, myCash, theirSlabs, theirCash)</Fn> closes their offer (refunding it) and opens
-              yours in one transaction. A listed slab of yours goes through <Fn>SlabMarket.cancelListing</Fn> first.
-            </>
-          ) : (
-            <>
-              <Fn>TradeEscrow.createOffer(@{them.handle}, yourSlabs, yourCash, theirSlabs, theirCash, chat)</Fn>, after{" "}
-              <Fn>SlabMarket.cancelListing</Fn> for any listed slab of yours. They answer with <Fn>accept</Fn>, <Fn>counter</Fn> or{" "}
-              <Fn>decline</Fn>; you can <Fn>withdraw</Fn>.
-            </>
-          )
-        }
-      >
-        {counterOf
-          ? "Their offer is cancelled and they get their slabs and cash back. Your counter-offer takes its place: your slabs and cash are held by the trade contract until they answer."
-          : `Your slabs and cash are held by the trade contract, so you can't sell or move them while the offer is open. Nothing of @${them.handle}'s moves until they accept. When they do, everything swaps in one go, or nothing does. If one of your slabs is listed for sale, its listing is cancelled first.`}{" "}
-        The market and stated values only help you two weigh the deal; the contract moves exactly what the offer lists.
-      </OnChainNote>
     </div>
   );
 }
@@ -272,7 +244,7 @@ function Column({
         )}
       </div>
       <label className="mt-3 block text-[12px] font-semibold text-muted">
-        Plus cash (USDC)
+          Plus cash (Pokechain credits)
         <input
           className={clsx(inputClass, "mt-1 h-10")}
           inputMode="decimal"

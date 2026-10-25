@@ -45,7 +45,7 @@ export function ListForSaleForm({
   return (
     <div>
       <Field
-        label="Asking price (USDC)"
+        label="Asking price (Pokechain credits)"
         hint="Set your fixed asking price for the Pokéchain marketplace."
       >
         <div className="relative">
@@ -72,7 +72,7 @@ export function ListForSaleForm({
         <div className="h-px bg-hairline" />
         <div className="flex justify-between">
           <dt className="text-muted">You receive upon settlement</dt>
-          <dd className="font-bold text-accent">{usd(value, { cents: true })} USDC</dd>
+          <dd className="font-bold text-accent">{usd(value, { cents: true })} Pokechain credits</dd>
         </div>
       </dl>
 
