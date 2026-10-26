@@ -42,12 +42,26 @@ test("collector: submits a slab request; no NFT is minted until Pokechain receiv
     await page.getByText(text).click();
   }
   await page.getByRole("button", { name: "Upload evidence and submit on-chain" }).click();
+  await expect(page).toHaveURL(/\/submissions$/);
   await expect(page.getByText("Awaiting receipt at Pokechain")).toBeVisible();
+
+  // A completed request returns to the list, where another independent slab can be added immediately.
+  await page.getByRole("link", { name: "Add another slab" }).click();
+  await page.getByRole("button", { name: /Random unused cert/ }).click();
+  await expect(page.getByText(/Found in the PSA registry/i)).toBeVisible();
+  await page.getByRole("button", { name: /Use sample photos/ }).click();
+  await page.getByPlaceholder("RR123456789SG").fill("RR000111333SG");
+  for (const text of [/I own this slab/, /The slab is authentic/, /I agree to Pokechain/]) {
+    await page.getByText(text).click();
+  }
+  await page.getByRole("button", { name: "Upload evidence and submit on-chain" }).click();
+  await expect(page).toHaveURL(/\/submissions$/);
+  await expect(page.locator('li[data-testid^="request-"]')).toHaveCount(2);
   await page.reload();
-  await expect(page.getByText("Awaiting receipt at Pokechain")).toBeVisible();
+  await expect(page.getByText("Awaiting receipt at Pokechain")).toHaveCount(2);
 });
 
-test("collector: the separate simulator receives a card and exposes only a loss report until vaulting", async ({ page }) => {
+test("collector: a received slab stays in Submissions and its row expands to the submitted form", async ({ page }) => {
   await openAccount(page, "smoke_ash");
   await page.goto("/submit");
   await page.getByLabel("Certification number").fill("4324324");
@@ -63,10 +77,62 @@ test("collector: the separate simulator receives a card and exposes only a loss 
   await expect(page.getByText("Current status: Pending")).toBeVisible();
   await page.getByRole("button", { name: "Received at Pokechain", exact: true }).click();
   await expect(page.getByText("Received at Pokechain")).toBeVisible();
-  await page.goto("/vault");
-  await expect(page.getByText("Awaiting vaulting")).toBeVisible();
-  await page.getByRole("button", { name: "Report lost", exact: true }).click();
-  await expect(page.getByText("Loss report filed")).toBeVisible();
+  await page.goto("/submissions");
+  const request = page.getByTestId("request-4324324");
+  await expect(request.getByTestId("request-stage")).toHaveText("Received at Pokechain");
+  await request.getByRole("button").click();
+  await expect(request.getByText("Delivery method")).toBeVisible();
+  await expect(request.getByText("RR000333444SG")).toBeVisible();
+  await expect(page).toHaveURL(/\/submissions$/);
+});
+
+test("submissions: a received slab links to the Vault and its NFT, and a chain reset clears it from every tab", async ({ page, context, request }) => {
+  const cert = "5554443";
+  await openAccount(page, "smoke_links");
+  await page.goto("/submit");
+  await page.getByLabel("Certification number").fill(cert);
+  await page.getByRole("button", { name: /Use sample photos/ }).click();
+  await expect(page.getByText(/^keccak 0x/)).toHaveCount(3);
+  await page.getByPlaceholder("RR123456789SG").fill("RR000999111SG");
+  for (const text of [/I own this slab/, /The slab is authentic/, /I agree to Pokechain/]) {
+    await page.getByText(text).click();
+  }
+  await page.getByRole("button", { name: "Upload evidence and submit on-chain" }).click();
+  await expect(page).toHaveURL(/\/submissions$/);
+
+  // Pokechain receives it: the NFT is minted, locked, awaiting vault.
+  const received = await request.post("/api/chain/receive", { data: { submissionId: cert } });
+  expect(received.ok(), await received.text()).toBeTruthy();
+  const row = page.getByTestId(`request-${cert}`);
+  await expect(row.getByTestId("request-stage")).toHaveText("Received at Pokechain");
+  await row.getByRole("button").first().click();
+
+  // One button: View Vaulted NFT opens the Vault's Awaiting vault tab, with that NFT in it once.
+  await expect(row.getByRole("link")).toHaveCount(1);
+  await row.getByRole("link", { name: "View Vaulted NFT" }).click();
+  await expect(page).toHaveURL(/\/vault\?tab=awaiting$/);
+  await expect(page.getByText("Awaiting Vaulting", { exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /Report lost/ })).toHaveCount(1);
+
+  // An NFT still being vaulted has no page of its own: its address leads back to Awaiting vault.
+  await page.goto("/asset/token-1");
+  await expect(page).toHaveURL(/\/vault\?tab=awaiting$/);
+
+  // A second tab stays open on Submissions while the chain is reset from elsewhere (the Reset button
+  // or curl). Both tabs drop the request and the awaiting NFT; nothing old is written back.
+  const other = await context.newPage();
+  await other.goto("/submissions");
+  await expect(other.getByTestId(`request-${cert}`)).toBeVisible();
+  const reset = await request.post("/api/dev/reset?clean=1");
+  expect(reset.ok(), await reset.text()).toBeTruthy();
+  await expect(other.getByTestId(`request-${cert}`)).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId(`request-${cert}`)).toHaveCount(0, { timeout: 15_000 });
+  await page.goto("/vault?tab=awaiting");
+  await expect(page.getByText("Awaiting Vaulting", { exact: true })).toHaveCount(0);
+  // Nothing about the rolled-back request is left in this browser's saved state either.
+  await expect
+    .poll(async () => page.evaluate(() => window.localStorage.getItem("pokechain.state.v3") ?? "").catch(() => cert), { timeout: 15_000 })
+    .not.toContain(cert);
 });
 
 test("intake demo: the submit tab updates live while another tab (or curl) runs each step", async ({ page, context, request }) => {
@@ -101,7 +167,9 @@ test("intake demo: the submit tab updates live while another tab (or curl) runs 
 
   await intake.getByRole("button", { name: "Vaulted at Collector Crypt", exact: true }).click();
   await expect(tracked.getByTestId("request-stage")).toHaveText("Vaulted");
-  await expect(tracked.getByRole("link", { name: "See it in your Vault" })).toBeVisible();
+  await tracked.getByRole("button").click();
+  await expect(tracked.getByText("Delivery method")).toBeVisible();
+  await expect(tracked.getByRole("link", { name: "View Vaulted NFT" })).toBeVisible();
   expect(await ownerOf(1)).toBe(ASH);
 });
 
@@ -280,6 +348,13 @@ test("seeded demo: an offer on a listed slab, a counter that includes your own l
   // What `npm run chain` and the Reset button give you: accounts, slabs and listings already on-chain.
   await resetSeeded(request);
   expect(await isListed(3)).toBe(true); // test2's Dark Dragonite is for sale
+  // Seeded slabs were placed in the vault directly, so they aren't anyone's submissions.
+  const seededCtx = await browser.newContext();
+  const seeded = await seededCtx.newPage();
+  await logIn(seeded, 2, "test2");
+  await seeded.goto("/submissions");
+  await expect(seeded.getByText("No slab submissions yet")).toBeVisible();
+  await seededCtx.close();
 
   // test1 opens a chat about it: the new offer starts with that slab already picked.
   await logIn(page, 1, "test1");

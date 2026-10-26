@@ -87,7 +87,10 @@ export function ChainVaultSync() {
       );
       const isMine = (i: number) => owners[i]?.toLowerCase() === addrLower || escrowed[i];
       const candidates = ids.filter((_, i) => isMine(i));
-      const ownedByOthers = ids.filter((_, i) => owners[i] && !isMine(i)).map(String);
+      // A token whose ownerOf call now fails was reverted out of the current chain history.
+      // Treat it like a token held elsewhere so the local Vault mirror removes it. The
+      // contract-code check above still prevents a temporarily offline node from clearing state.
+      const ownedByOthers = ids.filter((_, i) => !isMine(i)).map(String);
       const [read, marketListings] = await Promise.all([
         Promise.all(candidates.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),
         Promise.all(

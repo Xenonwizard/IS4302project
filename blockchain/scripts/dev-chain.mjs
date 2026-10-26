@@ -72,7 +72,9 @@ if (deploy.status !== 0) {
   });
   const { result: snapshotId } = await res.json();
   mkdirSync(join(root, "..", ".data"), { recursive: true });
-  writeFileSync(join(root, "..", ".data", "chain-snapshot.json"), JSON.stringify({ snapshotId }));
+  // `epoch` names this run of the chain; open browser tabs drop their saved state when it changes.
+  const epoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  writeFileSync(join(root, "..", ".data", "chain-snapshot.json"), JSON.stringify({ snapshotId, epoch }));
   const seed = spawnSync("npm", ["run", "seed"], { cwd: root, stdio: "inherit", shell });
   if (seed.status !== 0) console.error("Seeding the demo data failed; the contracts are deployed but empty.");
   console.log(`\nPokechain is deployed on the local chain (snapshot ${snapshotId} saved for "Reset demo data").`);

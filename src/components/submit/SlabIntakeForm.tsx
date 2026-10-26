@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { BadgeCheck, Camera, Dices, ImagePlus, Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { keccak256 } from "viem";
@@ -39,6 +40,7 @@ interface Photo {
  * inbound tracking number.
  */
 export function SlabIntakeForm() {
+  const router = useRouter();
   const { user, pushToast } = useStore();
   const { uploadEvidence, submit } = useSlabChain();
   const client = usePublicClient();
@@ -133,11 +135,7 @@ export function SlabIntakeForm() {
         inboundTracking: method === "courier" ? tracking.trim() : "",
       });
       pushToast({ title: "Submitted", body: `Request #${submissionId} is waiting for receipt at Pokechain. An NFT is minted only when the slab arrives.`, tone: "success" });
-      setCert("");
-      setPhotos({});
-      setTracking("");
-      setCondition({ caseCracked: false, caseScratched: false, labelDamaged: false, notes: "" });
-      setDeclared({ owner: false, authentic: false, terms: false });
+      router.push("/submissions");
     } catch (err) {
       pushToast({ title: "Submission failed", body: (err as Error).message, tone: "error" });
     } finally {
