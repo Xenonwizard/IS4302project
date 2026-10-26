@@ -18,9 +18,9 @@ import {
   Truck,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { truncMiddle, usd } from "@/lib/format";
-import { useStore } from "@/lib/store";
+import { useLostSlabs, useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { chain, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
@@ -79,6 +79,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const client = usePublicClient();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const lostView = searchParams.get("lost") === "1";
+  const lostReport = useLostSlabs().find((item) => item.listing.id === base.id || item.listing.tokenId === base.tokenId)?.loss;
 
   const tokenIdBigInt = resolvedTokenId ? BigInt(resolvedTokenId) : null;
   const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
@@ -162,11 +165,11 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     if (awaitingVaulting) router.replace("/vault?tab=awaiting");
   }, [awaitingVaulting, router]);
 
-  const listed = enabledOnChain
+  const listed = !lostView && (enabledOnChain
     ? onChainMarketListing !== undefined
       ? Boolean(onChainMarketListing)
       : isListed(listing.id)
-    : isListed(listing.id);
+    : isListed(listing.id));
 
   const displayPrice = enabledOnChain && onChainMarketListing
     ? onChainMarketListing.price
@@ -175,13 +178,13 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const effectiveListing = useMemo(
     () => ({
       ...listing,
-      owner: currentOwner,
-      ownerAddress: currentOwnerAddress,
+      owner: lostView ? "Anonymous owner" : currentOwner,
+      ownerAddress: lostView ? "" : currentOwnerAddress,
       price: displayPrice,
       acceptsLoan: onChainMarketListing?.acceptsLoan ?? listing.acceptsLoan,
       loanAsk: onChainMarketListing?.loanAsk ?? listing.loanAsk,
     }),
-    [listing, currentOwner, currentOwnerAddress, displayPrice, onChainMarketListing],
+    [listing, lostView, currentOwner, currentOwnerAddress, displayPrice, onChainMarketListing],
   );
 
   const refreshActivity = () => {
@@ -551,17 +554,36 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <h1 className="text-[22px] font-bold leading-tight">{listing.title}</h1>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
-            <span className="flex items-center gap-2 text-muted">
-              Owned by
-              <Link
-                href={`/profile/${currentOwner}`}
-                className="flex items-center gap-1.5 font-semibold text-accent hover:underline"
-              >
-                <Avatar name={currentOwner} size={18} />
-                {currentOwner}
-              </Link>
-            </span>
+            {lostView ? (
+              <span className="text-muted">Owner identity hidden for lost-card recovery</span>
+            ) : (
+              <span className="flex items-center gap-2 text-muted">
+                Owned by
+                <Link
+                  href={`/profile/${currentOwner}`}
+                  className="flex items-center gap-1.5 font-semibold text-accent hover:underline"
+                >
+                  <Avatar name={currentOwner} size={18} />
+                  {currentOwner}
+                </Link>
+              </span>
+            )}
           </div>
+
+          {lostView && lostReport ? (
+            <div className="mt-4 rounded-2xl border border-warn/25 bg-warn/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[12px] font-bold uppercase tracking-wide text-warn">Lost-card report</p>
+                <TimeAgo value={lostReport.reportedAt} />
+              </div>
+              <p className="mt-2 text-[13px] leading-relaxed text-muted">{lostReport.details}</p>
+              {lostReport.bounty ? (
+                <p className="mt-3 border-t border-warn/15 pt-3 text-[13px] font-semibold text-good">
+                  Recovery bounty: {usd(lostReport.bounty.amount)} PokeCredits
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="flex items-center gap-1.5 text-[13px] text-muted">
@@ -582,6 +604,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </button>
           </div>
 
+          {!lostView ? <>
           {/* listing status and actions */}
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
             <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] sm:items-center sm:p-5">
@@ -659,14 +682,15 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               loading: enabledOnChain && onChainOwner === undefined,
               contractAddress: IS_DEPLOYED ? contracts.slabVault.address : null,
               tokenId: onChainOwner?.address ? resolvedTokenId : null,
-              ownerAddress: onChainOwner?.address ?? null,
+              ownerAddress: lostView ? null : onChainOwner?.address ?? null,
             }}
           />
+          </> : null}
         </div>
       </div>
 
       {/* Full-width history sits below the gallery and listing details. */}
-      <section className="mt-8">
+      {!lostView ? <section className="mt-8">
         <h2 className="mb-3 text-base font-bold">Activity history</h2>
         <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
           {allActivity.map((e, i) => (
@@ -677,8 +701,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-semibold">{e.price ? usd(e.price) : "—"}</p>
                 <p className="truncate text-[12px] text-muted">
-                  From <span className="text-white/80">{e.from}</span> to{" "}
-                  <span className="text-white/80">{e.to}</span>
+                  From <span className="text-white/80">{lostView ? "Anonymous" : e.from}</span> to{" "}
+                  <span className="text-white/80">{lostView ? "Anonymous" : e.to}</span>
                 </p>
               </div>
               <span className="shrink-0 text-[12px] text-dim">
@@ -690,7 +714,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </li>
           ))}
         </ul>
-      </section>
+      </section> : null}
 
       {/* Buy Confirmation Modal */}
       <Modal open={buyOpen} onClose={() => !buyBusy && setBuyOpen(false)} title="Confirm Purchase">
@@ -704,7 +728,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <p className="mt-1 text-[12px] text-muted">
                 {listing.grader} Cert #{listing.certNumber}
               </p>
-              <p className="mt-1 text-[12px] text-muted">Seller: @{currentOwner}</p>
+              <p className="mt-1 text-[12px] text-muted">{lostView ? "Seller identity hidden" : `Seller: @${currentOwner}`}</p>
             </div>
           </div>
 

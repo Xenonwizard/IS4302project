@@ -11,6 +11,7 @@ import {
   House,
   MessagesSquare,
   Plus,
+  ShieldAlert,
   ShieldCheck,
   Store,
   UserRound,
@@ -20,10 +21,11 @@ import {
 const NAV = [
   { href: "/", label: "Home", short: "Home", icon: House },
   { href: "/marketplace", label: "Marketplace", short: "Market", icon: Store },
+  { href: "/lost", label: "Lost cards", short: "Lost", icon: ShieldAlert },
   { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
   { href: "/submissions", label: "Submissions", short: "Submit", icon: ClipboardList },
   { href: "/vault", label: "Vault", short: "Vault", icon: ShieldCheck },
-  { href: "/watchlist", label: "Watchlist", short: "Watchlist", icon: Heart },
+  { href: "/watchlist", label: "Watchlist", short: "Watch", icon: Heart },
   { href: "/wallet", label: "Wallet", short: "Wallet", icon: Wallet },
   { href: "/account", label: "Account", short: "Account", icon: UserRound, desktopOnly: true },
 ];
