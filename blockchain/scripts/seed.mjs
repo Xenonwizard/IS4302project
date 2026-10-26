@@ -26,6 +26,7 @@ const mockUSDCAddress = addresses["PokechainModule#MockUSDC"];
 const accountRegistryAddress = addresses["PokechainModule#AccountRegistry"];
 const slabVaultAddress = addresses["PokechainModule#SlabVault"];
 const slabMarketAddress = addresses["PokechainModule#SlabMarket"];
+const lostAndFoundAddress = addresses["PokechainModule#LostAndFound"];
 
 const publicClient = createPublicClient({
   chain: hardhat,
@@ -251,6 +252,32 @@ const SEED_SLABS = [
     custodianRef: "DemoUmbreonPSA10",
     listPriceUsdc: 3100,
   },
+  // Reported lost by their owners (see LOST_SLABS): public on the Lost page with escrowed bounties.
+  // test1 and test2 each own one, so either can play the finder who earns the other's bounty.
+  {
+    recipient: TEST2,
+    grader: "BGS",
+    certNumber: "79961445",
+    title: "2002 Pokémon Neo Destiny #106/105 Shining Celebi - Shining Holo (BGS 8.5 NM-MT+)",
+    image: "https://images.pokemontcg.io/neo4/106_hires.png",
+    custodianRef: "DemoShiningCelebiBGS85",
+    listPriceUsdc: 0,
+  },
+  {
+    recipient: TEST1,
+    grader: "BGS",
+    certNumber: "92596655",
+    title: "2006 Pokémon Crystal Guardians #99/100 Alakazam ★ - Holo Star (BGS 9 MINT)",
+    image: "https://images.pokemontcg.io/ex14/99_hires.png",
+    custodianRef: "DemoAlakazamStarBGS9",
+    listPriceUsdc: 0,
+  },
+];
+
+/** Seeded slabs whose owner reports them lost (SlabVault.reportLost) and escrows a bounty (LostAndFound.setBounty). */
+const LOST_SLABS = [
+  { certNumber: "79961445", details: "Slab unaccounted for during routine Delaware vault inventory audit. Security seal #4429.", bountyUsdc: 250 },
+  { certNumber: "92596655", details: "Vault location scan came back empty after a storage-bay transfer at the Delaware facility.", bountyUsdc: 100 },
 ];
 
 async function seed() {
@@ -275,7 +302,6 @@ async function seed() {
     "function seedSlab(SeedParams calldata p) external returns (uint256 tokenId)",
     "function tokenOfCert(bytes32 key) external view returns (uint256)",
     "function certKey(string grader, string certNumber) external pure returns (bytes32)",
-    "function nextTokenId() external view returns (uint256)",
   ]);
 
   const marketAbi = parseAbi([
@@ -456,6 +482,32 @@ async function seed() {
         console.log(`  ✓ Recorded demo sale for Token #${tokenId} at $${slab.listPriceUsdc.toLocaleString()} USDC`);
       }
     }
+  }
+
+  // 4. Demo lost slabs: the owner reports each lost and escrows its bounty from their Pokechain balance.
+  const lostAbi = parseAbi([
+    "function reportLost(uint256 tokenId, string details) external",
+    "function custodyOf(uint256 tokenId) external view returns (uint8)",
+    "function setBounty(uint256 tokenId, uint256 amount) external",
+  ]);
+  for (const lost of LOST_SLABS) {
+    const tokenId = tokenMap.get(lost.certNumber);
+    const owner = SEED_SLABS.find((slab) => slab.certNumber === lost.certNumber).recipient;
+    if (!tokenId) continue;
+    const custody = await publicClient.readContract({ address: slabVaultAddress, abi: lostAbi, functionName: "custodyOf", args: [tokenId] });
+    if (custody !== 1) continue; // already reported (or no longer Vaulted) on a rerun
+    const wallet = getWallet(owner);
+    const bounty = parseUnits(String(lost.bountyUsdc), 6);
+    for (const [address, abi, functionName, args] of [
+      [mockUSDCAddress, usdcAbi, "approve", [accountRegistryAddress, bounty]],
+      [accountRegistryAddress, registryAbi, "deposit", [bounty]],
+      [slabVaultAddress, lostAbi, "reportLost", [tokenId, lost.details]],
+      [lostAndFoundAddress, lostAbi, "setBounty", [tokenId, bounty]],
+    ]) {
+      const hash = await wallet.writeContract({ address, abi, functionName, args });
+      await publicClient.waitForTransactionReceipt({ hash });
+    }
+    console.log(`  ✓ Token #${tokenId} reported lost with a $${lost.bountyUsdc} bounty escrowed`);
   }
 
   const active = await publicClient.readContract({

@@ -98,7 +98,7 @@ export async function requestShipment(origin: string, assetId: string, shipTo: s
   const check: CheckStep = {
     call: "Collector Crypt POST /redemptions",
     ok: true,
-    detail: `${r.id}: ${r.carrier} ${r.trackingNumber}, NFT frozen in escrow (not burned)`,
+    detail: `${r.id}: ${r.carrier} ${r.trackingNumber}, slab released and CC's Solana NFT burned (simulated)`,
   };
   return { redemption: r, check };
 }

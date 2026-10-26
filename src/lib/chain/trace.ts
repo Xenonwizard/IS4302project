@@ -30,7 +30,9 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 export async function traceSlab(origin: string, tokenId: bigint) {
   const sv = contracts.slabVault;
   const slab = await publicClient.readContract({ ...sv, functionName: "slabOf", args: [tokenId] });
-  const owner = await publicClient.readContract({ ...sv, functionName: "ownerOf", args: [tokenId] });
+  // ownerOf intentionally stops existing once the owner confirms physical receipt. The custody
+  // record and delivery event remain queryable after that receipt-gated burn.
+  let owner = await publicClient.readContract({ ...sv, functionName: "ownerOf", args: [tokenId] }).catch(() => zeroAddress);
   const from = { fromBlock: DEPLOY_BLOCK };
   const byToken = { args: { tokenId }, ...from };
 
@@ -39,17 +41,20 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   const submissionId = await publicClient.readContract({ ...sv, functionName: "submissionOfToken", args: [tokenId] });
   const bySub = { args: { submissionId }, ...from };
 
-  const [transfers, redeem, shipped, delivered, lost, resolved, requested, received, forwarded] = await Promise.all([
+  const [transfers, redeem, shipped, delivered, lost, cancelled, resolved, recovered, requested, received, forwarded] = await Promise.all([
     publicClient.getContractEvents({ ...sv, eventName: "Transfer", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "RedemptionRequested", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "SlabShipped", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "SlabDelivered", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "SlabReportedLost", ...byToken }),
+    publicClient.getContractEvents({ ...sv, eventName: "LostReportCancelled", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "LostReportResolved", ...byToken }),
+    publicClient.getContractEvents({ ...sv, eventName: "LostSlabRecovered", ...byToken }),
     publicClient.getContractEvents({ ...sv, eventName: "SubmissionRequested", ...bySub }),
     publicClient.getContractEvents({ ...sv, eventName: "SubmissionReceived", ...bySub }),
     publicClient.getContractEvents({ ...sv, eventName: "SubmissionForwarded", ...bySub }),
   ]);
+  if (owner === zeroAddress && delivered.length) owner = delivered.at(-1)!.args.owner!;
 
   const rows: { event: string; detail: string; block: bigint; tx: string; logIndex: number }[] = [];
   const push = (event: string, detail: string, log: { blockNumber: bigint; transactionHash: string; logIndex: number }) =>
@@ -73,7 +78,9 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   for (const l of shipped) push("SlabShipped", `Collector Crypt ${l.args.redemptionRef}: ${l.args.carrier} ${l.args.trackingNumber}`, l);
   for (const l of delivered) push("SlabDelivered", `${short(l.args.owner!)} confirmed delivery`, l);
   for (const l of lost) push("SlabReportedLost", `${short(l.args.owner!)}: "${l.args.details}" (tracking ${l.args.trackingNumber})`, l);
+  for (const l of cancelled) push("LostReportCancelled", `${short(l.args.owner!)} cancelled the report; restored ${CUSTODY[Number(l.args.restoredCustody)]}`, l);
   for (const l of resolved) push("LostReportResolved", `Outcome: ${CUSTODY[Number(l.args.outcome)]}`, l);
+  for (const l of recovered) push("LostSlabRecovered", `Pokechain/CC verified it and returned it via ${l.args.carrier} ${l.args.trackingNumber}`, l);
   rows.sort((a, b) => Number(a.block - b.block) || a.logIndex - b.logIndex);
 
   // Block timestamps, fetched once per block.

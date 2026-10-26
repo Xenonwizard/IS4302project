@@ -91,6 +91,13 @@ const ERROR_TEXT: Record<string, string> = {
   DeadlineNotPassed: "The lender can claim the collateral only after the deadline.",
   TokenAlreadyCollateral: "This slab already secures an active loan.",
   LoansStillOpen: "Settle or withdraw every loan before closing the account.",
+  ClaimInProgress: "A finder's claim on this slab is open, so the report and bounty are locked until it closes.",
+  SlabNotLost: "This slab isn't reported lost on-chain.",
+  OwnSlab: "You own this slab, so you can't claim its bounty.",
+  NotFinder: "Only the collector who found the slab can claim the bounty.",
+  NotReturnedYet: "The slab isn't back yet: the bounty pays out once it's in the vault or the owner confirms delivery.",
+  WrongClaimStatus: "That step doesn't match the case's current stage.",
+  EmptyField: "A required field is empty.",
 };
 
 function errorNameFromAnyAbi(raw: `0x${string}` | undefined): string | undefined {

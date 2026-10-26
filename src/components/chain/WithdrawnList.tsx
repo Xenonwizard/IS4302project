@@ -6,9 +6,10 @@ import { PackageCheck, PackageX, Route } from "lucide-react";
 import { useState } from "react";
 import { useReadContracts } from "wagmi";
 import { CUSTODY, contracts, type CustodyName } from "@/lib/chain/config";
+import { useLostReport } from "@/lib/chain/useLostAndFound";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { shortDate } from "@/lib/format";
-import { useStore } from "@/lib/store";
+import { isActiveRecovery, useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 import { Badge, Button, inputClass } from "../ui/primitives";
@@ -19,8 +20,8 @@ const TRAIL: CustodyName[] = ["Vaulted", "Redemption requested", "Shipped", "Del
 
 /**
  * Slabs that have left the vault. Their custody state, Collector Crypt redemption id and tracking
- * come live from `SlabVault.slabOf(tokenId)`; the token never goes away, so this list is the
- * traceable record of everything withdrawn, and each row links to the full cross-chain trace.
+ * come live from `SlabVault.slabOf(tokenId)`. The token remains through transit and is burned only
+ * after owner-confirmed receipt; the slab record and event trail stay queryable afterwards.
  */
 export function WithdrawnList({ items }: { items: { entry: VaultItem; listing: Listing }[] }) {
   const tokenIds = items.map((i) => BigInt(i.entry.token?.tokenId ?? 0));
@@ -40,7 +41,6 @@ export function WithdrawnList({ items }: { items: { entry: VaultItem; listing: L
     </ul>
   );
 }
-
 interface OnChainSlab {
   custody: number;
   carrier: string;
@@ -61,11 +61,14 @@ function Row({
   custody: CustodyName | null;
   onChange: () => void;
 }) {
-  const { confirmDelivery, reportLost } = useSlabChain();
-  const { pushToast } = useStore();
+  const { confirmDelivery } = useSlabChain();
+  const { pushToast, recoveries, confirmRecoveredSlab } = useStore();
+  const lostReport = useLostReport();
+  const recovering = isActiveRecovery(recoveries[listing.id]);
   const [busy, setBusy] = useState(false);
   const [lostOpen, setLostOpen] = useState(false);
   const [details, setDetails] = useState("");
+  const [bounty, setBounty] = useState("");
   const w = entry.withdrawal;
   const token = entry.token;
 
@@ -81,6 +84,12 @@ function Row({
     } finally {
       setBusy(false);
     }
+  };
+
+  const fileLost = async () => {
+    await act(async () => {
+      await lostReport.report(listing.id, token!.tokenId, details.trim() || "Lost in transit", { inTransit: true, bounty: Number(bounty) });
+    }, Number(bounty) > 0 ? "Lost report and bounty filed" : "Lost report filed");
   };
 
   const lost = custody === "Lost";
@@ -101,7 +110,7 @@ function Row({
             <Badge tone={lost ? "warn" : custody === "Delivered" ? "good" : "accent"}>{custody ?? "Reading chain…"}</Badge>
           </div>
           <p className="mt-1 text-[12px] text-muted">
-            Token #{token?.tokenId} · still owned by you{w?.requestTx ? ` · requested ${shortDate(w.requestedAt)}` : ""}
+            Token #{token?.tokenId} · {custody === "Delivered" ? "burned after your receipt confirmation" : "locked to the latest owner during transit"}{w?.requestTx ? ` · requested ${shortDate(w.requestedAt)}` : ""}
             {slab?.trackingNumber ? ` · Collector Crypt ${slab.redemptionRef} · ${slab.carrier} ${slab.trackingNumber}` : ""}
           </p>
 
@@ -134,13 +143,24 @@ function Row({
 
         <div className="flex flex-col gap-2">
           {custody === "Shipped" ? (
-            <Button size="sm" onClick={() => act(() => confirmDelivery(token!.tokenId), "Delivery confirmed on-chain")} disabled={busy}>
+            <Button size="sm" onClick={() => act(async () => {
+              await confirmDelivery(token!.tokenId);
+              // A found slab on its way back: receipt is also what releases the finder's bounty.
+              if (recoveries[listing.id]?.status === "Returning to owner") confirmRecoveredSlab(listing.id);
+            }, "Delivery confirmed; Pokechain NFT burned")} disabled={busy}>
               <PackageCheck size={13} /> Confirm delivery
             </Button>
           ) : null}
           {custody === "Shipped" || custody === "Redemption requested" ? (
             <Button size="sm" variant="danger" onClick={() => setLostOpen((v) => !v)} disabled={busy}>
               <PackageX size={13} /> Report lost
+            </Button>
+          ) : null}
+          {custody === "Lost" && !recovering ? (
+            <Button size="sm" variant="outline" onClick={() => act(async () => {
+              await lostReport.cancel(listing.id, token!.tokenId);
+            }, "Lost report cancelled")} disabled={busy}>
+              Cancel lost status
             </Button>
           ) : null}
         </div>
@@ -151,12 +171,13 @@ function Row({
           <p className="text-[12px] text-muted">
             Calls <Fn>SlabVault.reportLost(tokenId, details)</Fn>. Custody becomes <b className="text-white">Lost</b> and{" "}
             <Fn>SlabReportedLost</Fn> is emitted with the tracking number. The Trace page lines this up with Collector
-            Crypt&apos;s redemption record, the carrier scans and the Solana NFT, which is frozen in Pokechain&apos;s escrow
-            and never burned.
+            Crypt&apos;s redemption record, the carrier scans and the Pokechain NFT, which stays locked until receipt is confirmed.
+            A bounty is escrowed from your Pokechain balance with <Fn>LostAndFound.setBounty</Fn> and refunded if you cancel.
           </p>
-          <div className="flex gap-2">
+          <div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]">
             <input className={inputClass} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Not delivered after 10 days, carrier has no scan since dispatch" />
-            <Button variant="danger" onClick={() => act(() => reportLost(token!.tokenId, details.trim() || "Lost in transit"), "Lost report filed on-chain")} disabled={busy}>
+            <input className={inputClass} inputMode="decimal" value={bounty} onChange={(e) => setBounty(e.target.value.replace(/[^\d.]/g, ""))} placeholder="Bounty (optional)" />
+            <Button variant="danger" onClick={() => void fileLost()} disabled={busy}>
               File
             </Button>
           </div>

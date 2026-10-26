@@ -9,27 +9,35 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  Copy,
   FileText,
   PackageCheck,
   PackageSearch,
   Plus,
   TriangleAlert,
+  Truck,
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { certPreview, getListing } from "@/lib/catalog";
 import { OPEN_SUBMISSION } from "@/lib/chain/config";
+import { useFoundCases } from "@/lib/chain/useLostAndFound";
 import { type SubmissionRequest, useSubmissions } from "@/lib/chain/useSubmissions";
 import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
+import { WithdrawnList } from "../chain/WithdrawnList";
+import { FoundCaseList } from "../lost/FoundCaseList";
 import { TimeAgo } from "../ui/primitives";
 import { Empty, LoginPrompt } from "../vault/shared";
 
-type Filter = "all" | "progress" | "vaulted" | "attention";
+type Filter = "all" | "progress" | "vaulted" | "withdrawals" | "found" | "attention";
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "progress", label: "In progress" },
   { value: "vaulted", label: "Vaulted" },
+  { value: "withdrawals", label: "Withdrawals" },
+  { value: "found", label: "Found slabs" },
   { value: "attention", label: "Needs attention" },
 ];
 
@@ -41,7 +49,7 @@ export const SUBMISSION_STAGE: Record<number, string> = {
   5: "Rejected",
 };
 
-const TIMELINE_STEPS = ["Submitted", "Received", "At custodian", "Vaulted"];
+const TIMELINE_STEPS = ["Sent", "At Pokechain", "At Vault", "Vaulted"];
 
 interface EvidenceResponse {
   found?: boolean;
@@ -58,7 +66,8 @@ interface EvidenceResponse {
 export function SubmissionsView() {
   const { user, ready, vault, resolve } = useStore();
   const { data: requests = [], isPending, isError, refetch } = useSubmissions();
-  const [filter, setFilter] = useState<Filter>("all");
+  const params = useSearchParams();
+  const [filter, setFilter] = useState<Filter>(() => FILTERS.find((f) => f.value === params.get("tab"))?.value ?? "all");
   const [openId, setOpenId] = useState<string | null>(null);
 
   const localRequests = useMemo(
@@ -70,15 +79,32 @@ export function SubmissionsView() {
       }),
     [resolve, vault],
   );
+  // Withdraw requests from the Vault: tracked here too, so a slab that never arrives can be reported lost.
+  const withdrawals = useMemo(
+    () =>
+      vault.flatMap((entry) => {
+        if (entry.status !== "Withdrawn" || !entry.token) return [];
+        const listing = getListing(entry.listingId);
+        return listing ? [{ entry, listing: resolve(listing) }] : [];
+      }),
+    [resolve, vault],
+  );
 
-  const visible = requests.filter((request) => {
+  // Found-slab claims are recovery requests: the finder and the owner both follow them here.
+  const { data: allCases = [] } = useFoundCases();
+  const me = user?.address?.toLowerCase();
+  const myCases = allCases.filter((c) => me && (c.finder.toLowerCase() === me || c.owner.toLowerCase() === me));
+  const visibleCases = filter === "all" || filter === "found" ? myCases : [];
+
+  const visible = filter === "withdrawals" || filter === "found" ? [] : requests.filter((request) => {
     if (filter === "progress") return OPEN_SUBMISSION.has(request.status);
     if (filter === "vaulted") return request.status === 4;
     if (filter === "attention") return request.status === 5;
     return true;
   });
   const visibleLocal = filter === "all" || filter === "vaulted" ? localRequests : [];
-  const total = requests.length + localRequests.length;
+  const visibleWithdrawals = filter === "all" || filter === "withdrawals" ? withdrawals : [];
+  const total = requests.length + localRequests.length + withdrawals.length + myCases.length;
   const inProgress = requests.filter((request) => OPEN_SUBMISSION.has(request.status)).length;
   const awaitingVault = requests.filter((request) => request.status === 2 || request.status === 3).length;
   const vaulted = requests.filter((request) => request.status === 4).length + localRequests.length;
@@ -86,6 +112,8 @@ export function SubmissionsView() {
     all: total,
     progress: inProgress,
     vaulted,
+    withdrawals: withdrawals.length,
+    found: myCases.length,
     attention: requests.filter((request) => request.status === 5).length,
   };
 
@@ -148,7 +176,18 @@ export function SubmissionsView() {
               Try again
             </button>
           </div>
-        ) : visible.length || visibleLocal.length ? (
+        ) : visible.length || visibleLocal.length || visibleWithdrawals.length || visibleCases.length ? (
+          <div className="space-y-6">
+          {visibleCases.length ? (
+            <section data-testid="found-cases">
+              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><PackageSearch size={15} /> Found-slab cases</h2>
+              <p className="mb-3 text-[12px] text-muted">
+                A slab reported lost that another collector found and sent to Pokechain. The bounty sits in the LostAndFound contract until the slab is back.
+              </p>
+              <FoundCaseList cases={visibleCases} me={me ?? ""} />
+            </section>
+          ) : null}
+          {visible.length || visibleLocal.length ? (
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
             <div className="hidden grid-cols-[minmax(240px,1.25fr)_minmax(210px,1fr)_150px_28px] gap-4 border-b border-hairline px-4 py-2.5 text-[10px] font-bold uppercase tracking-wide text-dim md:grid">
               <span>Slab request</span>
@@ -175,6 +214,17 @@ export function SubmissionsView() {
                 />
               ))}
             </ul>
+          </div>
+          ) : null}
+          {visibleWithdrawals.length ? (
+            <section data-testid="withdraw-requests">
+              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><Truck size={15} /> Withdraw requests</h2>
+              <p className="mb-3 text-[12px] text-muted">
+                Slabs you asked to ship out of the vault. Confirm delivery when it arrives, or report it lost if it never does.
+              </p>
+              <WithdrawnList items={visibleWithdrawals} />
+            </section>
+          ) : null}
           </div>
         ) : total ? (
           <Empty
@@ -293,16 +343,18 @@ function LocalRequestAccordion({
 function ProgressTimeline({ status }: { status: number }) {
   const completed = status === 5 ? 0 : Math.min(status, TIMELINE_STEPS.length);
   return (
-    <ol className="flex min-w-0 items-center gap-1.5 pt-1 md:pt-0">
+    <ol className="flex min-w-0 items-start gap-1.5 pt-1 md:pt-0">
       {TIMELINE_STEPS.map((step, index) => {
         const done = index < completed;
         return (
-          <li key={step} className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className={clsx("grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[9px] font-bold", done ? "border-good/70 bg-good/10 text-good" : "border-hairline text-dim")}>
-              {done ? <Check size={11} /> : index + 1}
-            </span>
-            {index < TIMELINE_STEPS.length - 1 ? <span className={clsx("h-px min-w-2 flex-1", index < completed - 1 ? "bg-good/60" : "bg-hairline")} /> : null}
-            <span className="sr-only">{step}</span>
+          <li key={step} className={clsx("flex min-w-0 flex-col gap-1", index < TIMELINE_STEPS.length - 1 ? "flex-1" : "shrink-0")}>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className={clsx("grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[9px] font-bold", done ? "border-good/70 bg-good/10 text-good" : "border-hairline text-dim")}>
+                {done ? <Check size={11} /> : index + 1}
+              </span>
+              {index < TIMELINE_STEPS.length - 1 ? <span className={clsx("h-px min-w-2 flex-1", index < completed - 1 ? "bg-good/60" : "bg-hairline")} /> : null}
+            </div>
+            <span className={clsx("whitespace-nowrap text-[10px] font-semibold leading-none", done ? "text-good" : "text-dim")}>{step}</span>
           </li>
         );
       })}
@@ -409,10 +461,31 @@ function FormGrid({ children }: { children: React.ReactNode }) {
 }
 
 function FormField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
   return (
     <div className="mb-3 last:mb-0">
       <p className="text-[10px] font-bold uppercase tracking-wide text-dim">{label}</p>
-      <p className={clsx("mt-1 break-words text-[12.5px] text-white", mono && "font-mono")}>{value}</p>
+      <div className="mt-1 flex items-start gap-2">
+        <p className={clsx("min-w-0 break-words text-[12.5px] text-white", mono && "font-mono")}>{value}</p>
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={`Copy ${label}`}
+          title={copied ? "Copied" : `Copy ${label}`}
+          className="mt-px shrink-0 rounded p-0.5 text-dim transition hover:text-white"
+        >
+          {copied ? <Check size={13} className="text-good" /> : <Copy size={13} />}
+        </button>
+      </div>
     </div>
   );
 }

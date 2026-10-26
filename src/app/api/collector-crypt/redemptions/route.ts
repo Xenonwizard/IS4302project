@@ -4,7 +4,7 @@
  *
  *   POST /api/collector-crypt/redemptions   { "assetId": "...", "shipTo": "Name, street, city", "requestedBy": "<holder wallet>" }
  *
- * The NFT is not burned: it is frozen and marked Shipped, so the slab stays traceable.
+ * CC takes the slab out of its vault and burns its NFT; the burn stays in the asset's Solana history.
  */
 import { requestRedemption } from "@/lib/collectorCrypt/store";
 

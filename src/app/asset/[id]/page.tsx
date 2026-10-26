@@ -16,6 +16,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const listing = getListing(id);
   // Not in the catalog: it may be a slab the user submitted, which lives client-side.
-  if (!listing) return <StoredSlab id={id} />;
-  return <AssetDetail listing={listing} />;
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted">Loading slab…</div>}>
+      {!listing ? <StoredSlab id={id} /> : <AssetDetail listing={listing} />}
+    </Suspense>
+  );
 }
+import { Suspense } from "react";

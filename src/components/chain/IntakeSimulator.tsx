@@ -8,6 +8,7 @@ import { SUBMISSION_STATUS, contracts } from "@/lib/chain/config";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { useStore } from "@/lib/store";
 import { Button, inputClass } from "../ui/primitives";
+import { FoundIntakeQueue } from "./FoundIntakeQueue";
 
 type Step = "receive" | "forward" | "vault";
 
@@ -181,6 +182,7 @@ export function IntakeSimulator() {
         </section>
       ) : null}
 
+      <FoundIntakeQueue onOpenCert={setCertNumber} />
     </div>
   );
 }

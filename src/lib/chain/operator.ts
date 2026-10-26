@@ -31,6 +31,7 @@ import { publishKeyIfNeeded, ccPublicKey } from "../collectorCrypt/keys";
 import { loadEvidence } from "../evidence/store";
 import { commit, randomSalt, seal } from "../sealed/envelope";
 import { getForwardRecord, saveForwardRecord } from "./forwardRecords";
+import { getRedemptionAddress, saveRedemptionAddress } from "./redemptionAddresses";
 import type { Grader } from "../types";
 import { CUSTODY, IS_LOCAL, SUBMISSION_STATUS, chain, contracts } from "./config";
 
@@ -268,11 +269,34 @@ export async function vaultSubmission(origin: string, submissionId: bigint, list
  * slab can only go where the owner signed for), then, as holder of CC's NFT, asks Collector Crypt
  * to ship there, and records CC's redemption id, carrier and tracking number on Polygon.
  */
-export async function shipSlab(origin: string, tokenId: bigint, shipTo: string) {
+/**
+ * The owner hands Pokechain the plaintext delivery address after signing requestRedemption. It is
+ * kept only if it hashes to the shippingHash on-chain, so nobody else can plant a different one.
+ */
+export async function saveSignedAddress(tokenId: bigint, shipTo: string) {
   const slab = await publicClient.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [tokenId] });
   if (CUSTODY[slab.custody] !== "Redemption requested") {
     throw new Error(`Slab #${tokenId} is ${CUSTODY[slab.custody]}, not awaiting shipment`);
   }
+  if (keccak256(toBytes(shipTo.trim())) !== slab.shippingHash) {
+    throw new Error("That address doesn't match the shippingHash the owner signed on-chain");
+  }
+  saveRedemptionAddress(tokenId.toString(), shipTo.trim());
+}
+
+/** The delivery address the owner gave Pokechain for this redemption, if any. */
+export function signedAddressFor(tokenId: bigint) {
+  return getRedemptionAddress(tokenId.toString());
+}
+
+/** shipTo defaults to the address the owner gave Pokechain when withdrawing. */
+export async function shipSlab(origin: string, tokenId: bigint, shipTo = getRedemptionAddress(tokenId.toString()) ?? "") {
+  if (!shipTo.trim()) throw new Error("No delivery address: the owner hasn't given Pokechain one, so send shipTo");
+  const slab = await publicClient.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [tokenId] });
+  if (CUSTODY[slab.custody] !== "Redemption requested") {
+    throw new Error(`Slab #${tokenId} is ${CUSTODY[slab.custody]}, not awaiting shipment`);
+  }
+  const latestOwner = await publicClient.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [tokenId] });
   if (keccak256(toBytes(shipTo.trim())) !== slab.shippingHash) {
     throw new Error("That address doesn't match the shippingHash the owner signed on-chain");
   }
@@ -289,17 +313,30 @@ export async function shipSlab(origin: string, tokenId: bigint, shipTo: string) 
     hash,
     wallet.account.address,
   );
-  return { redemptionRef: r.id, carrier: r.carrier, trackingNumber: r.trackingNumber, checks: [check], tx };
+  return { owner: latestOwner, redemptionRef: r.id, carrier: r.carrier, trackingNumber: r.trackingNumber, checks: [check], tx };
+}
+
+/** Resolve the numeric PSA cert number used as a submission id to its minted SlabVault token. */
+export async function tokenForPsaCert(certNumber: string): Promise<bigint> {
+  const submission = await publicClient.readContract({
+    ...contracts.slabVault,
+    functionName: "submissionOf",
+    args: [BigInt(certNumber)],
+  });
+  if (submission.certNumber !== certNumber || submission.tokenId === BigInt(0)) {
+    throw new Error(`PSA cert ${certNumber} does not have a minted SlabVault token`);
+  }
+  return submission.tokenId;
 }
 
 /** What the operator found after a lost report, and the custody it records. */
-export const LOST_OUTCOMES = { "at-pokechain": 7, delivered: 4, vaulted: 1 } as const;
+export const LOST_OUTCOMES = { "at-pokechain": 7, vaulted: 1 } as const;
 export type LostOutcome = keyof typeof LOST_OUTCOMES;
 
 /**
  * Closes a lost report (SlabVault.resolveLostReport). "at-pokechain": an inbound parcel turned up
- * at the warehouse and onboarding carries on; "delivered": an outbound one reached the owner;
- * "vaulted": it went back into Collector Crypt's vault.
+ * at the warehouse and onboarding carries on; "vaulted": it went back into Collector Crypt's vault.
+ * A return to the owner must use shipRecoveredSlab followed by the owner's confirmDelivery.
  */
 export async function resolveLost(tokenId: bigint, outcome: LostOutcome) {
   const slab = await publicClient.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [tokenId] });
@@ -318,6 +355,26 @@ export async function resolveLost(tokenId: bigint, outcome: LostOutcome) {
   return { custody: CUSTODY[LOST_OUTCOMES[outcome]], tx };
 }
 
+/** Pokechain/CC verified a found slab and put it on the return leg to its latest owner. */
+export async function shipRecoveredSlab(tokenId: bigint, carrier: string, trackingNumber: string) {
+  const slab = await publicClient.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [tokenId] });
+  if (CUSTODY[slab.custody] !== "Lost") throw new Error(`Slab #${tokenId} is ${CUSTODY[slab.custody]}, not reported lost`);
+  if (!carrier.trim() || !trackingNumber.trim()) throw new Error("Carrier and tracking number are required");
+  const wallet = walletClient();
+  const hash = await wallet.writeContract({
+    ...contracts.slabVault,
+    functionName: "markRecoveredShipped",
+    args: [tokenId, carrier.trim(), trackingNumber.trim()],
+  });
+  const tx = await receiptOf(
+    "SlabVault.markRecoveredShipped",
+    [tokenId.toString(), carrier.trim(), trackingNumber.trim()],
+    hash,
+    wallet.account.address,
+  );
+  return { custody: "Shipped", carrier: carrier.trim(), trackingNumber: trackingNumber.trim(), tx };
+}
+
 /**
  * Local chain only: tops a new wallet up with 10 test ETH for gas, since a MetaMask account
  * starts empty and the Hardhat chain has no public faucet. On Amoy, use the Polygon faucet.
@@ -330,4 +387,37 @@ export async function sendGas(to: Address) {
   const hash = await wallet.sendTransaction({ to, value: parseEther("10") });
   const tx = await receiptOf("eth_sendTransaction (10 ETH gas)", [to], hash, wallet.account.address);
   return { skipped: false as const, tx };
+}
+
+/* ---------------- found-slab claims (LostAndFound) ---------------- */
+
+export const FOUND_STEPS = ["receive", "return", "reject"] as const;
+export type FoundStep = (typeof FOUND_STEPS)[number];
+
+/**
+ * Pokechain's intake for a finder's parcel, on LostAndFound:
+ *   receive  markReceived: the parcel arrived and the slab matches the lost token
+ *   return   completeReturn: back into the vault, or shipped to the owner (closes the lost report on SlabVault)
+ *   reject   rejectClaim: wrong or fake slab; the bounty stays posted for the next finder
+ */
+export async function foundClaimStep(claimId: bigint, step: FoundStep, reason = "") {
+  const claim = await publicClient.readContract({ ...contracts.lostAndFound, functionName: "claimOf", args: [claimId] });
+  if (claim.status === 0) throw new Error(`Found-slab claim #${claimId} doesn't exist`);
+  const wallet = walletClient();
+  if (step === "receive") {
+    const hash = await wallet.writeContract({ ...contracts.lostAndFound, functionName: "markReceived", args: [claimId] });
+    return { step, tx: await receiptOf("LostAndFound.markReceived", [claimId.toString()], hash, wallet.account.address) };
+  }
+  if (step === "reject") {
+    const why = reason.trim() || "Slab did not match the lost token";
+    const hash = await wallet.writeContract({ ...contracts.lostAndFound, functionName: "rejectClaim", args: [claimId, why] });
+    return { step, tx: await receiptOf("LostAndFound.rejectClaim", [claimId.toString(), why], hash, wallet.account.address) };
+  }
+  // Delivery gets a Pokechain courier reference; a vault return needs none.
+  const toOwner = claim.returnTo === 2;
+  const carrier = toOwner ? "Pokechain Secure" : "";
+  const tracking = toOwner ? `PCR-${claimId}-${claim.tokenId.toString().slice(-4)}` : "";
+  const hash = await wallet.writeContract({ ...contracts.lostAndFound, functionName: "completeReturn", args: [claimId, carrier, tracking] });
+  const tx = await receiptOf("LostAndFound.completeReturn", [claimId.toString(), carrier, tracking], hash, wallet.account.address);
+  return { step, returnTo: toOwner ? "owner" : "vault", carrier, trackingNumber: tracking, tx };
 }

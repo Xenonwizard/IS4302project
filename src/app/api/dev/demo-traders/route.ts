@@ -67,7 +67,7 @@ export async function POST(request: Request) {
         if ("error" in evidence) throw new Error(evidence.error);
         const receipt = await send("slabVault", "requestSubmission", ["PSA", cert, evidence.evidenceHash, "Drop-off", ""]);
         if (receipt.status !== "success") throw new Error(`requestSubmission for ${cert} reverted`);
-        // The PSA cert number is the submission id; the NFT gets its own token id when Pokechain receives it.
+        // The PSA cert number is both the submission id and, once received, the NFT token id.
         const id = BigInt(cert);
         await receiveSubmission(id);
         await forwardSubmission(id);

@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { BRAND } from "./brand";
 import { LISTINGS, buildOnChainListing, getListing, makeStarterListings, makeSubmittedListing, registerListing } from "./catalog";
 import { IS_DEPLOYED, PENDING_CUSTODY, type CustodyName } from "./chain/config";
+import { useChainLostSlabs } from "./chain/lostRegistry";
 import { usd } from "./format";
 import {
   botReply,
@@ -32,6 +33,7 @@ import type {
   ChatMessage,
   ChatTrade,
   ChatLoan,
+  FoundSlabRecovery,
   Grader,
   LedgerEntry,
   Listing,
@@ -103,6 +105,8 @@ interface PersistShape {
   pendingLossDecisions: Record<string, { createdAt: string }>;
   /** Tokens removed from the active app after an off-chain insurance settlement. */
   insuranceBurnedTokenIds: string[];
+  /** Finder claims, keyed by listing id so only one return is active at a time. */
+  recoveries: Record<string, FoundSlabRecovery>;
 }
 
 const INITIAL_DEMO_LOSSES: Record<string, VaultLossReport> = {
@@ -124,6 +128,15 @@ const INITIAL_DEMO_LOSSES: Record<string, VaultLossReport> = {
   },
 };
 
+/**
+ * With a chain, public lost reports live on SlabVault (see useChainLostSlabs): this browser keeps
+ * only private vaulting-delay reports that haven't been published yet.
+ */
+function localLosses(saved?: Record<string, VaultLossReport>): Record<string, VaultLossReport> {
+  if (!IS_DEPLOYED) return saved && Object.keys(saved).length > 0 ? saved : INITIAL_DEMO_LOSSES;
+  return Object.fromEntries(Object.entries(saved ?? {}).filter(([, loss]) => loss.published === false));
+}
+
 const EMPTY: PersistShape = {
   user: null,
   vault: [],
@@ -133,9 +146,10 @@ const EMPTY: PersistShape = {
   negotiations: {},
   ledger: [],
   lostReports: [],
-  vaultLosses: INITIAL_DEMO_LOSSES,
+  vaultLosses: localLosses(),
   pendingLossDecisions: {},
   insuranceBurnedTokenIds: [],
+  recoveries: {},
 };
 
 /** A slab token the connected wallet owns, as SlabVault reports it. */
@@ -154,11 +168,32 @@ export interface ChainSlab {
   redemptionRef?: string;
   isListed?: boolean;
   listedPrice?: number;
+  /** While custody is Lost: where it was when reported (SlabVault.custodyBeforeLossOf). */
+  custodyBeforeLoss?: string;
+}
+
+/** A finder's claim that is still open: the slab is with Pokechain or on its way back. */
+export function isActiveRecovery(recovery?: FoundSlabRecovery): boolean {
+  return recovery?.status === "Submitted" || recovery?.status === "Returning to owner";
 }
 
 /** All in-progress inbound custody states belong in the Awaiting vaulting tab. */
 function isAwaitingVaulting(custody: string): boolean {
   return PENDING_CUSTODY.has(custody as CustodyName);
+}
+
+/**
+ * Which Vault tab a token belongs in. A Lost slab stays where it was when it was reported: in the
+ * Vault if it went missing there, Awaiting vaulting if it was lost on its way in, else Withdrawn.
+ */
+function vaultStatusFor(o: ChainSlab, previous?: VaultItem["status"]): VaultItem["status"] {
+  if (o.custody === "Vaulted") return o.isListed ? "Listed" : "Vaulted";
+  if (isAwaitingVaulting(o.custody)) return "Awaiting vaulting";
+  if (o.custody === "Lost") {
+    if (o.custodyBeforeLoss === "Vaulted") return "Vaulted";
+    if (o.custodyBeforeLoss ? isAwaitingVaulting(o.custodyBeforeLoss) : previous === "Awaiting vaulting") return "Awaiting vaulting";
+  }
+  return "Withdrawn";
 }
 
 export interface SlabSubmission {
@@ -224,13 +259,22 @@ interface StoreValue extends PersistShape {
   withdrawOffer: (negotiationId: string, offerId: string) => void;
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
   /* vault missing reports and their optional bounties */
-  reportVaultLost: (listingId: string, details: string) => void;
+  reportVaultLost: (listingId: string, details: string, inTransit?: boolean) => void;
+  /** A slab reported lost on-chain: take it off sale here and close buyers' chats. The report itself is on SlabVault. */
+  delistLostSlab: (listingId: string) => void;
   completeLossInvestigation: (listingId: string) => void;
   resolveLossDecision: (listingId: string) => void;
   cancelVaultLost: (listingId: string) => void;
   withdrawLostForInsurance: (listingId: string) => void;
   setVaultBounty: (listingId: string, amount: number) => void;
   cancelVaultBounty: (listingId: string) => void;
+  reportFoundSlab: (
+    listingId: string,
+    input: Pick<FoundSlabRecovery, "details" | "evidence" | "evidenceFiles" | "inboundCarrier" | "inboundTracking">,
+  ) => FoundSlabRecovery | null;
+  verifyFoundSlab: (listingId: string, carrier: string, tracking: string) => void;
+  rejectFoundSlab: (listingId: string) => void;
+  confirmRecoveredSlab: (listingId: string) => void;
   addComment: (listingId: string, text: string) => void;
   topUp: (amount: number) => void;
   resetDemo: () => void;
@@ -579,8 +623,8 @@ function loadUser(username: string): PersistShape {
     const raw = window.localStorage.getItem(userKey(username));
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as PersistShape;
-    const vaultLosses = parsed.vaultLosses && Object.keys(parsed.vaultLosses).length > 0 ? parsed.vaultLosses : INITIAL_DEMO_LOSSES;
-    return { ...EMPTY, ...parsed, vaultLosses };
+    const vaultLosses = localLosses(parsed.vaultLosses);
+    return { ...EMPTY, ...parsed, vaultLosses, recoveries: parsed.recoveries ?? {} };
   } catch {
     return EMPTY;
   }
@@ -592,8 +636,8 @@ function loadState(): PersistShape {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as PersistShape;
-    const vaultLosses = parsed.vaultLosses && Object.keys(parsed.vaultLosses).length > 0 ? parsed.vaultLosses : INITIAL_DEMO_LOSSES;
-    return { ...EMPTY, ...parsed, vaultLosses };
+    const vaultLosses = localLosses(parsed.vaultLosses);
+    return { ...EMPTY, ...parsed, vaultLosses, recoveries: parsed.recoveries ?? {} };
   } catch {
     return EMPTY;
   }
@@ -705,13 +749,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const mergedSlabsMap = new Map([...next.slabs, ...current.slabs].map((s) => [s.id, s]));
           const mergedOverrides = { ...next.overrides, ...current.overrides };
           const mergedNegotiations = { ...next.negotiations, ...current.negotiations };
-          const mergedVaultLosses = { ...next.vaultLosses, ...current.vaultLosses };
+          // Lost reports and finder claims are a public registry every account on this browser
+          // sees. The active state is always the newest copy, so merging an older stash back in
+          // would resurrect reports that were cancelled or closed while this user was away.
+          const mergedVaultLosses = current.vaultLosses;
+          const mergedRecoveries = current.recoveries;
           prev = {
             ...next,
             slabs: Array.from(mergedSlabsMap.values()),
             overrides: mergedOverrides,
             negotiations: mergedNegotiations,
             vaultLosses: mergedVaultLosses,
+            recoveries: mergedRecoveries,
           };
           // If switching to an on-chain account, filter out vault items that belong to other addresses or lack tokens
           if (address) {
@@ -1129,7 +1178,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!v.token) continue;
         const o = ownedMap.get(v.token.tokenId);
         if (!o) continue;
-        const newStatus: VaultItem["status"] = o.custody === "Vaulted" ? (o.isListed ? "Listed" : "Vaulted") : isAwaitingVaulting(o.custody) ? "Awaiting vaulting" : "Withdrawn";
+        const newStatus = vaultStatusFor(o, v.status);
         const listing = getListing(v.listingId);
         const title = o.title || `Vaulted Slab #${o.token.tokenId}`;
         const image = o.image || "";
@@ -1155,9 +1204,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           contract: o.token.contract,
         });
         registerListing(listing);
-        const awaitingVaulting = isAwaitingVaulting(o.custody);
-        const withdrawn = o.custody !== "Vaulted" && !awaitingVaulting;
-        const status: VaultItem["status"] = awaitingVaulting ? "Awaiting vaulting" : withdrawn ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+        const status = vaultStatusFor(o);
+        const withdrawn = status === "Withdrawn";
         added.push({
           listing,
           item: {
@@ -1196,8 +1244,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             if (!v.token) return v;
             const o = ownedMap.get(v.token.tokenId);
             if (!o) return v;
-            const status: VaultItem["status"] = o.custody === "Vaulted" ? (o.isListed ? "Listed" : "Vaulted") : isAwaitingVaulting(o.custody) ? "Awaiting vaulting" : "Withdrawn";
-            return { ...v, status, listedPrice: o.listedPrice };
+            return { ...v, status: vaultStatusFor(o, v.status), listedPrice: o.listedPrice };
           });
 
         // Older browser state can contain a received slab before it had a cert-derived
@@ -1917,7 +1964,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const reportVaultLost = useCallback(
-    (listingId: string, details: string) => {
+    (listingId: string, details: string, inTransit = false) => {
       setState((prev) => {
         if (!prev.vault.some((item) => item.listingId === listingId)) return prev;
         const negotiations = closeSellerChats(
@@ -1939,13 +1986,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
           vaultLosses: {
             ...prev.vaultLosses,
-            [listingId]: { reportedAt: new Date().toISOString(), details, published: false },
+            [listingId]: { reportedAt: new Date().toISOString(), details, published: false, inTransit },
           },
         };
       });
     },
     [],
   );
+
+  const delistLostSlab = useCallback((listingId: string) => {
+    setState((prev) => {
+      const pendingLossDecisions = { ...prev.pendingLossDecisions };
+      const vaultLosses = { ...prev.vaultLosses };
+      // A private vaulting-delay report that is now public on-chain.
+      delete pendingLossDecisions[listingId];
+      delete vaultLosses[listingId];
+      return {
+        ...prev,
+        negotiations: closeSellerChats(prev, listingId, "This slab was reported lost."),
+        vault: prev.vault.map((item) =>
+          item.listingId === listingId && item.status === "Listed" ? { ...item, status: "Vaulted", listedPrice: undefined } : item,
+        ),
+        overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
+        pendingLossDecisions,
+        vaultLosses,
+      };
+    });
+  }, []);
 
   const completeLossInvestigation = useCallback((listingId: string) => {
     setState((prev) => ({
@@ -1968,6 +2035,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const cancelVaultLost = useCallback(
     (listingId: string) => {
+      // A finder has the slab or it's on its way back: closing the report now would strand their bounty.
+      const claim = latest.current.recoveries[listingId];
+      if (claim && isActiveRecovery(claim)) {
+        pushToast({ title: "Recovery in progress", body: `Finish recovery ${claim.id} first: confirm receipt once the slab arrives.`, tone: "error" });
+        return;
+      }
       setState((prev) => {
         if (!prev.vaultLosses[listingId]) return prev;
         const vaultLosses = { ...prev.vaultLosses };
@@ -2045,6 +2118,150 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
+  const reportFoundSlab = useCallback(
+    (
+      listingId: string,
+      input: Pick<FoundSlabRecovery, "details" | "evidence" | "evidenceFiles" | "inboundCarrier" | "inboundTracking">,
+    ): FoundSlabRecovery | null => {
+      const snapshot = latest.current;
+      const finder = snapshot.user;
+      const loss = snapshot.vaultLosses[listingId];
+      const owned = snapshot.vault.some((item) => item.listingId === listingId);
+      const existing = snapshot.recoveries[listingId];
+      const blocked = !finder
+        ? "Sign in first."
+        : !loss
+          ? "This slab is no longer reported lost."
+          : owned
+            ? "You own this slab. Use Found / Cancel on your own report instead."
+            : existing && existing.status !== "Rejected"
+              ? `Recovery ${existing.id} is already ${existing.status.toLowerCase()}.`
+              : null;
+      if (blocked || !finder || !loss) {
+        pushToast({ title: "Can't submit this claim", body: blocked ?? undefined, tone: "error" });
+        return null;
+      }
+
+      const recovery: FoundSlabRecovery = {
+        id: `REC-${Date.now().toString(36).toUpperCase().slice(-7)}`,
+        listingId,
+        finder: finder.username,
+        finderAddress: finder.address,
+        details: input.details.trim(),
+        evidence: input.evidence.trim(),
+        evidenceFiles: input.evidenceFiles,
+        inboundCarrier: input.inboundCarrier.trim(),
+        inboundTracking: input.inboundTracking.trim(),
+        submittedAt: new Date().toISOString(),
+        status: "Submitted",
+        bountyAmount: loss.bounty?.amount ?? 0,
+      };
+      setState((prev) => ({
+        ...prev,
+        recoveries: { ...prev.recoveries, [listingId]: recovery },
+      }));
+      pushToast({
+        title: `Recovery ${recovery.id} opened`,
+        body: "Ship the slab to Pokechain Recovery Desk for verification. The bounty stays locked until the owner confirms receipt.",
+        tone: "success",
+      });
+      return recovery;
+    },
+    [pushToast],
+  );
+
+  const verifyFoundSlab = useCallback(
+    (listingId: string, carrier: string, tracking: string) => {
+      setState((prev) => {
+        const recovery = prev.recoveries[listingId];
+        if (!recovery || recovery.status !== "Submitted") return prev;
+        return {
+          ...prev,
+          recoveries: {
+            ...prev.recoveries,
+            [listingId]: {
+              ...recovery,
+              status: "Returning to owner",
+              verifiedAt: new Date().toISOString(),
+              returnCarrier: carrier,
+              returnTracking: tracking,
+            },
+          },
+        };
+      });
+      pushToast({ title: "Slab verified", body: "The recovery shipment is now on its way to the owner.", tone: "success" });
+    },
+    [pushToast],
+  );
+
+  const rejectFoundSlab = useCallback(
+    (listingId: string) => {
+      setState((prev) => {
+        const recovery = prev.recoveries[listingId];
+        if (!recovery || recovery.status !== "Submitted") return prev;
+        return {
+          ...prev,
+          recoveries: {
+            ...prev.recoveries,
+            [listingId]: { ...recovery, status: "Rejected" },
+          },
+        };
+      });
+      pushToast({ title: "Recovery claim rejected", body: "The lost-slab report and bounty remain active." });
+    },
+    [pushToast],
+  );
+
+  const confirmRecoveredSlab = useCallback(
+    (listingId: string) => {
+      const snapshot = latest.current;
+      // Ownership is checked by the caller (and on-chain by confirmDelivery): a burned token can
+      // leave this Vault mirror while the confirmation is still settling.
+      const recovery = snapshot.recoveries[listingId];
+      if (!recovery || recovery.status !== "Returning to owner") return;
+      const paidAt = new Date().toISOString();
+      const amount = recovery.bountyAmount;
+
+      setState((prev) => {
+        const live = prev.recoveries[listingId];
+        if (!live || live.status !== "Returning to owner") return prev;
+        const vaultLosses = { ...prev.vaultLosses };
+        delete vaultLosses[listingId];
+        return {
+          ...prev,
+          vaultLosses,
+          ledger: amount > 0
+            ? [ledgerEntry(-amount, `Recovery bounty paid to @${live.finder}`, listingId), ...prev.ledger]
+            : prev.ledger,
+          recoveries: {
+            ...prev.recoveries,
+            [listingId]: { ...live, status: "Completed", returnedAt: paidAt, bountyPaidAt: amount > 0 ? paidAt : undefined },
+          },
+        };
+      });
+
+      if (amount > 0 && recovery.finder !== snapshot.owner) {
+        const finderState = loadUser(recovery.finder);
+        const finderRecovery = finderState.recoveries[listingId] ?? recovery;
+        stashUser({
+          ...finderState,
+          owner: recovery.finder,
+          ledger: [ledgerEntry(amount, "Lost slab recovery bounty", listingId), ...finderState.ledger],
+          recoveries: {
+            ...finderState.recoveries,
+            [listingId]: { ...finderRecovery, status: "Completed", returnedAt: paidAt, bountyPaidAt: paidAt },
+          },
+        });
+      }
+      pushToast({
+        title: "Recovery completed",
+        body: amount > 0 ? `${usd(amount, { cents: true })} was released to @${recovery.finder}.` : "The lost-slab report is now closed.",
+        tone: "success",
+      });
+    },
+    [pushToast],
+  );
+
   const addComment = useCallback((listingId: string, text: string) => {
     setState((prev) => {
       const entry = {
@@ -2117,12 +2334,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     withdrawOffer,
     fileLostReport,
     reportVaultLost,
+    delistLostSlab,
     completeLossInvestigation,
     resolveLossDecision,
     cancelVaultLost,
     withdrawLostForInsurance,
     setVaultBounty,
     cancelVaultBounty,
+    reportFoundSlab,
+    verifyFoundSlab,
+    rejectFoundSlab,
+    confirmRecoveredSlab,
     addComment,
     topUp,
     resetDemo,
@@ -2167,12 +2389,34 @@ export interface LostSlabItem {
   listing: Listing;
   loss: VaultLossReport;
   source: "vault" | "transit";
+  /** The owner's wallet, for reports read from the chain. */
+  owner?: string;
+  recovery?: FoundSlabRecovery;
 }
 
-/** Slabs currently reported lost in vault or in transit. */
+/**
+ * Slabs currently reported lost in vault or in transit. With a chain this is SlabVault's public
+ * registry (useChainLostSlabs), the same for every collector; without one it is the local demo.
+ */
 export function useLostSlabs(): LostSlabItem[] {
-  const { vaultLosses, slabs, vault, resolve } = useStore();
+  const { vaultLosses, recoveries, slabs, vault, resolve } = useStore();
+  const { data: chainLost } = useChainLostSlabs();
   return useMemo(() => {
+    if (IS_DEPLOYED) {
+      return (chainLost ?? []).map((c) => ({
+        listing: c.listing,
+        loss: {
+          reportedAt: c.reportedAt,
+          details: c.details,
+          published: true,
+          inTransit: c.source === "transit",
+          bounty: c.bounty > 0 ? { amount: c.bounty, addedAt: c.reportedAt } : undefined,
+        },
+        source: c.source,
+        owner: c.owner,
+      }));
+    }
+
     const map = new Map<string, LostSlabItem>();
 
     // 1. Vault losses reported by collectors
@@ -2187,12 +2431,13 @@ export function useLostSlabs(): LostSlabItem[] {
         map.set(item.id, {
           listing: item,
           loss,
-          source: "vault",
+          source: loss.inTransit ? "transit" : "vault",
+          recovery: recoveries[listingId],
         });
       }
     }
 
-    // 2. On-chain slabs whose custody is marked "Lost"
+    // 2. Slabs whose custody is marked "Lost"
     for (const v of vault) {
       if (v.status === "Withdrawn" && v.withdrawal?.carrier === "Lost") {
         const found = getListing(v.listingId) || slabs.find((s) => s.id === v.listingId);
@@ -2210,5 +2455,5 @@ export function useLostSlabs(): LostSlabItem[] {
     }
 
     return Array.from(map.values());
-  }, [vaultLosses, slabs, vault, resolve]);
+  }, [chainLost, vaultLosses, recoveries, slabs, vault, resolve]);
 }
