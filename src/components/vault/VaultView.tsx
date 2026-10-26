@@ -14,6 +14,7 @@ import { useEscrowedByMe } from "@/lib/chain/trades";
 import { useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useSlabChain } from "@/lib/chain/useSlabChain";
 import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { RedeemModal } from "../chain/RedeemModal";
 import { TransferModal } from "../chain/TransferModal";
@@ -55,6 +56,7 @@ export function VaultView() {
     pushToast,
   } = useStore();
   const { cancelListing } = useMarketChain();
+  const { reportLost } = useSlabChain();
   const [delistingId, setDelistingId] = useState<string | null>(null);
   const [gridSize, setGridSize] = useState<"medium" | "small">("medium");
 
@@ -161,7 +163,11 @@ export function VaultView() {
       if (entry.status === "Listed" && user?.address && entry.token?.tokenId) {
         await cancelListing(entry.token.tokenId);
       }
-      reportVaultLost(listing.id, missingDetails.trim() || "Reported missing from the vault");
+      if (entry.status === "Awaiting vaulting" && entry.token?.tokenId) {
+        await reportLost(entry.token.tokenId, missingDetails.trim() || "Reported lost while in transit to the vault");
+      }
+      const inTransit = entry.status === "Awaiting vaulting" && Boolean(entry.token?.tokenId);
+      reportVaultLost(listing.id, missingDetails.trim() || (inTransit ? "Reported lost while in transit to the vault" : "Reported missing from the vault"), inTransit);
       const bounty = Number(missingBounty);
       if (Number.isFinite(bounty) && bounty > 0) setVaultBounty(listing.id, bounty);
       setMissingTarget(null);
@@ -288,7 +294,7 @@ export function VaultView() {
                       onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                       onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
-                      onReportLost={entry.token?.tokenId ? () => setAwaitingReportTarget({ entry, listing }) : undefined}
+                      onReportLost={entry.token?.tokenId ? () => setMissingTarget({ entry, listing }) : undefined}
                       decisionPending={hasPendingDecision(listing)}
                       onReviewDecision={() => setDecisionTarget({ entry, listing })}
                       loss={vaultLosses[listing.id]}
@@ -517,13 +523,13 @@ export function VaultView() {
           setMissingTarget(null);
           setMissingDetails("");
         }}
-        title="Report card lost in vault"
+        title={missingTarget?.entry.status === "Awaiting vaulting" ? "Report card lost in transit" : "Report card lost in vault"}
         width="max-w-sm"
       >
         {missingTarget ? (
           <div className="space-y-4 p-5">
             <p className="text-[13px] leading-relaxed text-muted">
-              Mark <span className="font-semibold text-white">{missingTarget.listing.title}</span> as lost in the vault. It will be removed from sale until you cancel this report.
+              Mark <span className="font-semibold text-white">{missingTarget.listing.title}</span> as lost {missingTarget.entry.status === "Awaiting vaulting" ? "while travelling to Pokechain or Collector Crypt" : "in the vault"}. It will be removed from sale until you cancel this report.
             </p>
             <Field label="What happened?" hint="Optional">
               <textarea

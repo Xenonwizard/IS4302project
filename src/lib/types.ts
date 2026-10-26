@@ -94,7 +94,7 @@ export interface SlabToken {
   evidenceHash?: string;
 }
 
-/** A slab that has left the vault. The token stays; SlabVault holds the live custody state. */
+/** A slab that has left the vault. Its token stays through transit and burns on confirmed receipt. */
 export interface Withdrawal {
   requestedAt: string;
   requestTx: string;
@@ -126,11 +126,37 @@ export interface VaultLossReport {
   details: string;
   /** False while this is only a private vaulting-delay report; true once published to the Lost registry. */
   published?: boolean;
+  /** Lost in the post (inbound or outbound), so SlabVault custody is Lost too. Otherwise CC lost it in the vault. */
+  inTransit?: boolean;
   /** Optional reward offered by the owner to help locate the slab. */
   bounty?: {
     amount: number;
     addedAt: string;
   };
+}
+
+export type RecoveryStatus = "Submitted" | "Returning to owner" | "Completed" | "Rejected";
+
+/** A finder-submitted claim for a physical slab that was publicly reported lost. */
+export interface FoundSlabRecovery {
+  id: string;
+  listingId: string;
+  finder: string;
+  finderAddress?: string;
+  details: string;
+  evidence: string;
+  evidenceFiles: string[];
+  inboundCarrier: string;
+  inboundTracking: string;
+  submittedAt: string;
+  status: RecoveryStatus;
+  /** The advertised reward is locked when the finder submits their claim. */
+  bountyAmount: number;
+  verifiedAt?: string;
+  returnCarrier?: string;
+  returnTracking?: string;
+  returnedAt?: string;
+  bountyPaidAt?: string;
 }
 
 /* ---------------- negotiations ---------------- */

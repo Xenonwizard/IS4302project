@@ -184,8 +184,8 @@ export function TraceView({ tokenId }: { tokenId: string }) {
               <span>
                 Reported lost. The claim rests on records three different parties wrote. Polygon shows who owned it and that they
                 asked for it (with the address hash). Collector Crypt&apos;s redemption {data.redemptionRef} names the carrier and
-                tracking number. The Solana NFT is frozen and was never burned, so the slab can&apos;t be redeemed again or sold
-                elsewhere while the claim is open.
+                tracking number. Collector Crypt burned its Solana NFT when the slab left its vault (simulated), but the Pokechain token stays
+                locked to the owner until they confirm receipt, so the claim and any bounty stay attached to it.
               </span>
             </div>
           ) : null}

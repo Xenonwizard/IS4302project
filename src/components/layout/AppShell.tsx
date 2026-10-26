@@ -17,9 +17,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
 
-  // The intake simulator is deliberately presentation-only: it should not look like or expose
-  // the normal collector product during a demo.
-  if (pathname === "/intake") {
+  // The custody simulators are deliberately presentation-only: they should not look like or
+  // expose the normal collector product during a demo.
+  if (pathname === "/intake" || pathname === "/outtake") {
     return (
       <div className="min-h-screen bg-black">
         <header className="border-b border-white/10 py-3 text-center text-[11px] font-black tracking-[0.28em] text-warn">

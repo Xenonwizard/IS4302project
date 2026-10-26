@@ -101,7 +101,7 @@ and resets to an empty chain first, except the seeded-demo test). `test:unit` al
 | Role | Sees | Can do |
 | --- | --- | --- |
 | **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (the NFT is minted when Pokechain receives the slab), watch each request move on live, report a parcel lost on the way in or out, trade slabs + cash with another collector in a chat (offer, accept, counter, decline, withdraw; prices negotiated using Pokechain records), transfer, withdraw a slab, trace it |
-| **Pokechain operator** (server key, simulated warehouse) | **/intake** (the card processing simulator), curl, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, ship redemptions, close lost reports. No power over trades |
+| **Pokechain operator** (server key, simulated warehouse) | **/intake** and **/outtake** (the card processing simulators), curl, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, notify Collector Crypt to ship a withdrawal, verify a found slab and send it back, close lost reports. No power over trades |
 | **Collector Crypt** (simulated custodian) | **/collector-crypt**, **/intake** (Vaulted step) | Publish its encryption key, read incoming parcels by decrypting them, vault slabs |
 | **Anyone** | **/trace/[tokenId]**, the chain itself | Verify a slab's history, evidence and custody without trusting Pokechain |
 
@@ -117,7 +117,9 @@ with grader and grade filters. Swap terms are shown as full baskets and cash, ne
 Missing history remains empty; no external pricing service or oracle is used. Card metadata and artwork
 can still come from the saved Pokemon TCG dataset. The contract moves whatever the collectors agree to.
 **Simulated (labelled in the UI):** Collector Crypt's API and Solana NFTs (mock routes with the real
-Solana DAS request shapes), the carrier (including "parcel found"), Pokechain's warehouse actions (the
+Solana DAS request shapes; on a withdrawal CC "releases" the slab and "burns" its Solana NFT, which is only a
+`BURN` entry in the mock asset history), the carrier (including "parcel found"), the finder's parcel and evidence
+photos (only file names are kept), lost-card bounties (paid in the app's PokeCredits ledger, not on-chain), Pokechain's warehouse actions (the
 operator buttons), the seeded demo accounts and slabs (`seedSlab`, operator-only), and the Hardhat test wallets that stand in for MetaMask locally.
 
 ### Can't sign up or log in?
@@ -155,7 +157,8 @@ npm run lint                 # eslint
 | `/vault` | Collection, my listings, offers made, orders, watchlist; list for sale, delist, open trade room, request shipping |
 | `/checkout`, `/checkout/success` | Cart review, payment method, order receipt with tx hash |
 | `/profile/[username]` | Any seller's public collection and activity |
-| `/submit` | Slab submission: `requestSubmission` mints the NFT (pending, locked), then it is tracked through Pokechain → Collector Crypt → Solana check → `confirmVaulted` |
+| `/submit` | Slab submission: `requestSubmission` opens intake; `markReceived` mints the PSA-cert-id NFT (pending, locked), then it is tracked through Pokechain → Collector Crypt → Solana check → `confirmVaulted` |
+| `/outtake` | Operator simulation for a withdrawal: inspect the latest token owner and have Pokechain notify Collector Crypt to release and ship the physical slab |
 | `/trace/[tokenId]` | One slab's journey across Polygon, Solana and Collector Crypt |
 | `/account` | On-chain account record, event history (`eth_getLogs`), close account |
 
@@ -172,6 +175,14 @@ npm run lint                 # eslint
    **Accept bid** settles: the slab leaves your vault and the cash (plus any slabs) comes in.
 6. **Report lost**: from any trade room, file a report for a slab you should have received, a
    slab you sent, or a payment. It gets a case id, posts to the room, and is listed on `/trades`.
+6a. **Lost slab, bounty and return** (on-chain custody, simulated parcels): from **Vault → Withdrawn** (on its way
+   to you) or **Vault → Awaiting vault** (never got vaulted), **Report lost** with an optional bounty. The
+   Pokechain NFT stays alive and locked (custody `Lost`); **Cancel lost status** puts it back. Anyone who finds it
+   searches the cert (top search bar or **Lost cards**), presses **Found Slab**, adds evidence and the tracking
+   number of the parcel they send to Pokechain. The operator verifies it on **/outtake**
+   (`SlabVault.markRecoveredShipped`), and when the owner presses **Confirm received** the NFT is burned
+   (`confirmDelivery`) and the bounty is released to the finder. Collector Crypt's own NFT was already burned
+   (simulated) when it released the slab; Pokechain's burns only on the owner's confirmation.
 7. **List from the vault**, **make an offer**, **accept an offer** on a slab you own, and
    **request shipping**.
 8. **Reset demo data** in the user menu wipes `localStorage`.

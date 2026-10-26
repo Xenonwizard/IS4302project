@@ -96,7 +96,7 @@ export function LostCardsView() {
     const q = query.trim().toLowerCase();
     const terms = q ? q.split(/\s+/) : [];
 
-    let pool = lostSlabs.filter(({ listing, loss }) => {
+    const pool = lostSlabs.filter(({ listing, loss }) => {
         // Search public card metadata and loss details; owner identity is private.
       if (terms.length) {
           const haystack = `${listing.title} ${listing.subject} ${listing.set} ${listing.certNumber} ${loss.details}`.toLowerCase();
@@ -334,7 +334,7 @@ export function LostCardsView() {
           title={`Recovery bounty for ${activeBountyTarget.listing.shortName}`}
           width="max-w-sm"
         >
-          <div className="space-y-4">
+          <div className="space-y-4 p-5">
             <p className="text-sm text-muted">
               Offer a PokeCredit reward to community members or courier agents who help locate this slab.
             </p>

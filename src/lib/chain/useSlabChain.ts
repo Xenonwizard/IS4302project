@@ -16,8 +16,9 @@
  *   transfer()        SlabVault.safeTransferFrom(me, to, tokenId)     collector's wallet
  *
  *  Outbound (owner → Collector Crypt ships to them)
- *   redeem()          SlabVault.requestRedemption, then the operator asks CC to ship and
- *                     records it with SlabVault.markShipped
+ *   redeem()          SlabVault.requestRedemption (owner's wallet). Pokechain's outtake service
+ *                     (/outtake) then notifies CC to ship to the current token owner and records
+ *                     it with SlabVault.markShipped
  *   confirmDelivery() SlabVault.confirmDelivery                       collector's wallet
  *   reportLost()      SlabVault.reportLost (inbound or outbound post)  collector's wallet
  *   resolveLost()     SlabVault.resolveLostReport                     operator (simulated carrier finds it)
@@ -186,16 +187,19 @@ export function useSlabChain() {
         requestTx = receipt.transactionHash;
       }
 
-      const shipped = await operator<{
-        redemptionRef: string;
-        carrier: string;
-        trackingNumber: string;
-        tx: OperatorTx;
-        checks: CheckStep[];
-      }>("Collector Crypt ships to you", "/api/chain/ship", { tokenId, shipTo: shipTo.trim() });
-      return { shippingHash, requestTx, ...shipped };
+      // Hand Pokechain the plaintext address (the chain only has its hash) so the outtake step can pass it to CC.
+      const saved = await fetch("/api/chain/outtake/address", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tokenId, shipTo: shipTo.trim() }),
+      });
+      if (!saved.ok) throw new Error(((await saved.json()) as { error?: string }).error ?? "Pokechain did not accept the delivery address");
+
+      // The owner's part ends here. Pokechain's outtake service (/outtake, or POST /api/chain/outtake)
+      // then notifies Collector Crypt to ship and records it with SlabVault.markShipped.
+      return { shippingHash, requestTx };
     },
-    [client, send, operator],
+    [client, send],
   );
 
   const confirmDelivery = useCallback(
@@ -210,11 +214,17 @@ export function useSlabChain() {
     [send],
   );
 
+  const cancelLost = useCallback(
+    (tokenId: string) =>
+      send({ contract: "slabVault", functionName: "cancelLostReport", args: [BigInt(tokenId)], label: "Cancel lost report" }),
+    [send],
+  );
+
   const resolveLost = useCallback(
     (tokenId: string, outcome: LostOutcome) =>
       operator<{ custody: string; tx: OperatorTx }>("Carrier found the parcel", "/api/chain/resolve-lost", { tokenId, outcome }),
     [operator],
   );
 
-  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost, resolveLost };
+  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost, cancelLost, resolveLost };
 }

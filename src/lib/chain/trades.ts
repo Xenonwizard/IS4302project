@@ -86,7 +86,8 @@ export function useTradeSlabs(owner: Address | undefined) {
         fromBlock: DEPLOY_BLOCK,
       });
       const ids = [...new Set(incoming.map((e) => e.args.tokenId!))];
-      const owners = await Promise.all(ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] })));
+      // ownerOf reverts for a token burned after confirmed delivery; one of those must not empty the list.
+      const owners = await Promise.all(ids.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] }).catch(() => null)));
       const held = ids.filter((_, i) => owners[i] === owner);
       const [slabs, listed, listings] = await Promise.all([
         Promise.all(held.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),

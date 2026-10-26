@@ -32,22 +32,22 @@ interface IAccountStatus {
  *                           asset id. Custody: Vaulted: only now can the token be traded.
  *                           (`rejectSubmission` at any open stage: Rejected, never burned.)
  *
- *  Offboarding a slab (the slab leaves the vault, the token stays)
+ *  Offboarding a slab (the slab leaves the vault, the token stays during transit)
  *   5. `requestRedemption`  the owner asks for the slab. The token is locked: it can no longer
  *                           be transferred or traded. Custody: RedemptionRequested.
  *   6. `markShipped`        Pokechain, as holder of CC's NFT, asked CC to ship to the owner;
  *                           records CC's redemption id, carrier and tracking. Custody: Shipped.
- *   7. `confirmDelivery`    the owner confirms it arrived. Custody: Delivered.
+ *   7. `confirmDelivery`    the owner confirms it arrived. Custody: Delivered, then the
+ *                           Pokechain title NFT is burned.
  *      `reportLost`         or reports it lost, in either direction's post. Custody: Lost.
- *   8. `resolveLostReport`  the operator closes a lost report: found at Pokechain, delivered,
- *                           or back in the vault.
+ *   8. `resolveLostReport`  the operator closes an inbound/vault return; a found outbound slab
+ *                           is verified and sent through `markRecoveredShipped`.
  *
  *  Trading: TradeEscrow (set with `setTradeEscrow`) may hold slabs that are in an open offer and
  *  move Vaulted slabs on its own authority when both sides of a trade have agreed.
  *
- *  Nothing is burned. Every step is a state change plus an event, so the slab's path from the
- *  collector's hands, through Pokechain and CC, and back out to its final owner can be traced
- *  end to end, on this chain and (through the stored ids) on Solana and with CC.
+ *  The NFT survives every pending and shipping state. It is burned only after the owner confirms
+ *  physical receipt; the slab record and events remain available as a permanent custody trail.
  */
 contract SlabVault is ERC721, AccessControl {
     using Strings for uint256;
@@ -119,10 +119,10 @@ contract SlabVault is ERC721, AccessControl {
 
     IAccountStatus public immutable accounts;
 
-    /// @notice ERC-721 token ids remain compact and sequential. Submission ids are PSA cert numbers.
-    uint256 public nextTokenId = 1;
+    /// @notice For PSA slabs, the ERC-721 token id is the numeric PSA certificate id.
 
     mapping(uint256 => Slab) private _slabs;
+    mapping(uint256 => Custody) private _custodyBeforeLoss;
     mapping(uint256 => Submission) private _submissions;
     /// @notice keccak256(grader, cert) => its token once Pokechain has received and minted it.
     mapping(bytes32 => uint256) public tokenOfCert;
@@ -182,7 +182,9 @@ contract SlabVault is ERC721, AccessControl {
     );
     event SlabDelivered(uint256 indexed tokenId, address indexed owner);
     event SlabReportedLost(uint256 indexed tokenId, address indexed owner, string trackingNumber, string details);
+    event LostReportCancelled(uint256 indexed tokenId, address indexed owner, Custody restoredCustody);
     event LostReportResolved(uint256 indexed tokenId, address indexed owner, Custody outcome);
+    event LostSlabRecovered(uint256 indexed tokenId, address indexed owner, string carrier, string trackingNumber);
     event MarketplaceSet(address indexed marketplace);
     event ListingRestrictionUpdated(uint256 indexed tokenId, bool restricted);
 
@@ -200,6 +202,7 @@ contract SlabVault is ERC721, AccessControl {
     error NoEncryptionKey(address account);
     error MissingEvidence();
     error InvalidCertNumber();
+    error UnknownSlab(uint256 tokenId);
 
     constructor(IAccountStatus accounts_, address operator) ERC721("Pokechain Slab", "SLAB") {
         accounts = accounts_;
@@ -250,7 +253,7 @@ contract SlabVault is ERC721, AccessControl {
     /// @notice Step 2: Pokechain's warehouse has received the slab from the collector.
     function markReceived(uint256 submissionId) external onlyRole(OPERATOR_ROLE) {
         Submission storage s = _moveSubmission(submissionId, SubmissionStatus.Pending, SubmissionStatus.ReceivedByPokechain);
-        uint256 tokenId = nextTokenId++;
+        uint256 tokenId = submissionId;
         s.tokenId = tokenId;
         submissionOfToken[tokenId] = submissionId;
         tokenOfCert[certKey(s.grader, s.certNumber)] = tokenId;
@@ -362,7 +365,7 @@ contract SlabVault is ERC721, AccessControl {
             revert CertAlreadyTokenised(tokenOfCert[key] != 0 ? tokenOfCert[key] : submissionId);
         }
 
-        tokenId = nextTokenId++;
+        tokenId = submissionId;
         tokenOfCert[key] = tokenId;
         submissionOfCert[key] = submissionId;
         submissionOfToken[tokenId] = submissionId;
@@ -445,6 +448,7 @@ contract SlabVault is ERC721, AccessControl {
         if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         _moveCustody(tokenId, Custody.Shipped, Custody.Delivered);
         emit SlabDelivered(tokenId, msg.sender);
+        _burn(tokenId);
     }
 
     /**
@@ -457,20 +461,35 @@ contract SlabVault is ERC721, AccessControl {
         bool inPost = c == Custody.PostedToPokechain || c == Custody.AtPokechain || c == Custody.SentToCustodian
             || c == Custody.RedemptionRequested || c == Custody.Shipped;
         if (!inPost) revert WrongCustody(tokenId, c);
+        _custodyBeforeLoss[tokenId] = c;
         _setCustody(tokenId, Custody.Lost);
         emit SlabReportedLost(tokenId, msg.sender, _slabs[tokenId].trackingNumber, details);
     }
 
+    /// @notice The owner withdraws a mistaken lost report and restores the preceding transit state.
+    function cancelLostReport(uint256 tokenId) external {
+        if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
+        Custody previous = _custodyBeforeLoss[tokenId];
+        if (_slabs[tokenId].custody != Custody.Lost || previous == Custody.None) {
+            revert WrongCustody(tokenId, _slabs[tokenId].custody);
+        }
+        _moveCustody(tokenId, Custody.Lost, previous);
+        delete _custodyBeforeLoss[tokenId];
+        emit LostReportCancelled(tokenId, msg.sender, previous);
+    }
+
     /**
      * @notice Step 8: the operator closes a lost report. `AtPokechain` if an inbound parcel turned
-     *         up at Pokechain (onboarding carries on from there), `Delivered` if an outbound one
-     *         reached the owner, `Vaulted` if it came back to the vault (tradeable again).
+     *         up at Pokechain (onboarding carries on from there), or `Vaulted` if it came back to
+     *         the vault. A recovered slab returned to its owner uses `markRecoveredShipped`, then
+     *         only the owner can call `confirmDelivery`.
      */
     function resolveLostReport(uint256 tokenId, Custody outcome) external onlyRole(OPERATOR_ROLE) {
-        if (outcome != Custody.Delivered && outcome != Custody.Vaulted && outcome != Custody.AtPokechain) {
+        if (outcome != Custody.Vaulted && outcome != Custody.AtPokechain) {
             revert WrongCustody(tokenId, outcome);
         }
         _moveCustody(tokenId, Custody.Lost, outcome);
+        delete _custodyBeforeLoss[tokenId];
         address owner = ownerOf(tokenId);
         if (outcome == Custody.Vaulted) vaultedCount[owner] += 1;
         if (outcome == Custody.AtPokechain) {
@@ -479,6 +498,22 @@ contract SlabVault is ERC721, AccessControl {
             s.updatedAt = uint64(block.timestamp);
         }
         emit LostReportResolved(tokenId, owner, outcome);
+    }
+
+    /** @notice Pokechain/CC verified a recovered lost slab and shipped it back to its latest owner. */
+    function markRecoveredShipped(uint256 tokenId, string calldata carrier, string calldata trackingNumber)
+        external
+        onlyRole(OPERATOR_ROLE)
+    {
+        if (bytes(carrier).length == 0 || bytes(trackingNumber).length == 0) revert EmptyField();
+        _moveCustody(tokenId, Custody.Lost, Custody.Shipped);
+        delete _custodyBeforeLoss[tokenId];
+        Slab storage slab = _slabs[tokenId];
+        slab.carrier = carrier;
+        slab.trackingNumber = trackingNumber;
+        address owner = ownerOf(tokenId);
+        emit LostSlabRecovered(tokenId, owner, carrier, trackingNumber);
+        emit SlabShipped(tokenId, owner, "RECOVERY", carrier, trackingNumber);
     }
 
     /// @notice Names the TradeEscrow contract (see the contract notice).
@@ -499,7 +534,7 @@ contract SlabVault is ERC721, AccessControl {
     }
 
     function slabOf(uint256 tokenId) external view returns (Slab memory) {
-        _requireOwned(tokenId);
+        if (_slabs[tokenId].mintedAt == 0) revert UnknownSlab(tokenId);
         return _slabs[tokenId];
     }
 
@@ -533,7 +568,7 @@ contract SlabVault is ERC721, AccessControl {
             : string.concat(s.grader, " ", s.certNumber, " (pending verification)");
         bytes memory head = abi.encodePacked(
             '{"name":"', name,
-            '","description":"Graded slab held by the Pokechain vault. The token is never burned, so the custody trail stays on-chain.",',
+            '","description":"Graded slab held by the Pokechain vault. The NFT remains active through transit and burns only after owner-confirmed physical delivery.",',
             '"image":"', s.image,
             '","attributes":[{"trait_type":"Grader","value":"', s.grader,
             '"},{"trait_type":"Cert number","value":"', s.certNumber
@@ -591,9 +626,14 @@ contract SlabVault is ERC721, AccessControl {
             if (to == from) revert SelfTransfer(tokenId);
             if (isListed[tokenId] && msg.sender != marketplace) revert SlabIsListed(tokenId);
             Custody c = _slabs[tokenId].custody;
-            if (c != Custody.Vaulted) revert SlabLocked(tokenId, c);
-            vaultedCount[from] -= 1;
-            if (to != address(0)) vaultedCount[to] += 1;
+            if (to == address(0)) {
+                // requestRedemption already removed it from vaultedCount. Only confirmed delivery burns.
+                if (c != Custody.Delivered) revert SlabLocked(tokenId, c);
+            } else {
+                if (c != Custody.Vaulted) revert SlabLocked(tokenId, c);
+                vaultedCount[from] -= 1;
+                vaultedCount[to] += 1;
+            }
         }
         return super._update(to, tokenId, auth);
     }

@@ -1572,6 +1572,17 @@ export const slabVaultAbi = [
         "internalType": "uint256",
         "name": "tokenId",
         "type": "uint256"
+      }
+    ],
+    "name": "UnknownSlab",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
       },
       {
         "internalType": "enum SlabVault.Custody",
@@ -1730,11 +1741,67 @@ export const slabVaultAbi = [
       {
         "indexed": false,
         "internalType": "enum SlabVault.Custody",
+        "name": "restoredCustody",
+        "type": "uint8"
+      }
+    ],
+    "name": "LostReportCancelled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum SlabVault.Custody",
         "name": "outcome",
         "type": "uint8"
       }
     ],
     "name": "LostReportResolved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "carrier",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "trackingNumber",
+        "type": "string"
+      }
+    ],
+    "name": "LostSlabRecovered",
     "type": "event"
   },
   {
@@ -2221,6 +2288,19 @@ export const slabVaultAbi = [
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "cancelLostReport",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "string",
         "name": "grader",
         "type": "string"
@@ -2534,6 +2614,29 @@ export const slabVaultAbi = [
       },
       {
         "internalType": "string",
+        "name": "carrier",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "trackingNumber",
+        "type": "string"
+      }
+    ],
+    "name": "markRecoveredShipped",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
         "name": "redemptionRef",
         "type": "string"
       },
@@ -2574,19 +2677,6 @@ export const slabVaultAbi = [
         "internalType": "string",
         "name": "",
         "type": "string"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "nextTokenId",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
       }
     ],
     "stateMutability": "view",

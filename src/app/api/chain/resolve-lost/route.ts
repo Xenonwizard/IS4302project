@@ -1,7 +1,7 @@
 /**
  * Pokechain operator: closes a lost-parcel report (SlabVault.resolveLostReport).
  *
- *   POST /api/chain/resolve-lost   { "tokenId": "1", "outcome": "at-pokechain" | "delivered" | "vaulted" }
+ *   POST /api/chain/resolve-lost   { "tokenId": "12345678", "outcome": "at-pokechain" | "vaulted" }
  */
 import { LOST_OUTCOMES, operatorError, resolveLost, type LostOutcome } from "@/lib/chain/operator";
 

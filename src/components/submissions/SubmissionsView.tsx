@@ -9,27 +9,32 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  Copy,
   FileText,
   PackageCheck,
   PackageSearch,
   Plus,
   TriangleAlert,
+  Truck,
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { certPreview, getListing } from "@/lib/catalog";
 import { OPEN_SUBMISSION } from "@/lib/chain/config";
 import { type SubmissionRequest, useSubmissions } from "@/lib/chain/useSubmissions";
 import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
+import { WithdrawnList } from "../chain/WithdrawnList";
 import { TimeAgo } from "../ui/primitives";
 import { Empty, LoginPrompt } from "../vault/shared";
 
-type Filter = "all" | "progress" | "vaulted" | "attention";
+type Filter = "all" | "progress" | "vaulted" | "withdrawals" | "attention";
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "progress", label: "In progress" },
   { value: "vaulted", label: "Vaulted" },
+  { value: "withdrawals", label: "Withdrawals" },
   { value: "attention", label: "Needs attention" },
 ];
 
@@ -58,7 +63,8 @@ interface EvidenceResponse {
 export function SubmissionsView() {
   const { user, ready, vault, resolve } = useStore();
   const { data: requests = [], isPending, isError, refetch } = useSubmissions();
-  const [filter, setFilter] = useState<Filter>("all");
+  const params = useSearchParams();
+  const [filter, setFilter] = useState<Filter>(() => FILTERS.find((f) => f.value === params.get("tab"))?.value ?? "all");
   const [openId, setOpenId] = useState<string | null>(null);
 
   const localRequests = useMemo(
@@ -70,15 +76,26 @@ export function SubmissionsView() {
       }),
     [resolve, vault],
   );
+  // Withdraw requests from the Vault: tracked here too, so a slab that never arrives can be reported lost.
+  const withdrawals = useMemo(
+    () =>
+      vault.flatMap((entry) => {
+        if (entry.status !== "Withdrawn" || !entry.token) return [];
+        const listing = getListing(entry.listingId);
+        return listing ? [{ entry, listing: resolve(listing) }] : [];
+      }),
+    [resolve, vault],
+  );
 
-  const visible = requests.filter((request) => {
+  const visible = filter === "withdrawals" ? [] : requests.filter((request) => {
     if (filter === "progress") return OPEN_SUBMISSION.has(request.status);
     if (filter === "vaulted") return request.status === 4;
     if (filter === "attention") return request.status === 5;
     return true;
   });
   const visibleLocal = filter === "all" || filter === "vaulted" ? localRequests : [];
-  const total = requests.length + localRequests.length;
+  const visibleWithdrawals = filter === "all" || filter === "withdrawals" ? withdrawals : [];
+  const total = requests.length + localRequests.length + withdrawals.length;
   const inProgress = requests.filter((request) => OPEN_SUBMISSION.has(request.status)).length;
   const awaitingVault = requests.filter((request) => request.status === 2 || request.status === 3).length;
   const vaulted = requests.filter((request) => request.status === 4).length + localRequests.length;
@@ -86,6 +103,7 @@ export function SubmissionsView() {
     all: total,
     progress: inProgress,
     vaulted,
+    withdrawals: withdrawals.length,
     attention: requests.filter((request) => request.status === 5).length,
   };
 
@@ -148,7 +166,9 @@ export function SubmissionsView() {
               Try again
             </button>
           </div>
-        ) : visible.length || visibleLocal.length ? (
+        ) : visible.length || visibleLocal.length || visibleWithdrawals.length ? (
+          <div className="space-y-6">
+          {visible.length || visibleLocal.length ? (
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
             <div className="hidden grid-cols-[minmax(240px,1.25fr)_minmax(210px,1fr)_150px_28px] gap-4 border-b border-hairline px-4 py-2.5 text-[10px] font-bold uppercase tracking-wide text-dim md:grid">
               <span>Slab request</span>
@@ -175,6 +195,17 @@ export function SubmissionsView() {
                 />
               ))}
             </ul>
+          </div>
+          ) : null}
+          {visibleWithdrawals.length ? (
+            <section data-testid="withdraw-requests">
+              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><Truck size={15} /> Withdraw requests</h2>
+              <p className="mb-3 text-[12px] text-muted">
+                Slabs you asked to ship out of the vault. Confirm delivery when it arrives, or report it lost if it never does.
+              </p>
+              <WithdrawnList items={visibleWithdrawals} />
+            </section>
+          ) : null}
           </div>
         ) : total ? (
           <Empty
@@ -409,10 +440,31 @@ function FormGrid({ children }: { children: React.ReactNode }) {
 }
 
 function FormField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
   return (
     <div className="mb-3 last:mb-0">
       <p className="text-[10px] font-bold uppercase tracking-wide text-dim">{label}</p>
-      <p className={clsx("mt-1 break-words text-[12.5px] text-white", mono && "font-mono")}>{value}</p>
+      <div className="mt-1 flex items-start gap-2">
+        <p className={clsx("min-w-0 break-words text-[12.5px] text-white", mono && "font-mono")}>{value}</p>
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={`Copy ${label}`}
+          title={copied ? "Copied" : `Copy ${label}`}
+          className="mt-px shrink-0 rounded p-0.5 text-dim transition hover:text-white"
+        >
+          {copied ? <Check size={13} className="text-good" /> : <Copy size={13} />}
+        </button>
+      </div>
     </div>
   );
 }

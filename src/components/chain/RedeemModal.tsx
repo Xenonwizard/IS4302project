@@ -1,7 +1,7 @@
 "use client";
 
+import { CheckCircle2, Truck } from "lucide-react";
 import Link from "next/link";
-import { CheckCircle2, Route, Truck } from "lucide-react";
 import { useState } from "react";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { useStore } from "@/lib/store";
@@ -10,11 +10,12 @@ import { Slab } from "../slab/Slab";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
 
 /**
- * Slab offboarding: the slab leaves the vault, the token stays.
+ * Slab offboarding: the slab leaves the vault; its token stays locked until confirmed receipt.
  *   (tokenise first if it was never minted)
  *   SlabVault.requestRedemption(tokenId, keccak256(address))   wallet: token locked
- *   Collector Crypt POST /redemptions (as holder of CC's NFT)   operator: CC ships to the owner
+ *   /outtake: Collector Crypt POST /redemptions (as holder of CC's NFT)   operator: CC ships to the owner
  *   SlabVault.markShipped(tokenId, ccRedemptionId, carrier, tracking)   operator
+ *   SlabVault.confirmDelivery(tokenId)   latest owner: custody Delivered, then token burns
  */
 export function RedeemModal({ target, onClose }: { target: { entry: VaultItem; listing: Listing } | null; onClose: () => void }) {
   return (
@@ -30,7 +31,7 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
   const entry = vault.find((v) => v.listingId === listingId);
   const [shipTo, setShipTo] = useState("");
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ carrier: string; trackingNumber: string; redemptionRef: string } | null>(null);
+  const [done, setDone] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const tokenise = async () => {
@@ -76,12 +77,8 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
         requestTx: out.requestTx,
         shippingHash: out.shippingHash,
         shipTo: shipTo.trim(),
-        redemptionRef: out.redemptionRef,
-        carrier: out.carrier,
-        trackingNumber: out.trackingNumber,
-        shipTx: out.tx.hash,
       });
-      setDone({ carrier: out.carrier, trackingNumber: out.trackingNumber, redemptionRef: out.redemptionRef });
+      setDone(true);
     } catch (e) {
       pushToast({ title: "Withdrawal failed", body: (e as Error).message, tone: "error" });
     } finally {
@@ -107,17 +104,15 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
       {done ? (
         <div className="space-y-3 text-center">
           <CheckCircle2 size={36} className="mx-auto text-good" />
-          <p className="text-[15px] font-bold">On its way</p>
+          <p className="text-[15px] font-bold">Withdrawal requested</p>
           <p className="text-[13px] text-muted">
-            Collector Crypt redemption <span className="font-mono text-white">{done.redemptionRef}</span> · {done.carrier}{" "}
-            <span className="font-mono text-white">{done.trackingNumber}</span>. It&apos;s now in your Vault&apos;s Withdrawn
-            tab. Confirm delivery there, or report it lost if it never arrives.
+            Your token is locked on-chain with the hash of your address. Pokechain now notifies Collector Crypt to
+            release and ship the card. Track it under Submissions → Withdrawals (or your Vault&apos;s Withdrawn tab):
+            confirm delivery there, or report it lost if it never arrives.
           </p>
           <div className="flex justify-center gap-2">
-            <Link href={`/trace/${entry?.token?.tokenId}`} onClick={onClose}>
-              <Button variant="secondary">
-                <Route size={15} /> Trace it
-              </Button>
+            <Link href="/submissions?tab=withdrawals" onClick={onClose}>
+              <Button variant="outline">View withdraw request</Button>
             </Link>
             <Button onClick={onClose}>Done</Button>
           </div>

@@ -90,7 +90,16 @@ export function ChainVaultSync() {
       // A token whose ownerOf call now fails was reverted out of the current chain history.
       // Treat it like a token held elsewhere so the local Vault mirror removes it. The
       // contract-code check above still prevents a temporarily offline node from clearing state.
-      const ownedByOthers = ids.filter((_, i) => !isMine(i)).map(String);
+      // Exception: a token burned because its owner confirmed delivery. Keep it in the
+      // Withdrawn tab as the record of the slab that left the vault.
+      const deliveredBurn = await Promise.all(
+        ids.map((id, i) =>
+          owners[i] === null
+            ? client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }).then((s) => CUSTODY[s.custody] === "Delivered").catch(() => false)
+            : false,
+        ),
+      );
+      const ownedByOthers = ids.filter((_, i) => !isMine(i) && !deliveredBurn[i]).map(String);
       const [read, marketListings] = await Promise.all([
         Promise.all(candidates.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),
         Promise.all(

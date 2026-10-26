@@ -275,7 +275,6 @@ async function seed() {
     "function seedSlab(SeedParams calldata p) external returns (uint256 tokenId)",
     "function tokenOfCert(bytes32 key) external view returns (uint256)",
     "function certKey(string grader, string certNumber) external pure returns (bytes32)",
-    "function nextTokenId() external view returns (uint256)",
   ]);
 
   const marketAbi = parseAbi([

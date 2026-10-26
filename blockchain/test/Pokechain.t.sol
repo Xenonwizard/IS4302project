@@ -342,9 +342,9 @@ contract PokechainTest is Test {
                 evidenceHash: EVIDENCE
             })
         );
-        assertEq(tokenId, 1);
-        assertEq(vault.ownerOf(1), alice);
-        SlabVault.Slab memory slab = vault.slabOf(1);
+        assertEq(tokenId, 88889999);
+        assertEq(vault.ownerOf(tokenId), alice);
+        SlabVault.Slab memory slab = vault.slabOf(tokenId);
         assertEq(slab.title, "Charizard");
         assertEq(vault.vaultedCount(alice), 1);
         assertEq(uint256(slab.custody), uint256(SlabVault.Custody.Vaulted));
@@ -374,7 +374,7 @@ contract PokechainTest is Test {
         uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
 
         vm.expectEmit(true, true, false, false);
-        emit SlabVault.SubmissionReceived(sid, 1, alice);
+        emit SlabVault.SubmissionReceived(sid, sid, alice);
         vm.prank(operator);
         vault.markReceived(sid);
 
@@ -506,7 +506,7 @@ contract PokechainTest is Test {
 
     /* ------------------------- slab offboarding ------------------------- */
 
-    function test_RedeemShipDeliverKeepsToken() public {
+    function test_RedeemShipDeliverBurnsOnlyAfterOwnerConfirmation() public {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");
 
@@ -524,7 +524,8 @@ contract PokechainTest is Test {
         assertEq(uint8(s.custody), uint8(SlabVault.Custody.Delivered));
         assertEq(s.trackingNumber, "JD0123456789");
         assertEq(s.redemptionRef, "CCR-1");
-        assertEq(vault.ownerOf(tokenId), alice); // never burned
+        vm.expectRevert();
+        vault.ownerOf(tokenId);
     }
 
     function test_CannotTransferToSelf() public {
@@ -554,7 +555,8 @@ contract PokechainTest is Test {
         vault.markShipped(tokenId, "CCR-7", "DHL", "JD999");
         vm.prank(bob);
         vault.confirmDelivery(tokenId);
-        assertEq(vault.ownerOf(tokenId), bob);
+        vm.expectRevert();
+        vault.ownerOf(tokenId);
     }
 
     function test_RedeemedTokenIsLocked() public {
@@ -591,12 +593,53 @@ contract PokechainTest is Test {
         assertEq(vault.vaultedCount(alice), 1);
     }
 
+    function test_RecoveredLostSlabShipsAndBurnsAfterOwnerReceipt() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+        vm.prank(alice);
+        vault.requestRedemption(tokenId, bytes32(0));
+        vm.prank(operator);
+        vault.markShipped(tokenId, "CCR-1", "DHL", "LOST-1");
+        vm.prank(alice);
+        vault.reportLost(tokenId, "Parcel did not arrive");
+
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.WrongCustody.selector, tokenId, SlabVault.Custody.Delivered));
+        vault.resolveLostReport(tokenId, SlabVault.Custody.Delivered);
+
+        vm.prank(operator);
+        vault.markRecoveredShipped(tokenId, "Pokechain Secure", "REC-123");
+        assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Shipped));
+        assertEq(vault.ownerOf(tokenId), alice);
+
+        vm.prank(alice);
+        vault.confirmDelivery(tokenId);
+        assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Delivered));
+        vm.expectRevert();
+        vault.ownerOf(tokenId);
+    }
+
     function test_CannotReportLostWhileVaulted() public {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(SlabVault.WrongCustody.selector, tokenId, SlabVault.Custody.Vaulted));
         vault.reportLost(tokenId, "");
+    }
+
+    function test_OwnerCanCancelLostStatus() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+        vm.prank(alice);
+        vault.requestRedemption(tokenId, bytes32(0));
+        vm.prank(operator);
+        vault.markShipped(tokenId, "CCR-1", "DHL", "JD0123456789");
+        vm.prank(alice);
+        vault.reportLost(tokenId, "Mistaken carrier alert");
+
+        vm.prank(alice);
+        vault.cancelLostReport(tokenId);
+        assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Shipped));
     }
 
     function test_TokenURIIsOnChainJson() public {

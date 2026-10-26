@@ -5,7 +5,7 @@ This branch moves the start and end of a collector's life on Pokechain onto a bl
 | | Onboarding | Offboarding |
 | --- | --- | --- |
 | **Account** | connect a wallet → `register(handle)` → deposit USDC | withdraw USDC → `closeAccount()` |
-| **Slab** | `requestSubmission` **mints the ERC-721 at once, pending and locked** → Pokechain receives it (`markReceived`) → forwards it to **Collector Crypt** (`markForwarded`) → CC vaults it and mints its **Solana** NFT to Pokechain's escrow → operator verifies that NFT → `confirmVaulted` (now tradeable). Lost in the post on the way in: `reportLost` | `requestRedemption` (token locked, **never burned**) → Pokechain asks CC to ship → `markShipped` (with CC's redemption id) → `confirmDelivery` or `reportLost` |
+| **Slab** | `requestSubmission` creates the intake → Pokechain receives it (`markReceived`) and mints a locked ERC-721 whose id is the numeric PSA cert → forwards it to **Collector Crypt** (`markForwarded`) → CC vaults it and mints its **Solana** NFT to Pokechain's escrow → operator verifies that NFT → `confirmVaulted` (now tradeable). Lost in the post on the way in: `reportLost` | `requestRedemption` (token locked) → Pokechain asks CC to ship → `markShipped` (with CC's redemption id) → `confirmDelivery` burns the Pokechain NFT, or `reportLost` keeps it pending for recovery |
 | **Ownership** | | A → B: `safeTransferFrom`, or a **TradeEscrow** swap of several slabs + cash both ways, settled in one transaction. CC's NFTs never move |
 
 **The model in one line:** the physical slab sits in Collector Crypt's vault, CC's Solana NFT for it
@@ -148,13 +148,13 @@ and refuses `closeAccount` while the account has open offers (`OffersStillOpen`)
 ERC-20 with 6 decimals and `permit`, plus a public `faucet(amount)` (≤ 10,000). On a real
 network you would point AccountRegistry at Circle's USDC instead.
 
-### Why the token is never burned
+### Why the token burns only after owner-confirmed receipt
 
-Withdrawn slabs must stay traceable. Burning would erase the owner, the cert link and the custody
-trail at exactly the moment a parcel can go missing. Instead the token is **locked**: `_update`
-refuses any transfer once custody leaves `Vaulted`. The owner keeps a permanent, verifiable record
-and can file `reportLost` against it. The listing is removed from the marketplace off-chain, and the
-slab shows under **Vault → Withdrawn**.
+During withdrawal, the token is **locked**, not burned: `_update` refuses transfers once custody
+leaves `Vaulted`, and the owner can still file `reportLost` and attach a bounty. Pokechain/CC can
+verify a found slab and move it back to `Shipped`. Only `confirmDelivery`, signed by the latest
+owner after physical receipt, moves it to `Delivered` and burns the title NFT. The slab record,
+certificate link and events remain queryable after the burn.
 
 **Does Collector Crypt burn its NFT on redemption?** We don't know, so the design works either way:
 
@@ -163,7 +163,7 @@ slab shows under **Vault → Withdrawn**.
   (delivered, lost) is written to its metadata as a Solana transaction.
 * If the real CC **does burn**, the burn is itself a Solana transaction in the NFT's history
   (`getSignaturesForAsset`). Pokechain's own token still holds CC's asset id, CC's redemption id and
-  the tracking number, so the trail survives on Polygon regardless.
+  the tracking number, so the trail survives on Polygon after Pokechain's receipt-gated burn.
 
 The **Trace** page (`/trace/<tokenId>`) puts all three records side by side.
 
@@ -345,13 +345,13 @@ withdrawn or offered twice.
 sequenceDiagram
   actor B as Owner (B)
   participant SV as SlabVault
-  participant O as Operator (/api/chain/ship)
+  participant O as Pokechain outtake (/api/chain/outtake)
   participant CC as Collector Crypt
   participant C as Carrier (Postman)
   B->>B: shippingHash = keccak256(address)
   B->>SV: requestRedemption(1, shippingHash)
   Note over SV: RedemptionRequested, token locked
-  B->>O: ship(1, address)
+  B->>O: automatic outtake notification(1, address)
   O->>O: keccak256(address) == shippingHash on-chain?
   O->>CC: POST /redemptions {assetId, shipTo, requestedBy: escrow}
   CC-->>O: CCR-00001, FedEx FE…  (NFT frozen, not burned)
@@ -463,7 +463,7 @@ is assigned; both collectors choose their own terms → **Send offer** (Chain lo
   the meantime makes it revert, so nobody ever gets half a trade (fuzz-tested: cash is conserved).
 * **No approvals to phish:** TradeEscrow is a built-in operator of SlabVault, but only moves a slab in
   a call its owner signed (their own `createOffer` or `accept`).
-* **Locked, not burned** on redemption: no trading of a slab that's in transit, and a permanent trail.
+* **Locked during redemption; burned only on confirmed receipt:** no trading of a slab in transit, while the custody record remains permanent.
 * **Only active accounts can receive slabs** (`_update`), the on-chain equivalent of a KYC gate.
 * **Privacy:** the shipping address never goes on-chain, only `keccak256(address)`, which the
   operator can later match.

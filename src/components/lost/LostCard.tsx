@@ -2,12 +2,15 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { AlertTriangle, Coins, Copy, Check, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertTriangle, Coins, Copy, Check, PackageCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { usd } from "@/lib/format";
-import { useStore, type LostSlabItem } from "@/lib/store";
+import { IS_DEPLOYED } from "@/lib/chain/config";
+import { useSlabChain } from "@/lib/chain/useSlabChain";
+import { isActiveRecovery, useStore, type LostSlabItem } from "@/lib/store";
 import { Slab } from "../slab/Slab";
 import { Badge, Button, Modal, TimeAgo } from "../ui/primitives";
+import { FoundSlabModal } from "./FoundSlabModal";
 
 export function LostCard({
   item,
@@ -18,13 +21,31 @@ export function LostCard({
   size?: "medium" | "small";
   onManageBounty?: (listingId: string) => void;
 }) {
-  const { listing, loss } = item;
-  const { user, isOwned, withdrawLostForInsurance } = useStore();
+  const { listing, loss, recovery } = item;
+  const recovering = isActiveRecovery(recovery);
+  const { user, isOwned, withdrawLostForInsurance, confirmRecoveredSlab, pushToast } = useStore();
+  const { confirmDelivery } = useSlabChain();
   const owned = isOwned(listing.id) || (user && listing.owner.toLowerCase() === user.username.toLowerCase());
   const small = size === "small";
 
   const [copied, setCopied] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [foundOpen, setFoundOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  const confirmRecovered = async () => {
+    setConfirming(true);
+    try {
+      // Only a slab lost in the post has an on-chain Lost → Shipped trail to close (and burn on receipt).
+      if (IS_DEPLOYED && listing.tokenId && item.source === "transit") await confirmDelivery(listing.tokenId);
+      confirmRecoveredSlab(listing.id);
+    } catch (error) {
+      pushToast({ title: "Receipt confirmation failed", body: (error as Error).message, tone: "error" });
+    } finally {
+      setConfirming(false);
+    }
+  };
+
 
   const handleCopyCert = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -44,21 +65,18 @@ export function LostCard({
           <Slab listing={listing} interactive maxTilt={9} />
 
           {/* Top badges */}
-          <div className="absolute left-2.5 top-2.5 z-10 flex flex-wrap gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-md bg-warn/20 px-2 py-0.5 text-[10.5px] font-bold text-warn backdrop-blur-md border border-warn/30">
+          <div className="absolute inset-x-2.5 top-2.5 z-10 flex flex-wrap items-start justify-between gap-1.5">
+            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-warn/20 px-2 py-0.5 text-[10.5px] font-bold text-warn backdrop-blur-md border border-warn/30">
               <AlertTriangle size={12} className="shrink-0" />
               Reported Lost
             </span>
-          </div>
-
-          {loss.bounty ? (
-            <div className="absolute right-2.5 top-2.5 z-10">
-              <span className="inline-flex items-center gap-1 rounded-md bg-good/25 px-2 py-0.5 text-[11px] font-extrabold text-good shadow-lg shadow-good/10 backdrop-blur-md border border-good/40 animate-pulse">
+            {loss.bounty ? (
+              <span className="ml-auto inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-good/25 px-2 py-0.5 text-[11px] font-extrabold text-good shadow-lg shadow-good/10 backdrop-blur-md border border-good/40 animate-pulse">
                 <Coins size={12} className="shrink-0" />
                 {usd(loss.bounty.amount)} Bounty
               </span>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       </Link>
 
@@ -124,12 +142,23 @@ export function LostCard({
               </div>
             ) : null}
           </div>
+          {recovery ? (
+            <div className="mt-2 rounded-lg border border-accent/25 bg-accent/5 px-2.5 py-2 text-[11px] text-muted">
+              <span className="font-bold text-accent">Recovery {recovery.id}</span> · {recovery.status}
+              {recovery.returnTracking ? <span className="block pt-1">{recovery.returnCarrier} {recovery.returnTracking}</span> : null}
+            </div>
+          ) : null}
         </div>
 
         {/* Card Actions */}
         <div className="mt-3.5 pt-2.5 border-t border-hairline">
           {owned ? (
             <div className="flex gap-2">
+              {recovery?.status === "Returning to owner" ? (
+                <Button size="sm" className="flex-1 text-[11.5px]" disabled={confirming} onClick={() => void confirmRecovered()}>
+                  {confirming ? "Confirming…" : item.source === "transit" ? "Confirm received" : "Confirm back in vault"}
+                </Button>
+              ) : (
               <Button
                 size="sm"
                 variant="outline"
@@ -138,22 +167,23 @@ export function LostCard({
               >
                 {loss.bounty ? "Edit bounty" : "Add bounty"}
               </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
                 className="text-[11.5px] text-muted hover:text-bad"
                 onClick={() => setWithdrawOpen(true)}
+                disabled={recovering}
+                title={recovering ? "A finder's recovery is in progress" : undefined}
               >
                 Withdraw
               </Button>
             </div>
           ) : (
             <div className="flex gap-2">
-              <Link href={lostDetailsHref} className="w-full">
-                <Button size="sm" variant="outline" className="w-full text-[11.5px]">
-                  View details
-                </Button>
-              </Link>
+              <Button size="sm" className="w-full text-[11.5px]" disabled={recovering} onClick={() => setFoundOpen(true)}>
+                <PackageCheck size={14} /> {recovering ? "Recovery in progress" : "Found Slab"}
+              </Button>
             </div>
           )}
         </div>
@@ -182,6 +212,7 @@ export function LostCard({
           </div>
         </div>
       </Modal>
+      <FoundSlabModal listing={listing} open={foundOpen} onClose={() => setFoundOpen(false)} />
     </div>
   );
 }
