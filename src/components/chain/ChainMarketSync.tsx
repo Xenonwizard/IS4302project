@@ -73,6 +73,8 @@ export function ChainMarketSync() {
           sellerHandle: string;
           price: bigint;
           listedAt: bigint | number;
+          acceptsLoan: boolean;
+          loanAsk: bigint;
           grader: string;
           certNumber: string;
           title: string;
@@ -144,6 +146,8 @@ export function ChainMarketSync() {
                     sellerHandle: acct?.handle || "",
                     price: l.price,
                     listedAt: l.listedAt,
+                    acceptsLoan: l.acceptsLoan,
+                    loanAsk: l.loanAsk,
                     grader: s.grader,
                     certNumber: s.certNumber,
                     title: s.title,
@@ -174,6 +178,8 @@ export function ChainMarketSync() {
             ownerAddress: item.seller,
             listedAt: new Date(nowMs).toISOString(),
             contract: contracts.slabVault.address,
+            acceptsLoan: item.acceptsLoan,
+            loanAsk: fromUsdcUnits(item.loanAsk),
           });
 
           results.push({

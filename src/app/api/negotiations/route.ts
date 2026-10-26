@@ -24,6 +24,7 @@ function dedupeMessages(messages: Negotiation["messages"]): Negotiation["message
         r.kind === m.kind &&
         r.text === m.text &&
         r.trade?.offerId === m.trade?.offerId &&
+        r.loan?.offerId === m.loan?.offerId &&
         Math.abs((Date.parse(r.at) || 0) - (Date.parse(m.at) || 0)) < 3000,
     );
     if (isDup) continue;

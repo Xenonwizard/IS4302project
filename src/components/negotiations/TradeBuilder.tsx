@@ -36,6 +36,7 @@ export function TradeBuilder({
   them,
   cash,
   counterOf,
+  initialRequestedTokenId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -45,9 +46,11 @@ export function TradeBuilder({
   /** PokeCredits in my Pokechain account, the cash I can put in an offer */
   cash: number;
   counterOf?: CounterOf;
+  /** Slab whose asset page opened this trade builder. */
+  initialRequestedTokenId?: string;
 }) {
   if (!open) return null;
-  return <Form key={`${negotiationId}:${counterOf?.offerId ?? "new"}`} onClose={onClose} negotiationId={negotiationId} me={me} them={them} cash={cash} counterOf={counterOf} />;
+  return <Form key={`${negotiationId}:${counterOf?.offerId ?? "new"}`} onClose={onClose} negotiationId={negotiationId} me={me} them={them} cash={cash} counterOf={counterOf} initialRequestedTokenId={initialRequestedTokenId} />;
 }
 
 type TradeDraft = { give: string[]; get: string[]; giveCash: string; getCash: string };
@@ -63,6 +66,7 @@ function Form({
   them,
   cash,
   counterOf,
+  initialRequestedTokenId,
 }: {
   onClose: () => void;
   negotiationId: string;
@@ -70,6 +74,7 @@ function Form({
   them: { address: Address; handle: string };
   cash: number;
   counterOf?: CounterOf;
+  initialRequestedTokenId?: string;
 }) {
   const { create, counter } = useTradeActions();
   const { pushToast, postTrade } = useStore();
@@ -78,7 +83,10 @@ function Form({
   const { data: theirs = [] } = useTradeSlabs(them.address);
 
   const [give, setGive] = useState<string[]>(counterOf?.mySide.slabs.map((s) => s.tokenId) ?? []);
-  const [get, setGet] = useState<string[]>(counterOf?.theirSide.slabs.map((s) => s.tokenId) ?? []);
+  const requestedTokenId = counterOf ? undefined : initialRequestedTokenId;
+  const [get, setGet] = useState<string[]>(
+    counterOf?.theirSide.slabs.map((s) => s.tokenId) ?? (requestedTokenId ? [requestedTokenId] : []),
+  );
   // Strings, so the fields can be cleared and retyped.
   const [giveCash, setGiveCash] = useState(counterOf?.mySide.cash ? String(counterOf.mySide.cash) : "");
   const [getCash, setGetCash] = useState(counterOf?.theirSide.cash ? String(counterOf.theirSide.cash) : "");
@@ -98,7 +106,10 @@ function Form({
       if (raw) {
         const draft = JSON.parse(raw) as Partial<TradeDraft>;
         if (Array.isArray(draft.give)) setGive(draft.give.filter((id): id is string => typeof id === "string"));
-        if (Array.isArray(draft.get)) setGet(draft.get.filter((id): id is string => typeof id === "string"));
+        if (Array.isArray(draft.get)) {
+          const saved = draft.get.filter((id): id is string => typeof id === "string");
+          setGet(requestedTokenId && !saved.includes(requestedTokenId) ? [...saved, requestedTokenId] : saved);
+        }
         if (typeof draft.giveCash === "string") setGiveCash(draft.giveCash);
         if (typeof draft.getCash === "string") setGetCash(draft.getCash);
         setDraftSaved(true);
@@ -107,7 +118,7 @@ function Form({
       // Ignore unavailable or malformed local drafts.
     }
     setDraftReady(true);
-  }, [key]);
+  }, [key, requestedTokenId]);
 
   // Their slabs the offer being countered already names are in escrow, so they aren't in their vault list.
   const theirPool: TradeSlab[] = useMemo(() => {

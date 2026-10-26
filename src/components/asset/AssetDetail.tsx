@@ -101,6 +101,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           seller: l.seller,
           price: fromUsdcUnits(l.price),
           listedAt: Number(l.listedAt),
+          acceptsLoan: l.acceptsLoan,
+          loanAsk: fromUsdcUnits(l.loanAsk),
         };
       } catch {
         return null;
@@ -170,8 +172,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
       owner: currentOwner,
       ownerAddress: currentOwnerAddress,
       price: displayPrice,
+      acceptsLoan: onChainMarketListing?.acceptsLoan ?? listing.acceptsLoan,
+      loanAsk: onChainMarketListing?.loanAsk ?? listing.loanAsk,
     }),
-    [listing, currentOwner, currentOwnerAddress, displayPrice],
+    [listing, currentOwner, currentOwnerAddress, displayPrice, onChainMarketListing],
   );
 
   const refreshActivity = () => {

@@ -132,6 +132,8 @@ contract SlabVault is ERC721, AccessControl {
     mapping(uint256 => uint256) public submissionOfToken;
     /// @notice The TradeEscrow contract: may hold slabs in open offers and move Vaulted slabs for agreed trades.
     address public tradeEscrow;
+    /// @notice The collateral escrow: may hold a vaulted slab while its loan is active.
+    address public loanEscrow;
     /// @notice Slabs each address holds that are still physically in the vault.
     mapping(address => uint256) public vaultedCount;
 
@@ -173,6 +175,7 @@ contract SlabVault is ERC721, AccessControl {
     event SubmissionRejected(uint256 indexed submissionId, address indexed owner, string reason);
     event SlabVaulted(uint256 indexed tokenId, address indexed owner, string certNumber, string custodianRef);
     event TradeEscrowSet(address indexed tradeEscrow);
+    event LoanEscrowSet(address indexed loanEscrow);
     event RedemptionRequested(uint256 indexed tokenId, address indexed owner, bytes32 shippingHash);
     event SlabShipped(
         uint256 indexed tokenId, address indexed owner, string redemptionRef, string carrier, string trackingNumber
@@ -484,6 +487,11 @@ contract SlabVault is ERC721, AccessControl {
         emit TradeEscrowSet(escrow);
     }
 
+    function setLoanEscrow(address escrow) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        loanEscrow = escrow;
+        emit LoanEscrowSet(escrow);
+    }
+
     /* --------------------------------- views --------------------------------- */
 
     function certKey(string memory grader, string memory certNumber) public pure returns (bytes32) {
@@ -510,7 +518,8 @@ contract SlabVault is ERC721, AccessControl {
      *      slabs, called by the taker), so nobody's slab moves without its owner's transaction.
      */
     function isApprovedForAll(address owner, address operator) public view override returns (bool) {
-        return (operator == tradeEscrow && tradeEscrow != address(0)) || super.isApprovedForAll(owner, operator);
+        return (operator == tradeEscrow && tradeEscrow != address(0))
+            || (operator == loanEscrow && loanEscrow != address(0)) || super.isApprovedForAll(owner, operator);
     }
 
     /// @notice Fully on-chain ERC-721 metadata: a base64 JSON document, no server or IPFS needed.
@@ -575,7 +584,9 @@ contract SlabVault is ERC721, AccessControl {
      */
     function _update(address to, uint256 tokenId, address auth) internal override returns (address from) {
         from = _ownerOf(tokenId);
-        if (to != address(0) && to != tradeEscrow && !accounts.isActive(to)) revert AccountNotActive(to);
+        if (to != address(0) && to != tradeEscrow && to != loanEscrow && !accounts.isActive(to)) {
+            revert AccountNotActive(to);
+        }
         if (from != address(0)) {
             if (to == from) revert SelfTransfer(tokenId);
             if (isListed[tokenId] && msg.sender != marketplace) revert SlabIsListed(tokenId);

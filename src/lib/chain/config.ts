@@ -8,7 +8,7 @@
  */
 import { defineChain, formatUnits, parseUnits, type Address, type Chain, type Hash } from "viem";
 import { hardhat, polygonAmoy } from "viem/chains";
-import { accountRegistryAbi, deployments, mockUSDCAbi, slabMarketAbi, slabVaultAbi, tradeEscrowAbi } from "./generated";
+import { accountRegistryAbi, deployments, loanEscrowAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi, tradeEscrowAbi } from "./generated";
 
 export const CHAIN_KEY = process.env.NEXT_PUBLIC_CHAIN === "amoy" ? "amoy" : "local";
 export const IS_LOCAL = CHAIN_KEY === "local";
@@ -21,7 +21,7 @@ export const chain: Chain = defineChain({
   ...(rpcOverride ? { rpcUrls: { default: { http: [rpcOverride] } } } : {}),
 });
 
-type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; TradeEscrow: Address; SlabMarket?: Address; fromBlock: number };
+type Deployment = { MockUSDC: Address; AccountRegistry: Address; SlabVault: Address; TradeEscrow: Address; SlabMarket?: Address; LoanEscrow?: Address; fromBlock: number };
 const deployment = (deployments as Record<string, Deployment>)[String(chain.id)];
 
 /** False until `npm run deploy:local` (or deploy:amoy) has exported addresses for this chain. */
@@ -36,6 +36,7 @@ export const contracts = {
   slabVault: { address: deployment?.SlabVault ?? ZERO, abi: slabVaultAbi },
   tradeEscrow: { address: deployment?.TradeEscrow ?? ZERO, abi: tradeEscrowAbi },
   slabMarket: { address: deployment?.SlabMarket ?? ZERO, abi: slabMarketAbi },
+  loanEscrow: { address: deployment?.LoanEscrow ?? ZERO, abi: loanEscrowAbi },
 } as const;
 
 export type ContractName = keyof typeof contracts;
@@ -46,6 +47,7 @@ export const CONTRACT_LABEL: Record<ContractName, string> = {
   slabVault: "SlabVault",
   tradeEscrow: "TradeEscrow",
   slabMarket: "SlabMarket",
+  loanEscrow: "LoanEscrow",
 };
 
 /** Block the contracts were deployed at: event queries start here instead of at genesis. */
@@ -82,6 +84,9 @@ export const PENDING_CUSTODY = new Set<CustodyName>(["Posted to Pokechain", "At 
 /** TradeEscrow.Status */
 export const OFFER_STATUS = ["None", "Open", "Accepted", "Declined", "Withdrawn", "Countered"] as const;
 export type OfferStatusName = (typeof OFFER_STATUS)[number];
+/** LoanEscrow.Status */
+export const LOAN_STATUS = ["None", "Open", "Active", "Repaid", "Declined", "Withdrawn", "Defaulted"] as const;
+export type LoanStatusName = (typeof LOAN_STATUS)[number];
 
 /* ---------------- explorer links ---------------- */
 

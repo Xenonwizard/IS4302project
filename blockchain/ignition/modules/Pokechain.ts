@@ -32,9 +32,15 @@ export default buildModule("PokechainModule", (m) => {
   m.call(accounts, "setSlabMarket", [slabMarket]);
   m.call(slabVault, "setMarketplace", [slabMarket]);
 
+  // Fully funded loan offers lock cash here; accepted loans hold the slab until repayment or default.
+  const loanEscrow = m.contract("LoanEscrow", [accounts, slabVault, slabMarket]);
+  m.call(accounts, "setLoanEscrow", [loanEscrow]);
+  m.call(slabVault, "setLoanEscrow", [loanEscrow]);
+  m.call(slabMarket, "setLoanEscrow", [loanEscrow]);
+
   // Seed default test USDC balance for Hardhat test collectors (accounts #1 and #2)
   m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector1, id: "seed_collector1" });
   m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector2, id: "seed_collector2" });
 
-  return { usdc, accounts, slabVault, tradeEscrow, slabMarket };
+  return { usdc, accounts, slabVault, tradeEscrow, slabMarket, loanEscrow };
 });

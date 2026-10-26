@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight, HandCoins } from "lucide-react";
 import { useHandleAddress } from "@/lib/chain/trades";
+import { useLoanListing } from "@/lib/chain/loans";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { Listing } from "@/lib/types";
@@ -29,6 +30,9 @@ export function OfferModal({
   const router = useRouter();
   // A slab held by another wallet account is traded for in a chat, with slabs from both vaults.
   const { data: ownerAddress } = useHandleAddress(listing.owner);
+  const { data: loanListing } = useLoanListing(listing.tokenId);
+  // Never trust cached catalogue data for eligibility: the live SlabMarket listing is authoritative.
+  const loanEnabled = loanListing?.acceptsLoan === true;
   const collectorTrade = Boolean(user?.address && ownerAddress && ownerAddress.toLowerCase() !== user.address.toLowerCase());
 
   if (collectorTrade) {
@@ -41,20 +45,39 @@ export function OfferModal({
           </p>
           <dl className="grid grid-cols-2 gap-2 text-center text-[12px]">
             <Fact label="Seller asking price" value={listing.price > 0 ? usd(listing.price, { cents: true }) : "Not listed"} />
+            {loanEnabled ? <Fact label="Minimum loan" value={usd(loanListing.loanAsk, { cents: true })} /> : null}
           </dl>
-          <Button
-            size="lg"
-            className="w-full"
-            onClick={() => {
-              const id = openChat(listing);
-              if (!id) return;
-              onClose();
-              router.push(`/trades/${id}?trade=1`);
-            }}
-          >
-            <ArrowLeftRight size={16} />
-            Open chat and build a trade
-          </Button>
+          <div className={loanEnabled ? "grid grid-cols-2 gap-3" : "grid"}>
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={() => {
+                const id = openChat(listing);
+                if (!id) return;
+                onClose();
+                router.push(`/trades/${id}?trade=1`);
+              }}
+            >
+              <ArrowLeftRight size={16} />
+              Make a trade offer
+            </Button>
+            {loanEnabled ? (
+              <Button
+                size="lg"
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  const id = openChat(listing);
+                  if (!id) return;
+                  onClose();
+                  router.push(`/trades/${id}?loan=1`);
+                }}
+              >
+                <HandCoins size={16} />
+                Offer a loan
+              </Button>
+            ) : null}
+          </div>
         </div>
       </Modal>
     );

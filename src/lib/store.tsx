@@ -31,6 +31,7 @@ import type {
   ActivityEvent,
   ChatMessage,
   ChatTrade,
+  ChatLoan,
   Grader,
   LedgerEntry,
   Listing,
@@ -71,6 +72,8 @@ export interface Toast {
 /** Mutations layered over the static catalog. */
 export interface ListingOverride {
   price?: number;
+  acceptsLoan?: boolean;
+  loanAsk?: number;
   owner?: string;
   ownerAddress?: string;
   listedAt?: string;
@@ -152,7 +155,7 @@ interface StoreValue extends PersistShape {
   isWatched: (id: string) => boolean;
   /* slabs */
   submitSlab: (input: SlabSubmission, token?: SlabToken) => Listing | null;
-  listFromVault: (id: string, price: number) => void;
+  listFromVault: (id: string, price: number, acceptsLoan?: boolean, loanAsk?: number) => void;
   delist: (id: string) => void;
   buyNow: (listingId: string, txHash?: string) => boolean;
   requestShipping: (id: string) => void;
@@ -187,6 +190,8 @@ interface StoreValue extends PersistShape {
   openChat: (anchor: Listing) => string | null;
   /** puts an on-chain trade offer into the chat as a message from me */
   postTrade: (negotiationId: string, trade: ChatTrade) => void;
+  /** puts an on-chain loan offer into the chat as a message from me */
+  postLoan: (negotiationId: string, loan: ChatLoan) => void;
   /** a short note in the chat saying what just happened (accepted, withdrawn…) */
   chatNote: (negotiationId: string, text: string) => void;
   /** seller side: accept or decline the buyer's pending offer */
@@ -511,6 +516,8 @@ async function writeReply(chat: Negotiation, me: string, listing: Listing): Prom
           text:
             m.kind === "offer" && m.offer
               ? `[offer ${usd(bidValue(m.offer), { cents: true })}, ${offerMix(m.offer)}, ${m.status}]`
+              : m.kind === "loan" && m.loan
+                ? `[funded loan offer ${usd(m.loan.principal, { cents: true })} principal + ${usd(m.loan.interest, { cents: true })} interest, ${Math.round(m.loan.duration / 86400)} days]`
               : (m.text ?? ""),
         })),
       }),
@@ -717,6 +724,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return {
         ...listing,
         price: o.price ?? listing.price,
+        acceptsLoan: o.acceptsLoan ?? listing.acceptsLoan,
+        loanAsk: o.loanAsk ?? listing.loanAsk,
         owner: o.owner ?? listing.owner,
         ownerAddress: o.ownerAddress ?? listing.ownerAddress,
         listedAt: o.listedAt ?? listing.listedAt,
@@ -845,7 +854,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const listFromVault = useCallback(
-    (id: string, price: number) => {
+    (id: string, price: number, acceptsLoan = false, loanAsk = 0) => {
       const now = new Date().toISOString();
       setState((prev) => ({
         ...prev,
@@ -854,6 +863,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           [id]: {
             ...prev.overrides[id],
             price,
+            acceptsLoan,
+            loanAsk: acceptsLoan ? loanAsk : 0,
             delisted: false,
             listedAt: now,
           },
@@ -1220,6 +1231,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           newOverrides[a.listing.id] = {
             ...newOverrides[a.listing.id],
             price: a.price,
+            acceptsLoan: a.listing.acceptsLoan,
+            loanAsk: a.listing.loanAsk,
             owner: a.seller || newOverrides[a.listing.id]?.owner,
             delisted: false,
           };
@@ -1227,12 +1240,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             newOverrides[`token-${a.listing.tokenId}`] = {
               ...newOverrides[`token-${a.listing.tokenId}`],
               price: a.price,
+              acceptsLoan: a.listing.acceptsLoan,
+              loanAsk: a.listing.loanAsk,
               owner: a.seller || newOverrides[`token-${a.listing.tokenId}`]?.owner,
               delisted: false,
             };
             newOverrides[a.listing.tokenId] = {
               ...newOverrides[a.listing.tokenId],
               price: a.price,
+              acceptsLoan: a.listing.acceptsLoan,
+              loanAsk: a.listing.loanAsk,
               owner: a.seller || newOverrides[a.listing.tokenId]?.owner,
               delisted: false,
             };
@@ -1241,6 +1258,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 newOverrides[s.id] = {
                   ...newOverrides[s.id],
                   price: a.price,
+                  acceptsLoan: a.listing.acceptsLoan,
+                  loanAsk: a.listing.loanAsk,
                   owner: a.seller || newOverrides[s.id]?.owner,
                   delisted: false,
                 };
@@ -1503,6 +1522,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const postTrade = useCallback(
     (negId: string, trade: ChatTrade) =>
       appendMessage(negId, (me) => ({ id: messageId(), from: me, at: new Date().toISOString(), kind: "trade", trade })),
+    [appendMessage],
+  );
+
+  const postLoan = useCallback(
+    (negId: string, loan: ChatLoan) =>
+      appendMessage(negId, (me) => ({ id: messageId(), from: me, at: new Date().toISOString(), kind: "loan", loan })),
     [appendMessage],
   );
 
@@ -1907,6 +1932,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     sendMessage,
     openChat,
     postTrade,
+    postLoan,
     chatNote,
     respondToOffer,
     withdrawOffer,

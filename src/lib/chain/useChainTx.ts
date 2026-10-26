@@ -66,6 +66,7 @@ const ERROR_TEXT: Record<string, string> = {
   NotVaulted: "Only slabs with confirmed vault custody can be traded.",
   NotSeller: "Only the seller can cancel this listing.",
   InvalidPrice: "Listing price must be greater than zero.",
+  InvalidLoanAsk: "The minimum loan must be above zero and below the sale price.",
   ERC20InsufficientAllowance: "The PokeCredits allowance is too low.",
   OffersStillOpen: "Withdraw your open trade offers before closing the account.",
   SelfTrade: "You can't trade with yourself.",
@@ -78,6 +79,18 @@ const ERROR_TEXT: Record<string, string> = {
   OfferNotOpen: "That offer is no longer open.",
   NotTaker: "Only the collector the offer was made to can do that.",
   NotMaker: "Only the collector who made the offer can withdraw it.",
+  LoanNotAccepted: "This seller is not accepting loans on the slab.",
+  PrincipalBelowAsk: "The loan amount is below the seller's minimum.",
+  PrincipalMustBeBelowPrice: "The loan amount must be below the listed sale price.",
+  InvalidDuration: "Choose a repayment period from 1 to 365 days.",
+  SelfLoan: "You cannot make a loan offer on your own slab.",
+  LoanNotActive: "This loan is no longer active.",
+  NotBorrower: "Only the borrower can do that.",
+  NotLender: "Only the lender can do that.",
+  DeadlinePassed: "The repayment deadline has passed.",
+  DeadlineNotPassed: "The lender can claim the collateral only after the deadline.",
+  TokenAlreadyCollateral: "This slab already secures an active loan.",
+  LoansStillOpen: "Settle or withdraw every loan before closing the account.",
 };
 
 function errorNameFromAnyAbi(raw: `0x${string}` | undefined): string | undefined {

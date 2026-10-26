@@ -17,6 +17,10 @@ interface ITradeEscrowOffers {
     function openOffers(address maker) external view returns (uint256);
 }
 
+interface ILoanEscrowCommitments {
+    function commitments(address participant) external view returns (uint256);
+}
+
 /**
  * @title AccountRegistry
  * @notice Account onboarding and offboarding for Pokechain.
@@ -62,6 +66,8 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     address public tradeEscrow;
     /// @notice The SlabMarket contract, which may move balances for marketplace purchases.
     address public slabMarket;
+    /// @notice The LoanEscrow contract, which locks principal and settles secured loans.
+    address public loanEscrow;
 
     mapping(address => Account) private _accounts;
     /// @notice keccak256(handle) => the address that claimed it. Handles are never released.
@@ -78,6 +84,7 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     event SlabVaultSet(address slabVault);
     event TradeEscrowSet(address tradeEscrow);
     event SlabMarketSet(address slabMarket);
+    event LoanEscrowSet(address loanEscrow);
     event BalanceMoved(address indexed from, address indexed to, uint256 amount);
 
     error InvalidHandle();
@@ -90,8 +97,10 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     error SlabVaultAlreadySet();
     error TradeEscrowAlreadySet();
     error SlabMarketAlreadySet();
+    error LoanEscrowAlreadySet();
     error OnlyBalanceMover();
     error OffersStillOpen(uint256 count);
+    error LoansStillOpen(uint256 count);
 
     constructor(IERC20 usdc_) Ownable(msg.sender) {
         usdc = usdc_;
@@ -118,13 +127,24 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         emit SlabMarketSet(market);
     }
 
+    /// @notice One-time wiring to LoanEscrow.
+    function setLoanEscrow(address escrow) external onlyOwner {
+        if (loanEscrow != address(0)) revert LoanEscrowAlreadySet();
+        loanEscrow = escrow;
+        emit LoanEscrowSet(escrow);
+    }
+
     /**
      * @notice Moves custody balance from one holder to another without any USDC leaving this
      *         contract, so `totalCustody` is unchanged. TradeEscrow calls it inside a transaction
      *         the paying side signed, and SlabMarket calls it for fixed-price purchases.
      */
     function moveBalance(address from, address to, uint256 amount) external {
-        if ((msg.sender != tradeEscrow || tradeEscrow == address(0)) && (msg.sender != slabMarket || slabMarket == address(0))) {
+        if (
+            (msg.sender != tradeEscrow || tradeEscrow == address(0))
+                && (msg.sender != slabMarket || slabMarket == address(0))
+                && (msg.sender != loanEscrow || loanEscrow == address(0))
+        ) {
             revert OnlyBalanceMover();
         }
         uint256 available = balanceOf[from];
@@ -194,6 +214,8 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         if (vaulted > 0) revert SlabsStillVaulted(vaulted);
         uint256 open = tradeEscrow == address(0) ? 0 : ITradeEscrowOffers(tradeEscrow).openOffers(msg.sender);
         if (open > 0) revert OffersStillOpen(open);
+        uint256 loans = loanEscrow == address(0) ? 0 : ILoanEscrowCommitments(loanEscrow).commitments(msg.sender);
+        if (loans > 0) revert LoansStillOpen(loans);
 
         a.status = Status.Closed;
         a.closedAt = uint64(block.timestamp);

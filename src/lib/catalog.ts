@@ -198,6 +198,8 @@ export function buildOnChainListing(input: {
   ownerAddress?: string;
   listedAt?: string;
   contract?: string;
+  acceptsLoan?: boolean;
+  loanAsk?: number;
 }): Listing {
   const id = `token-${input.tokenId}`;
   // An unlisted slab has no price until its owner chooses one.
@@ -241,6 +243,8 @@ export function buildOnChainListing(input: {
     language: "English",
     variant: "Holo",
     price,
+    acceptsLoan: input.acceptsLoan,
+    loanAsk: input.loanAsk,
     owner: input.owner,
     ownerAddress: input.ownerAddress || "",
     certNumber: input.certNumber,

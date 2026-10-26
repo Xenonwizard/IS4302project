@@ -29,6 +29,8 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         address seller;
         uint256 price;
         uint64 listedAt;
+        bool acceptsLoan;
+        uint256 loanAsk;
     }
 
     struct SaleRecord {
@@ -46,6 +48,8 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         string sellerHandle;
         uint256 price;
         uint64 listedAt;
+        bool acceptsLoan;
+        uint256 loanAsk;
         string grader;
         string certNumber;
         string title;
@@ -55,6 +59,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     SlabVault public immutable vault;
     IERC20 public immutable usdc;
     AccountRegistry public immutable accounts;
+    address public loanEscrow;
 
     /// @notice tokenId => active listing
     mapping(uint256 => Listing) public listings;
@@ -64,6 +69,8 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     mapping(uint256 => uint256[]) private _tokenSaleIndices;
 
     event CardListed(uint256 indexed tokenId, address indexed seller, uint256 price, uint64 listedAt);
+    event LoanTermsSet(uint256 indexed tokenId, bool acceptsLoan, uint256 loanAsk);
+    event LoanEscrowSet(address indexed loanEscrow);
     event ListingCancelled(uint256 indexed tokenId, address indexed seller, uint64 cancelledAt);
     event CardPurchased(
         uint256 indexed tokenId,
@@ -83,6 +90,9 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     error NotVaulted(uint256 tokenId, SlabVault.Custody custody);
     error TokenRestricted(uint256 tokenId);
     error SelfPurchase(uint256 tokenId);
+    error InvalidLoanAsk();
+    error LoanEscrowAlreadySet();
+    error OnlyLoanEscrow();
 
     constructor(SlabVault vault_, IERC20 usdc_, AccountRegistry accounts_) Ownable(msg.sender) {
         vault = vault_;
@@ -98,6 +108,20 @@ contract SlabMarket is Ownable, ReentrancyGuard {
      *      Applies the Rule 5 sale restriction to the token in SlabVault.
      */
     function list(uint256 tokenId, uint256 price) external {
+        _list(tokenId, price, false, 0);
+    }
+
+    /**
+     * @notice Lists a slab for sale and opts into secured loan offers.
+     * @param loanAsk Lowest principal the owner is willing to consider. It must stay below
+     *        the sale price so a loan can never masquerade as a purchase.
+     */
+    function listWithLoan(uint256 tokenId, uint256 price, uint256 loanAsk) external {
+        if (loanAsk == 0 || loanAsk >= price) revert InvalidLoanAsk();
+        _list(tokenId, price, true, loanAsk);
+    }
+
+    function _list(uint256 tokenId, uint256 price, bool acceptsLoan, uint256 loanAsk) private {
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
         if (vault.ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         if (price == 0) revert InvalidPrice();
@@ -112,7 +136,9 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         listings[tokenId] = Listing({
             seller: msg.sender,
             price: price,
-            listedAt: uint64(block.timestamp)
+            listedAt: uint64(block.timestamp),
+            acceptsLoan: acceptsLoan,
+            loanAsk: loanAsk
         });
 
         // Lock the token from ordinary transfer and redemption while listed (Rule 5).
@@ -121,6 +147,14 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         }
 
         emit CardListed(tokenId, msg.sender, price, uint64(block.timestamp));
+        emit LoanTermsSet(tokenId, acceptsLoan, loanAsk);
+    }
+
+    /// @notice One-time wiring to the collateral escrow.
+    function setLoanEscrow(address escrow) external onlyOwner {
+        if (loanEscrow != address(0)) revert LoanEscrowAlreadySet();
+        loanEscrow = escrow;
+        emit LoanEscrowSet(escrow);
     }
 
     /**
@@ -135,6 +169,21 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         vault.setListingRestriction(tokenId, false);
 
         emit ListingCancelled(tokenId, msg.sender, uint64(block.timestamp));
+    }
+
+    /**
+     * @notice Releases a listing immediately before LoanEscrow takes custody of its slab.
+     *         This is deliberately unavailable to collectors and other contracts.
+     */
+    function releaseForLoan(uint256 tokenId, address seller) external {
+        if (msg.sender != loanEscrow || loanEscrow == address(0)) revert OnlyLoanEscrow();
+        Listing memory l = listings[tokenId];
+        if (l.seller == address(0)) revert NotListed(tokenId);
+        if (l.seller != seller) revert NotSeller(tokenId);
+
+        delete listings[tokenId];
+        vault.setListingRestriction(tokenId, false);
+        emit ListingCancelled(tokenId, seller, uint64(block.timestamp));
     }
 
     /* ----------------------------- buying actions ----------------------------- */
@@ -235,6 +284,8 @@ contract SlabMarket is Ownable, ReentrancyGuard {
                     sellerHandle: handle,
                     price: listings[i].price,
                     listedAt: listings[i].listedAt,
+                    acceptsLoan: listings[i].acceptsLoan,
+                    loanAsk: listings[i].loanAsk,
                     grader: s.grader,
                     certNumber: s.certNumber,
                     title: s.title,
