@@ -124,6 +124,8 @@ export interface VaultItem {
 export interface VaultLossReport {
   reportedAt: string;
   details: string;
+  /** False while this is only a private vaulting-delay report; true once published to the Lost registry. */
+  published?: boolean;
   /** Optional reward offered by the owner to help locate the slab. */
   bounty?: {
     amount: number;

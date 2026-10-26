@@ -14,7 +14,6 @@ import { useEscrowedByMe } from "@/lib/chain/trades";
 import { useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
-import { useSlabChain } from "@/lib/chain/useSlabChain";
 import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { RedeemModal } from "../chain/RedeemModal";
 import { TransferModal } from "../chain/TransferModal";
@@ -50,10 +49,12 @@ export function VaultView() {
     cancelVaultLost,
     setVaultBounty,
     cancelVaultBounty,
+    withdrawLostForInsurance,
+    pendingLossDecisions,
+    resolveLossDecision,
     pushToast,
   } = useStore();
   const { cancelListing } = useMarketChain();
-  const { reportLost } = useSlabChain();
   const [delistingId, setDelistingId] = useState<string | null>(null);
   const [gridSize, setGridSize] = useState<"medium" | "small">("medium");
 
@@ -81,7 +82,14 @@ export function VaultView() {
   const [bountyTarget, setBountyTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [missingDetails, setMissingDetails] = useState("");
   const [missingBounty, setMissingBounty] = useState("");
+  const [awaitingReportTarget, setAwaitingReportTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  const [awaitingReportDetails, setAwaitingReportDetails] = useState("");
+  const [reportingAwaiting, setReportingAwaiting] = useState(false);
   const [reportingMissing, setReportingMissing] = useState(false);
+  const [decisionTarget, setDecisionTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  const [decisionChoice, setDecisionChoice] = useState<"insurance" | "bounty" | null>(null);
+  const [decisionBounty, setDecisionBounty] = useState("");
+  const [insuranceWithdrawTarget, setInsuranceWithdrawTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   // Slabs locked in one of my open trade offers (held by TradeEscrow): tokenId → offerId
   const { data: escrowed = {} } = useEscrowedByMe(user?.address as Address | undefined);
 
@@ -96,6 +104,25 @@ export function VaultView() {
         .filter((x): x is { entry: VaultItem; listing: Listing } => Boolean(x)),
     [vault, resolve, user?.address],
   );
+  const hasPendingDecision = (listing: Listing) => Object.keys(pendingLossDecisions).some(
+    (id) => id === listing.id || id === listing.tokenId || id === `token-${listing.tokenId}`,
+  );
+
+  const submitLossDecision = () => {
+    if (!decisionTarget || !decisionChoice) return;
+    const decisionId = Object.keys(pendingLossDecisions).find(
+      (id) => id === decisionTarget.listing.id || id === decisionTarget.listing.tokenId || id === `token-${decisionTarget.listing.tokenId}`,
+    ) ?? decisionTarget.listing.id;
+    if (decisionChoice === "bounty") {
+      const amount = Number(decisionBounty);
+      if (Number.isFinite(amount) && amount > 0) setVaultBounty(decisionId, amount);
+    }
+    resolveLossDecision(decisionId);
+    setDecisionTarget(null);
+    setDecisionChoice(null);
+    setDecisionBounty("");
+    pushToast({ title: decisionChoice === "insurance" ? "Insurance claim submitted" : "Lost-card bounty published", body: decisionChoice === "insurance" ? "The vault service provider will review your claim." : "Your card is now visible on the Lost page.", tone: "success" });
+  };
   const items = allItems.filter((i) => i.entry.status !== "Withdrawn");
   const awaiting = items.filter((i) => i.entry.status === "Awaiting vaulting");
   const withdrawn = allItems.filter((i) => i.entry.status === "Withdrawn");
@@ -111,12 +138,18 @@ export function VaultView() {
     withdrawn: withdrawn.length,
   };
 
-  const handleReportLost = async (tokenId: string) => {
+  const handleReportLost = async (listingId: string, details: string) => {
+    setReportingAwaiting(true);
     try {
-      await reportLost(tokenId, "Reported lost from Awaiting vault");
-      pushToast({ title: "Lost slab reported", body: "The vault team has been notified.", tone: "success" });
+      const reportDetails = details.trim() || "Card has been awaiting vaulting longer than expected";
+      reportVaultLost(listingId, reportDetails);
+      pushToast({ title: "Vaulting delay reported", body: "The NFT remains visible while the vault team investigates.", tone: "success" });
+      setAwaitingReportTarget(null);
+      setAwaitingReportDetails("");
     } catch (err) {
       pushToast({ title: "Could not report slab", body: (err as Error).message, tone: "error" });
+    } finally {
+      setReportingAwaiting(false);
     }
   };
 
@@ -255,11 +288,14 @@ export function VaultView() {
                       onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                       onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
-                      onReportLost={entry.token?.tokenId ? () => void handleReportLost(entry.token!.tokenId) : undefined}
+                      onReportLost={entry.token?.tokenId ? () => setAwaitingReportTarget({ entry, listing }) : undefined}
+                      decisionPending={hasPendingDecision(listing)}
+                      onReviewDecision={() => setDecisionTarget({ entry, listing })}
                       loss={vaultLosses[listing.id]}
                       onCancelMissing={() => cancelVaultLost(listing.id)}
                       onAddBounty={() => setBountyTarget({ entry, listing })}
                       onCancelBounty={() => cancelVaultBounty(listing.id)}
+                      onWithdrawInsurance={() => setInsuranceWithdrawTarget({ entry, listing })}
                     />
                   </div>
                 );
@@ -288,7 +324,17 @@ export function VaultView() {
               gridSize === "small" ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
             )}>
               {awaiting.map(({ entry, listing }) => (
-                <AwaitingSlabCard key={listing.id} entry={entry} listing={listing} onReportLost={entry.token?.tokenId ? () => void handleReportLost(entry.token!.tokenId) : undefined} />
+                <AwaitingSlabCard
+                  key={listing.id}
+                  entry={entry}
+                  listing={listing}
+                  loss={vaultLosses[listing.id]}
+                  decisionPending={hasPendingDecision(listing)}
+                  onReviewDecision={() => setDecisionTarget({ entry, listing })}
+                  onReportLost={() => setAwaitingReportTarget({ entry, listing })}
+                  onManageBounty={() => setBountyTarget({ entry, listing })}
+                  onWithdrawInsurance={() => setInsuranceWithdrawTarget({ entry, listing })}
+                />
               ))}
             </div>
           ) : (
@@ -373,6 +419,96 @@ export function VaultView() {
 
       <RedeemModal target={redeemTarget} onClose={() => setRedeemTarget(null)} />
       <TransferModal target={transferTarget} onClose={() => setTransferTarget(null)} />
+
+      <Modal open={Boolean(decisionTarget)} onClose={() => { setDecisionTarget(null); setDecisionChoice(null); }} title="Investigation complete" width="max-w-sm">
+        {decisionTarget ? (
+          <div className="space-y-4 p-5">
+            <p className="text-[13px] leading-relaxed text-muted">The vault team confirmed that <span className="font-semibold text-white">{decisionTarget.listing.title}</span> was lost while being processed. How would you like to proceed?</p>
+            <div className="grid gap-2">
+              <button className={`rounded-xl border p-3 text-left ${decisionChoice === "insurance" ? "border-accent bg-accent/10" : "border-hairline"}`} onClick={() => setDecisionChoice("insurance")}>
+                <p className="text-[13px] font-bold">Claim vault-service insurance</p>
+                <p className="mt-1 text-[11px] text-muted">Request settlement directly from the service provider.</p>
+              </button>
+              <button className={`rounded-xl border p-3 text-left ${decisionChoice === "bounty" ? "border-accent bg-accent/10" : "border-hairline"}`} onClick={() => setDecisionChoice("bounty")}>
+                <p className="text-[13px] font-bold">Publish a lost-card bounty</p>
+                <p className="mt-1 text-[11px] text-muted">Keep searching and offer PokeCredits if someone returns it.</p>
+              </button>
+            </div>
+            {decisionChoice === "bounty" ? (
+              <Field label="Recovery bounty (PokeCredits)" hint="Optional">
+                <input className={inputClass} inputMode="decimal" value={decisionBounty} onChange={(event) => setDecisionBounty(event.target.value.replace(/[^\d.]/g, ""))} placeholder="e.g. 150" />
+              </Field>
+            ) : null}
+            <Button className="w-full" onClick={submitLossDecision} disabled={!decisionChoice}>{decisionChoice === "insurance" ? "Submit insurance claim" : decisionChoice === "bounty" ? "Publish lost card" : "Choose an outcome"}</Button>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={Boolean(insuranceWithdrawTarget)} onClose={() => setInsuranceWithdrawTarget(null)} title="Withdraw lost-card listing" width="max-w-sm">
+        {insuranceWithdrawTarget ? (
+          <div className="space-y-4 p-5">
+            <p className="text-[13px] leading-relaxed text-muted">
+              Are you sure you want to withdraw <span className="font-semibold text-white">{insuranceWithdrawTarget.listing.title}</span> from the Lost registry and your active Vault?
+            </p>
+            <div className="rounded-xl border border-warn/25 bg-warn/10 p-3 text-[12px] leading-relaxed text-muted">
+              Its public bounty will be removed, your insurance claim will be handed to the vault provider off-chain, and the minted NFT will be retired from the active app.
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setInsuranceWithdrawTarget(null)}>Keep card</Button>
+              <Button
+                variant="danger"
+                className="flex-1"
+                onClick={() => {
+                  withdrawLostForInsurance(insuranceWithdrawTarget.listing.id);
+                  setInsuranceWithdrawTarget(null);
+                }}
+              >
+                Withdraw and claim insurance
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={Boolean(awaitingReportTarget)}
+        onClose={() => {
+          if (reportingAwaiting) return;
+          setAwaitingReportTarget(null);
+          setAwaitingReportDetails("");
+        }}
+        title="Report vaulting delay"
+        width="max-w-sm"
+      >
+        {awaitingReportTarget ? (
+          <div className="space-y-4 p-5">
+            <p className="text-[13px] leading-relaxed text-muted">
+              Tell us what happened with <span className="font-semibold text-white">{awaitingReportTarget.listing.title}</span>. Use this when the card has been awaiting vaulting longer than expected.
+            </p>
+            <p className="text-[12px] text-dim">Submitted <TimeAgo value={awaitingReportTarget.entry.acquiredAt} /></p>
+            <Field label="What happened?" hint="Optional">
+              <textarea
+                className={`${inputClass} h-24 resize-none py-2.5`}
+                value={awaitingReportDetails}
+                onChange={(event) => setAwaitingReportDetails(event.target.value)}
+                placeholder="The card has not been vaulted yet…"
+                disabled={reportingAwaiting}
+              />
+            </Field>
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setAwaitingReportTarget(null)} disabled={reportingAwaiting}>Cancel</Button>
+              <Button
+                variant="danger"
+                className="flex-1"
+                onClick={() => void handleReportLost(awaitingReportTarget.listing.id, awaitingReportDetails)}
+                disabled={reportingAwaiting}
+              >
+                {reportingAwaiting ? "Reporting..." : "Submit report"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={Boolean(missingTarget)}
@@ -537,10 +673,13 @@ function SlabCard({
   onTransfer,
   inOffer,
   onReportLost,
+  decisionPending,
+  onReviewDecision,
   loss,
   onCancelMissing,
   onAddBounty,
   onCancelBounty,
+  onWithdrawInsurance,
 }: {
   entry: VaultItem;
   listing: Listing;
@@ -557,11 +696,14 @@ function SlabCard({
   onCancelMissing: () => void;
   onAddBounty: () => void;
   onCancelBounty: () => void;
+  onWithdrawInsurance: () => void;
   onReportLost?: () => void;
+  decisionPending?: boolean;
+  onReviewDecision?: () => void;
 }) {
   const small = size === "small";
   if (entry.status === "Awaiting vaulting") {
-    return <AwaitingSlabCard entry={entry} listing={listing} onReportLost={onReportLost} />;
+    return <AwaitingSlabCard entry={entry} listing={listing} loss={loss} onReportLost={onReportLost} decisionPending={decisionPending} onReviewDecision={onReviewDecision} onManageBounty={onAddBounty} onWithdrawInsurance={onWithdrawInsurance} />;
   }
   if (inOffer) {
     return (
@@ -626,6 +768,7 @@ function SlabCard({
             <div className={clsx("grid", small ? "gap-1" : "gap-1.5")}>
               <Button size="sm" variant="secondary" onClick={onAddBounty}>{loss.bounty ? "Edit bounty" : "Attach bounty"}</Button>
               {loss.bounty ? <Button size="sm" variant="outline" onClick={onCancelBounty}>Cancel bounty</Button> : null}
+              {loss.published ? <Button size="sm" variant="outline" onClick={onWithdrawInsurance}>Withdraw & claim insurance</Button> : null}
               <Button size="sm" variant="outline" onClick={onCancelMissing}>Cancel lost status</Button>
             </div>
           </div>
@@ -663,11 +806,21 @@ function SlabCard({
 function AwaitingSlabCard({
   entry,
   listing,
+  loss,
   onReportLost,
+  decisionPending,
+  onReviewDecision,
+  onManageBounty,
+  onWithdrawInsurance,
 }: {
   entry: VaultItem;
   listing: Listing;
+  loss?: VaultLossReport;
   onReportLost?: () => void;
+  decisionPending?: boolean;
+  onReviewDecision?: () => void;
+  onManageBounty?: () => void;
+  onWithdrawInsurance?: () => void;
 }) {
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
@@ -680,9 +833,25 @@ function AwaitingSlabCard({
         <p className="text-[11px] text-muted">
           Submitted <TimeAgo value={entry.acquiredAt} />
         </p>
-        {onReportLost ? (
+        <p className="text-[11px] leading-relaxed text-dim">If vaulting is taking longer than expected, let the vault team know.</p>
+        {decisionPending && onReviewDecision ? (
+          <Button size="sm" className="w-full" onClick={onReviewDecision}>
+            Pokechain replied — review
+          </Button>
+        ) : loss?.published ? (
+          <div className="grid gap-1.5">
+            <Button size="sm" variant="secondary" className="w-full" onClick={onManageBounty}>
+              {loss.bounty ? "Edit bounty" : "Add bounty"}
+            </Button>
+            <Button size="sm" variant="outline" className="w-full" onClick={onWithdrawInsurance}>
+              Withdraw & claim insurance
+            </Button>
+          </div>
+        ) : loss ? (
+          <Badge tone="warn">Vaulting delay reported</Badge>
+        ) : onReportLost ? (
           <Button size="sm" variant="outline" className="w-full" onClick={onReportLost}>
-            Report lost
+            Report vaulting delay
           </Button>
         ) : null}
       </div>

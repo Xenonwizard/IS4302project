@@ -21,7 +21,7 @@ const STEP_COPY: Record<Step, { title: string; expectedStatus: number; path: str
 export function IntakeSimulator() {
   const client = usePublicClient();
   const queryClient = useQueryClient();
-  const { pushToast, user } = useStore();
+  const { pushToast, user, slabs, vault, vaultLosses, completeLossInvestigation } = useStore();
   const { submit } = useSlabChain();
   const [certNumber, setCertNumber] = useState("");
   const [busy, setBusy] = useState<Step | null>(null);
@@ -96,6 +96,19 @@ export function IntakeSimulator() {
   };
 
   const activeSubmission = submission && submission.status !== 0 ? submission : null;
+  const lossTokenId = activeSubmission?.tokenId ? String(activeSubmission.tokenId) : null;
+  const lossListing = lossTokenId ? slabs.find((slab) => slab.tokenId === lossTokenId) : undefined;
+  const lossVaultItem = lossTokenId ? vault.find((item) => item.token?.tokenId === lossTokenId) : undefined;
+  const reportedLossId = lossTokenId
+    ? Object.keys(vaultLosses).find((id) => id === lossTokenId || id === `token-${lossTokenId}` || id === lossListing?.id || id === lossVaultItem?.listingId)
+    : undefined;
+  const simulateInvestigation = () => {
+    if (!reportedLossId) {
+      pushToast({ title: "Report required", body: "Submit a vaulting-delay report from your Vault before running the investigation simulation.", tone: "error" });
+      return;
+    }
+    completeLossInvestigation(reportedLossId);
+  };
   const unknown = !activeSubmission;
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
@@ -159,6 +172,15 @@ export function IntakeSimulator() {
           );
         })}
       </div>
+
+      {activeSubmission && reportedLossId ? (
+        <section className="mt-6 rounded-card border border-warn/25 bg-warn/5 p-4">
+          <p className="text-[15px] font-bold">Investigation simulator</p>
+          <p className="mt-1 text-[12px] leading-relaxed text-muted">A vaulting-delay report has been submitted. Simulate the vault team completing its investigation.</p>
+          <Button className="mt-3" variant="secondary" onClick={simulateInvestigation}>Simulate investigation</Button>
+        </section>
+      ) : null}
+
     </div>
   );
 }

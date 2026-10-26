@@ -100,6 +100,10 @@ interface PersistShape {
   lostReports: LostReport[];
   /** Missing-from-vault reports, keyed by listing id. */
   vaultLosses: Record<string, VaultLossReport>;
+  /** Investigation outcomes waiting for the collector to choose insurance or bounty. */
+  pendingLossDecisions: Record<string, { createdAt: string }>;
+  /** Tokens removed from the active app after an off-chain insurance settlement. */
+  insuranceBurnedTokenIds: string[];
 }
 
 const INITIAL_DEMO_LOSSES: Record<string, VaultLossReport> = {
@@ -132,6 +136,8 @@ const EMPTY: PersistShape = {
   ledger: [],
   lostReports: [],
   vaultLosses: INITIAL_DEMO_LOSSES,
+  pendingLossDecisions: {},
+  insuranceBurnedTokenIds: [],
 };
 
 /** A slab token the connected wallet owns, as SlabVault reports it. */
@@ -224,7 +230,10 @@ interface StoreValue extends PersistShape {
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
   /* vault missing reports and their optional bounties */
   reportVaultLost: (listingId: string, details: string) => void;
+  completeLossInvestigation: (listingId: string) => void;
+  resolveLossDecision: (listingId: string) => void;
   cancelVaultLost: (listingId: string) => void;
+  withdrawLostForInsurance: (listingId: string) => void;
   setVaultBounty: (listingId: string, amount: number) => void;
   cancelVaultBounty: (listingId: string) => void;
   addComment: (listingId: string, text: string) => void;
@@ -627,6 +636,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       /* storage can be unavailable (private mode) — the app still works */
     }
   }, [state, ready]);
+
+  useEffect(() => {
+    const syncAcrossTabs = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY || !event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue) as PersistShape;
+        const next = { ...EMPTY, ...parsed };
+        next.slabs.forEach(registerListing);
+        setState((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+      } catch {
+        /* Ignore malformed or inaccessible cross-tab storage updates. */
+      }
+    };
+    window.addEventListener("storage", syncAcrossTabs);
+    return () => window.removeEventListener("storage", syncAcrossTabs);
+  }, []);
 
   const recentToasts = useRef<Map<string, number>>(new Map());
 
@@ -1092,10 +1117,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const snapshot = latest.current;
       const me = snapshot.user;
       if (!me?.address) return;
+      const insuranceBurned = new Set(snapshot.insuranceBurnedTokenIds);
+      const visibleOwned = owned.filter((item) => !insuranceBurned.has(item.token.tokenId));
       // Only drop a token when ownerOf positively names someone else, so a read that started
       // before a fresh mint can never make that slab vanish.
       const others = new Set(ownedByOthers);
-      const ownedMap = new Map(owned.map((o) => [o.token.tokenId, o]));
+      const ownedMap = new Map(visibleOwned.map((o) => [o.token.tokenId, o]));
       const known = new Set(snapshot.vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])));
       const gone = snapshot.vault.filter((v) => v.token && others.has(v.token.tokenId));
       // Saved from an earlier chain (restarted since): the token id now belongs to a different cert.
@@ -1105,7 +1132,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return Boolean(o) && (!l || l.grader !== o!.grader || l.certNumber !== o!.certNumber);
       });
       const staleTokens = new Set(stale.map((v) => v.token!.tokenId));
-      const arrived = owned.filter((o) => !known.has(o.token.tokenId) || staleTokens.has(o.token.tokenId));
+      const arrived = visibleOwned.filter((o) => !known.has(o.token.tokenId) || staleTokens.has(o.token.tokenId));
 
       let updatedExisting = false;
       for (const v of snapshot.vault) {
@@ -1922,18 +1949,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
           vaultLosses: {
             ...prev.vaultLosses,
-            [listingId]: { reportedAt: new Date().toISOString(), details },
+            [listingId]: { reportedAt: new Date().toISOString(), details, published: false },
           },
         };
       });
-      pushToast({
-        title: "Card reported lost",
-        body: "It is no longer available for sale. You can add or cancel a bounty from its vault card.",
-        tone: "success",
-      });
     },
-    [pushToast],
+    [],
   );
+
+  const completeLossInvestigation = useCallback((listingId: string) => {
+    setState((prev) => ({
+      ...prev,
+      pendingLossDecisions: {
+        ...prev.pendingLossDecisions,
+        [listingId]: { createdAt: new Date().toISOString() },
+      },
+    }));
+    pushToast({ title: "Investigation complete", body: "A decision is waiting in your Vault.", tone: "success" });
+  }, [pushToast]);
+
+  const resolveLossDecision = useCallback((listingId: string) => {
+    setState((prev) => {
+      const pending = { ...prev.pendingLossDecisions };
+      delete pending[listingId];
+      return { ...prev, pendingLossDecisions: pending };
+    });
+  }, []);
 
   const cancelVaultLost = useCallback(
     (listingId: string) => {
@@ -1948,6 +1989,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
+  const withdrawLostForInsurance = useCallback((listingId: string) => {
+    setState((prev) => {
+      const item = prev.vault.find((vaultItem) => vaultItem.listingId === listingId);
+      const tokenId = item?.token?.tokenId ?? prev.slabs.find((slab) => slab.id === listingId)?.tokenId;
+      const vaultLosses = { ...prev.vaultLosses };
+      const pendingLossDecisions = { ...prev.pendingLossDecisions };
+      delete vaultLosses[listingId];
+      delete pendingLossDecisions[listingId];
+      return {
+        ...prev,
+        vault: prev.vault.filter((vaultItem) => vaultItem.listingId !== listingId),
+        slabs: prev.slabs.filter((slab) => slab.id !== listingId),
+        vaultLosses,
+        pendingLossDecisions,
+        insuranceBurnedTokenIds: tokenId && !prev.insuranceBurnedTokenIds.includes(tokenId)
+          ? [...prev.insuranceBurnedTokenIds, tokenId]
+          : prev.insuranceBurnedTokenIds,
+      };
+    });
+    pushToast({
+      title: "Lost-card listing withdrawn",
+      body: "The public bounty was removed and your insurance claim was handed to the vault provider off-chain.",
+      tone: "success",
+    });
+  }, [pushToast]);
+
   const setVaultBounty = useCallback(
     (listingId: string, amount: number) => {
       if (!Number.isFinite(amount) || amount <= 0) return;
@@ -1960,6 +2027,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...prev.vaultLosses,
             [listingId]: {
               ...report,
+              published: true,
               bounty: { amount: cents(amount), addedAt: new Date().toISOString() },
             },
           },
@@ -2061,7 +2129,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     withdrawOffer,
     fileLostReport,
     reportVaultLost,
+    completeLossInvestigation,
+    resolveLossDecision,
     cancelVaultLost,
+    withdrawLostForInsurance,
     setVaultBounty,
     cancelVaultBounty,
     addComment,
@@ -2118,6 +2189,7 @@ export function useLostSlabs(): LostSlabItem[] {
 
     // 1. Vault losses reported by collectors
     for (const [listingId, loss] of Object.entries(vaultLosses)) {
+      if (loss.published === false) continue;
       const found =
         slabs.find((s) => s.id === listingId || (s.tokenId && `token-${s.tokenId}` === listingId)) ||
         getListing(listingId) ||

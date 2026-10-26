@@ -7,7 +7,7 @@ import { useState } from "react";
 import { usd } from "@/lib/format";
 import { useStore, type LostSlabItem } from "@/lib/store";
 import { Slab } from "../slab/Slab";
-import { Badge, Button, TimeAgo } from "../ui/primitives";
+import { Badge, Button, Modal, TimeAgo } from "../ui/primitives";
 
 export function LostCard({
   item,
@@ -19,11 +19,12 @@ export function LostCard({
   onManageBounty?: (listingId: string) => void;
 }) {
   const { listing, loss } = item;
-  const { user, isOwned, cancelVaultLost } = useStore();
+  const { user, isOwned, withdrawLostForInsurance } = useStore();
   const owned = isOwned(listing.id) || (user && listing.owner.toLowerCase() === user.username.toLowerCase());
   const small = size === "small";
 
   const [copied, setCopied] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
 
   const handleCopyCert = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -141,9 +142,9 @@ export function LostCard({
                 size="sm"
                 variant="ghost"
                 className="text-[11.5px] text-muted hover:text-bad"
-                onClick={() => cancelVaultLost(listing.id)}
+                onClick={() => setWithdrawOpen(true)}
               >
-                Found / Cancel
+                Withdraw
               </Button>
             </div>
           ) : (
@@ -157,6 +158,30 @@ export function LostCard({
           )}
         </div>
       </div>
+
+      <Modal open={withdrawOpen} onClose={() => setWithdrawOpen(false)} title="Withdraw lost-card listing" width="max-w-sm">
+        <div className="space-y-4 p-5">
+          <p className="text-[13px] leading-relaxed text-muted">
+            Are you sure you want to withdraw <span className="font-semibold text-white">{listing.title}</span> from the Lost registry?
+          </p>
+          <div className="rounded-xl border border-warn/25 bg-warn/10 p-3 text-[12px] leading-relaxed text-muted">
+            Withdrawing removes the public listing and bounty. You can then claim insurance through the vault service provider off-chain, and the minted NFT will be retired from your active Vault.
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setWithdrawOpen(false)}>Keep listing</Button>
+            <Button
+              variant="danger"
+              className="flex-1"
+              onClick={() => {
+                withdrawLostForInsurance(listing.id);
+                setWithdrawOpen(false);
+              }}
+            >
+              Withdraw and claim insurance
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
