@@ -1976,3 +1976,21 @@ export function useMarketInventory(): Listing[] {
     return Array.from(map.values());
   }, [slabs, isListed, resolve]);
 }
+
+/** All known slabs — listed or not — for the browse-all catalog. */
+export function useAllSlabs(): Listing[] {
+  const { slabs, resolve } = useStore();
+  return useMemo(() => {
+    // In demo mode slabs is empty until a user logs in; fall back to the full catalog.
+    const pool = IS_DEPLOYED ? slabs : slabs.length > 0 ? slabs : LISTINGS;
+    const map = new Map<string, Listing>();
+    for (const l of pool) {
+      const item = resolve(l);
+      const key = item.tokenId ? `token-${item.tokenId}` : item.id;
+      if (!map.has(key) || (item.id.startsWith("token-") && !map.get(key)!.id.startsWith("token-"))) {
+        map.set(key, item);
+      }
+    }
+    return Array.from(map.values());
+  }, [slabs, resolve]);
+}
