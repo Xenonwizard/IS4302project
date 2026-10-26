@@ -102,6 +102,25 @@ interface PersistShape {
   vaultLosses: Record<string, VaultLossReport>;
 }
 
+const INITIAL_DEMO_LOSSES: Record<string, VaultLossReport> = {
+  [LISTINGS[1]?.id ?? "demo-loss-1"]: {
+    reportedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    details: "Slab unaccounted for during routine Delaware vault inventory audit. Security seal #4429.",
+    bounty: {
+      amount: 250,
+      addedAt: new Date(Date.now() - 1 * 86400000).toISOString(),
+    },
+  },
+  [LISTINGS[4]?.id ?? "demo-loss-2"]: {
+    reportedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+    details: "Courier shipment tracking exception: package failed to arrive at Delaware verification center.",
+    bounty: {
+      amount: 100,
+      addedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+    },
+  },
+};
+
 const EMPTY: PersistShape = {
   user: null,
   watchlist: [],
@@ -112,7 +131,7 @@ const EMPTY: PersistShape = {
   negotiations: {},
   ledger: [],
   lostReports: [],
-  vaultLosses: {},
+  vaultLosses: INITIAL_DEMO_LOSSES,
 };
 
 /** A slab token the connected wallet owns, as SlabVault reports it. */
@@ -554,7 +573,10 @@ function stashUser(state: PersistShape) {
 function loadUser(username: string): PersistShape {
   try {
     const raw = window.localStorage.getItem(userKey(username));
-    return raw ? { ...EMPTY, ...(JSON.parse(raw) as PersistShape) } : EMPTY;
+    if (!raw) return EMPTY;
+    const parsed = JSON.parse(raw) as PersistShape;
+    const vaultLosses = parsed.vaultLosses && Object.keys(parsed.vaultLosses).length > 0 ? parsed.vaultLosses : INITIAL_DEMO_LOSSES;
+    return { ...EMPTY, ...parsed, vaultLosses };
   } catch {
     return EMPTY;
   }
@@ -565,7 +587,9 @@ function loadState(): PersistShape {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY;
-    return { ...EMPTY, ...(JSON.parse(raw) as PersistShape) };
+    const parsed = JSON.parse(raw) as PersistShape;
+    const vaultLosses = parsed.vaultLosses && Object.keys(parsed.vaultLosses).length > 0 ? parsed.vaultLosses : INITIAL_DEMO_LOSSES;
+    return { ...EMPTY, ...parsed, vaultLosses };
   } catch {
     return EMPTY;
   }
@@ -652,11 +676,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const mergedSlabsMap = new Map([...next.slabs, ...current.slabs].map((s) => [s.id, s]));
           const mergedOverrides = { ...next.overrides, ...current.overrides };
           const mergedNegotiations = { ...next.negotiations, ...current.negotiations };
+          const mergedVaultLosses = { ...next.vaultLosses, ...current.vaultLosses };
           prev = {
             ...next,
             slabs: Array.from(mergedSlabsMap.values()),
             overrides: mergedOverrides,
             negotiations: mergedNegotiations,
+            vaultLosses: mergedVaultLosses,
           };
           // If switching to an on-chain account, filter out vault items that belong to other addresses or lack tokens
           if (address) {
@@ -2078,20 +2104,51 @@ export function useMarketInventory(): Listing[] {
   }, [slabs, isListed, resolve]);
 }
 
-/** All known slabs — listed or not — for the browse-all catalog. */
-export function useAllSlabs(): Listing[] {
-  const { slabs, resolve } = useStore();
+export interface LostSlabItem {
+  listing: Listing;
+  loss: VaultLossReport;
+  source: "vault" | "transit";
+}
+
+/** Slabs currently reported lost in vault or in transit. */
+export function useLostSlabs(): LostSlabItem[] {
+  const { vaultLosses, slabs, vault, resolve } = useStore();
   return useMemo(() => {
-    // In demo mode slabs is empty until a user logs in; fall back to the full catalog.
-    const pool = IS_DEPLOYED ? slabs : slabs.length > 0 ? slabs : LISTINGS;
-    const map = new Map<string, Listing>();
-    for (const l of pool) {
-      const item = resolve(l);
-      const key = item.tokenId ? `token-${item.tokenId}` : item.id;
-      if (!map.has(key) || (item.id.startsWith("token-") && !map.get(key)!.id.startsWith("token-"))) {
-        map.set(key, item);
+    const map = new Map<string, LostSlabItem>();
+
+    // 1. Vault losses reported by collectors
+    for (const [listingId, loss] of Object.entries(vaultLosses)) {
+      const found =
+        slabs.find((s) => s.id === listingId || (s.tokenId && `token-${s.tokenId}` === listingId)) ||
+        getListing(listingId) ||
+        LISTINGS.find((l) => l.id === listingId || (l.tokenId && `token-${l.tokenId}` === listingId));
+      if (found) {
+        const item = resolve(found);
+        map.set(item.id, {
+          listing: item,
+          loss,
+          source: "vault",
+        });
       }
     }
+
+    // 2. On-chain slabs whose custody is marked "Lost"
+    for (const v of vault) {
+      if (v.status === "Withdrawn" && v.withdrawal?.carrier === "Lost") {
+        const found = getListing(v.listingId) || slabs.find((s) => s.id === v.listingId);
+        if (found && !map.has(found.id)) {
+          map.set(found.id, {
+            listing: resolve(found),
+            loss: {
+              reportedAt: v.withdrawal.requestedAt || new Date().toISOString(),
+              details: "Package reported lost during courier transit",
+            },
+            source: "transit",
+          });
+        }
+      }
+    }
+
     return Array.from(map.values());
-  }, [slabs, resolve]);
+  }, [vaultLosses, slabs, vault, resolve]);
 }
