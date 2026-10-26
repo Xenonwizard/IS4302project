@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { truncMiddle, usd } from "@/lib/format";
-import { useStore } from "@/lib/store";
+import { useLostSlabs, useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { chain, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
@@ -81,6 +81,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const lostView = searchParams.get("lost") === "1";
+  const lostReport = useLostSlabs().find((item) => item.listing.id === base.id || item.listing.tokenId === base.tokenId)?.loss;
 
   const tokenIdBigInt = resolvedTokenId ? BigInt(resolvedTokenId) : null;
   const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
@@ -569,6 +570,21 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             )}
           </div>
 
+          {lostView && lostReport ? (
+            <div className="mt-4 rounded-2xl border border-warn/25 bg-warn/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[12px] font-bold uppercase tracking-wide text-warn">Lost-card report</p>
+                <TimeAgo value={lostReport.reportedAt} />
+              </div>
+              <p className="mt-2 text-[13px] leading-relaxed text-muted">{lostReport.details}</p>
+              {lostReport.bounty ? (
+                <p className="mt-3 border-t border-warn/15 pt-3 text-[13px] font-semibold text-good">
+                  Recovery bounty: {usd(lostReport.bounty.amount)} PokeCredits
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-2">
             <span className="flex items-center gap-1.5 text-[13px] text-muted">
               <BadgeCheck size={14} className="text-accent" />
@@ -588,6 +604,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </button>
           </div>
 
+          {!lostView ? <>
           {/* listing status and actions */}
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
             <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] sm:items-center sm:p-5">
@@ -668,11 +685,12 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               ownerAddress: lostView ? null : onChainOwner?.address ?? null,
             }}
           />
+          </> : null}
         </div>
       </div>
 
       {/* Full-width history sits below the gallery and listing details. */}
-      <section className="mt-8">
+      {!lostView ? <section className="mt-8">
         <h2 className="mb-3 text-base font-bold">Activity history</h2>
         <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
           {allActivity.map((e, i) => (
@@ -696,7 +714,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </li>
           ))}
         </ul>
-      </section>
+      </section> : null}
 
       {/* Buy Confirmation Modal */}
       <Modal open={buyOpen} onClose={() => !buyBusy && setBuyOpen(false)} title="Confirm Purchase">

@@ -80,6 +80,7 @@ export function VaultView() {
   const [missingTarget, setMissingTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [bountyTarget, setBountyTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [missingDetails, setMissingDetails] = useState("");
+  const [missingBounty, setMissingBounty] = useState("");
   const [reportingMissing, setReportingMissing] = useState(false);
   // Slabs locked in one of my open trade offers (held by TradeEscrow): tokenId → offerId
   const { data: escrowed = {} } = useEscrowedByMe(user?.address as Address | undefined);
@@ -128,9 +129,11 @@ export function VaultView() {
         await cancelListing(entry.token.tokenId);
       }
       reportVaultLost(listing.id, missingDetails.trim() || "Reported missing from the vault");
+      const bounty = Number(missingBounty);
+      if (Number.isFinite(bounty) && bounty > 0) setVaultBounty(listing.id, bounty);
       setMissingTarget(null);
       setMissingDetails("");
-      setBountyTarget({ entry, listing });
+      setMissingBounty("");
     } catch (err) {
       pushToast({ title: "Could not report card missing", body: (err as Error).message, tone: "error" });
     } finally {
@@ -254,7 +257,6 @@ export function VaultView() {
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
                       onReportLost={entry.token?.tokenId ? () => void handleReportLost(entry.token!.tokenId) : undefined}
                       loss={vaultLosses[listing.id]}
-                      onReportMissing={entry.status === "Vaulted" || entry.status === "Listed" ? () => setMissingTarget({ entry, listing }) : undefined}
                       onCancelMissing={() => cancelVaultLost(listing.id)}
                       onAddBounty={() => setBountyTarget({ entry, listing })}
                       onCancelBounty={() => cancelVaultBounty(listing.id)}
@@ -396,6 +398,16 @@ export function VaultView() {
                 disabled={reportingMissing}
               />
             </Field>
+            <Field label="Recovery bounty (PokeCredits)" hint="Optional">
+              <input
+                className={inputClass}
+                inputMode="decimal"
+                value={missingBounty}
+                onChange={(event) => setMissingBounty(event.target.value.replace(/[^\d.]/g, ""))}
+                placeholder="e.g. 150"
+                disabled={reportingMissing}
+              />
+            </Field>
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={() => setMissingTarget(null)} disabled={reportingMissing}>Cancel</Button>
               <Button variant="danger" className="flex-1" onClick={() => void reportMissingFromVault()} disabled={reportingMissing}>
@@ -526,7 +538,6 @@ function SlabCard({
   inOffer,
   onReportLost,
   loss,
-  onReportMissing,
   onCancelMissing,
   onAddBounty,
   onCancelBounty,
@@ -543,7 +554,6 @@ function SlabCard({
   inOffer?: { offerId: string; taker: string; room: string };
   /** A reversible report that this card cannot be located in the physical vault. */
   loss?: VaultLossReport;
-  onReportMissing?: () => void;
   onCancelMissing: () => void;
   onAddBounty: () => void;
   onCancelBounty: () => void;
@@ -643,7 +653,6 @@ function SlabCard({
                 Transfer
               </Button>
             ) : null}
-            {onReportMissing ? <Button size="sm" variant="outline" onClick={onReportMissing}>Report lost</Button> : null}
           </div>
         )}
       </div>
