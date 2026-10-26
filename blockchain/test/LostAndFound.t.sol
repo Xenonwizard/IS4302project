@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import {Test} from "forge-std/Test.sol";
+import {MockUSDC} from "../contracts/MockUSDC.sol";
+import {AccountRegistry, ISlabVaultCustody} from "../contracts/AccountRegistry.sol";
+import {SlabVault, IAccountStatus} from "../contracts/SlabVault.sol";
+import {LostAndFound} from "../contracts/LostAndFound.sol";
+
+/// A lost slab's bounty is escrowed, a finder files a claim, Pokechain returns it, and the finder is paid.
+contract LostAndFoundTest is Test {
+    MockUSDC usdc;
+    AccountRegistry accounts;
+    SlabVault vault;
+    LostAndFound lf;
+
+    address operator = makeAddr("operator");
+    address owner = makeAddr("owner");
+    address finder = makeAddr("finder");
+    address collectorCrypt = makeAddr("collectorCrypt");
+
+    uint256 constant USD = 1e6;
+    uint256 constant BOUNTY = 50 * USD;
+    bytes32 constant EVIDENCE = keccak256("found at a flea market, label intact");
+    bytes32 constant ADDRESS_HASH = keccak256("Ash Ketchum, 1 Pallet Town Road");
+
+    function setUp() public {
+        usdc = new MockUSDC();
+        accounts = new AccountRegistry(usdc);
+        vault = new SlabVault(IAccountStatus(address(accounts)), operator);
+        accounts.setSlabVault(ISlabVaultCustody(address(vault)));
+        vault.setCustodian(collectorCrypt);
+        vm.prank(collectorCrypt);
+        vault.setEncryptionKey(keccak256("cc key"));
+        lf = new LostAndFound(accounts, vault, operator);
+        accounts.setLostAndFound(address(lf));
+        vault.setLostAndFound(address(lf));
+
+        _register(owner, "owner");
+        _register(finder, "finder");
+        vm.startPrank(owner);
+        usdc.faucet(1_000 * USD);
+        usdc.approve(address(accounts), 1_000 * USD);
+        accounts.deposit(1_000 * USD);
+        vm.stopPrank();
+    }
+
+    function _register(address who, string memory handle) internal {
+        vm.prank(who);
+        accounts.register(handle);
+    }
+
+    /// A vaulted slab the owner withdrew, which never arrived: custody Lost, with a $50 bounty escrowed.
+    function _lostWithBounty() internal returns (uint256 tokenId) {
+        vm.prank(owner);
+        uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
+        vm.startPrank(operator);
+        vault.markReceived(sid);
+        vault.markForwarded(sid, hex"01", keccak256("c"));
+        vault.confirmVaulted(sid, "Charizard PSA 10", "img", "CCsol1111");
+        vm.stopPrank();
+        tokenId = sid;
+        vm.prank(owner);
+        vault.requestRedemption(tokenId, ADDRESS_HASH);
+        vm.prank(operator);
+        vault.markShipped(tokenId, "CCR-1", "DHL", "LOST-1");
+        vm.startPrank(owner);
+        vault.reportLost(tokenId, "Never arrived");
+        lf.setBounty(tokenId, BOUNTY);
+        vm.stopPrank();
+    }
+
+    /// The usual intake from At Pokechain: forward to Collector Crypt, which vaults it under a new NFT.
+    function _revault(uint256 tokenId, string memory ccRef) internal {
+        vm.startPrank(operator);
+        vault.markForwarded(tokenId, hex"02", keccak256("c2"));
+        vault.confirmVaulted(tokenId, "Charizard PSA 10", "img", ccRef);
+        vm.stopPrank();
+    }
+
+    function _fileAndReceive(uint256 tokenId) internal returns (uint256 claimId) {
+        vm.prank(finder);
+        claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
+        vm.prank(operator);
+        lf.markReceived(claimId);
+    }
+
+    function test_BountyIsEscrowedFromTheOwnersBalance() public {
+        uint256 tokenId = _lostWithBounty();
+        assertEq(accounts.balanceOf(owner), 950 * USD);
+        assertEq(accounts.balanceOf(address(lf)), BOUNTY);
+        assertEq(lf.bountyOf(tokenId), BOUNTY);
+    }
+
+    function test_ReturnToVaultThenFinderIsPaid() public {
+        uint256 tokenId = _lostWithBounty();
+        uint256 claimId = _fileAndReceive(tokenId);
+
+        vm.prank(owner);
+        lf.chooseReturn(claimId, true, bytes32(0));
+        vm.prank(operator);
+        lf.completeReturn(claimId, "", "");
+        // The slab is at Pokechain, not yet in Collector Crypt's vault: the bounty stays locked.
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.AtPokechain));
+        vm.prank(finder);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.NotReturnedYet.selector, tokenId));
+        lf.claimBounty(claimId);
+
+        _revault(tokenId, "CCsol1111-2");
+        // Back in the vault: the owner holds the token and it counts as vaulted (tradeable).
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.Vaulted));
+        assertEq(vault.vaultedCount(owner), 1);
+        assertEq(vault.slabOf(tokenId).custodianRef, "CCsol1111-2");
+
+        vm.prank(finder);
+        lf.claimBounty(claimId);
+        assertEq(accounts.balanceOf(finder), BOUNTY);
+        assertEq(accounts.balanceOf(address(lf)), 0);
+        assertEq(uint8(lf.claimOf(claimId).status), uint8(LostAndFound.Status.Paid));
+    }
+
+    function test_DeliveryPaysOnlyAfterTheOwnerConfirmsReceipt() public {
+        uint256 tokenId = _lostWithBounty();
+        uint256 claimId = _fileAndReceive(tokenId);
+        vm.prank(owner);
+        lf.chooseReturn(claimId, false, ADDRESS_HASH);
+        vm.prank(operator);
+        lf.completeReturn(claimId, "Pokechain Secure", "PCR-1");
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.Shipped));
+
+        // Shipped is not enough: the finder waits for the owner's confirmDelivery.
+        vm.prank(finder);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.NotReturnedYet.selector, tokenId));
+        lf.claimBounty(claimId);
+
+        vm.prank(owner);
+        vault.confirmDelivery(tokenId);
+        vm.prank(finder);
+        lf.claimBounty(claimId);
+        assertEq(accounts.balanceOf(finder), BOUNTY);
+    }
+
+    function test_OwnerCannotCancelOrLowerTheBountyDuringAClaim() public {
+        uint256 tokenId = _lostWithBounty();
+        vm.prank(finder);
+        uint256 claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
+
+        vm.startPrank(owner);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.ClaimInProgress.selector, claimId));
+        vault.cancelLostReport(tokenId);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.ClaimInProgress.selector, claimId));
+        lf.setBounty(tokenId, 0);
+        vm.stopPrank();
+    }
+
+    function test_CancellingTheReportRefundsTheBounty() public {
+        uint256 tokenId = _lostWithBounty();
+        vm.prank(owner);
+        vault.cancelLostReport(tokenId);
+        assertEq(accounts.balanceOf(owner), 1_000 * USD);
+        assertEq(lf.bountyOf(tokenId), 0);
+    }
+
+    function test_WriteOffRefundsTheBountyAndBurns() public {
+        uint256 tokenId = _lostWithBounty();
+        vm.prank(owner);
+        vault.writeOffLost(tokenId);
+        assertEq(accounts.balanceOf(owner), 1_000 * USD);
+        assertEq(lf.bountyOf(tokenId), 0);
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.WrittenOff));
+    }
+
+    function test_CannotWriteOffDuringAClaim() public {
+        uint256 tokenId = _lostWithBounty();
+        uint256 claimId = _fileAndReceive(tokenId);
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.ClaimInProgress.selector, claimId));
+        vault.writeOffLost(tokenId);
+    }
+
+    function test_SlabLostInTheVaultIsFoundAndReturned() public {
+        vm.prank(owner);
+        uint256 sid = vault.requestSubmission("PSA", "87654321", EVIDENCE, "SingPost", "RR2SG");
+        vm.startPrank(operator);
+        vault.markReceived(sid);
+        vault.markForwarded(sid, hex"01", keccak256("c"));
+        vault.confirmVaulted(sid, "Pikachu PSA 9", "img", "CCsol2222");
+        vm.stopPrank();
+        vm.startPrank(owner);
+        vault.reportLost(sid, "Missing at audit");
+        lf.setBounty(sid, BOUNTY);
+        vm.stopPrank();
+
+        uint256 claimId = _fileAndReceive(sid);
+        vm.prank(owner);
+        lf.chooseReturn(claimId, true, bytes32(0));
+        vm.prank(operator);
+        lf.completeReturn(claimId, "", "");
+        _revault(sid, "CCsol2222-2");
+        assertEq(uint8(vault.custodyOf(sid)), uint8(SlabVault.Custody.Vaulted));
+        assertEq(vault.vaultedCount(owner), 1);
+        vm.prank(finder);
+        lf.claimBounty(claimId);
+        assertEq(accounts.balanceOf(finder), BOUNTY);
+    }
+
+    function test_RejectedClaimLeavesTheBountyPostedForTheNextFinder() public {
+        uint256 tokenId = _lostWithBounty();
+        vm.prank(finder);
+        uint256 claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
+        vm.prank(operator);
+        lf.rejectClaim(claimId, "Different cert on the label");
+        assertEq(lf.activeClaimOf(tokenId), 0);
+        assertEq(lf.bountyOf(tokenId), BOUNTY);
+        vm.prank(finder);
+        lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR556SG");
+    }
+
+    function test_InvalidClaimsAreRefused() public {
+        uint256 tokenId = _lostWithBounty();
+        vm.prank(owner);
+        vm.expectRevert(LostAndFound.OwnSlab.selector);
+        lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR1");
+
+        vm.prank(finder);
+        lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR1");
+        // Only the owner chooses, and only after Pokechain has the slab.
+        vm.prank(finder);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.WrongClaimStatus.selector, 1, LostAndFound.Status.Filed));
+        lf.chooseReturn(1, true, bytes32(0));
+        vm.prank(operator);
+        lf.markReceived(1);
+        vm.prank(finder);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.NotSlabOwner.selector, tokenId));
+        lf.chooseReturn(1, true, bytes32(0));
+        // Only the finder collects, and only after the return.
+        vm.prank(finder);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.WrongClaimStatus.selector, 1, LostAndFound.Status.AtPokechain));
+        lf.claimBounty(1);
+    }
+
+    function test_CannotClaimASlabThatIsNotLost() public {
+        uint256 tokenId = _lostWithBounty();
+        vm.prank(owner);
+        vault.cancelLostReport(tokenId);
+        vm.prank(finder);
+        vm.expectRevert(abi.encodeWithSelector(LostAndFound.SlabNotLost.selector, tokenId));
+        lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR1");
+    }
+}

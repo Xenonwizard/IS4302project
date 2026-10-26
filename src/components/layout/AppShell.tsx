@@ -8,6 +8,7 @@ import { ChainEpochGuard } from "../chain/ChainEpochGuard";
 import { ChainMarketSync } from "../chain/ChainMarketSync";
 import { ChainSessionSync } from "../chain/ChainSessionSync";
 import { ChainVaultSync } from "../chain/ChainVaultSync";
+import { FoundCaseSync } from "../chain/FoundCaseSync";
 import { AuthModal } from "../modals/AuthModal";
 import { MobileNav, Sidebar } from "./Sidebar";
 import { Toasts } from "./Toasts";
@@ -49,6 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ChainSessionSync />
       <ChainVaultSync />
       <ChainMarketSync />
+      <FoundCaseSync />
       <ChainConsole />
       <ChainEpochGuard />
       <Toasts />

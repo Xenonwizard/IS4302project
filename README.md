@@ -101,7 +101,7 @@ and resets to an empty chain first, except the seeded-demo test). `test:unit` al
 | Role | Sees | Can do |
 | --- | --- | --- |
 | **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (the NFT is minted when Pokechain receives the slab), watch each request move on live, report a parcel lost on the way in or out, trade slabs + cash with another collector in a chat (offer, accept, counter, decline, withdraw; prices negotiated using Pokechain records), transfer, withdraw a slab, trace it |
-| **Pokechain operator** (server key, simulated warehouse) | **/intake** and **/outtake** (the card processing simulators), curl, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, notify Collector Crypt to ship a withdrawal, verify a found slab and send it back, close lost reports. No power over trades |
+| **Pokechain operator** (server key, simulated warehouse) | **/intake** and **/outtake** (the card processing simulators), curl, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, notify Collector Crypt to ship a withdrawal, authenticate a found slab on **/intake** and return it to the vault or the owner, close lost reports. No power over trades and can't pay a bounty out: only the finder can claim it, once the chain shows the slab back |
 | **Collector Crypt** (simulated custodian) | **/collector-crypt**, **/intake** (Vaulted step) | Publish its encryption key, read incoming parcels by decrypting them, vault slabs |
 | **Anyone** | **/trace/[tokenId]**, the chain itself | Verify a slab's history, evidence and custody without trusting Pokechain |
 
@@ -119,7 +119,7 @@ can still come from the saved Pokemon TCG dataset. The contract moves whatever t
 **Simulated (labelled in the UI):** Collector Crypt's API and Solana NFTs (mock routes with the real
 Solana DAS request shapes; on a withdrawal CC "releases" the slab and "burns" its Solana NFT, which is only a
 `BURN` entry in the mock asset history), the carrier (including "parcel found"), the finder's parcel and evidence
-photos (only file names are kept), lost-card bounties (paid in the app's PokeCredits ledger, not on-chain), Pokechain's warehouse actions (the
+photos (only file names are kept; their keccak256 goes on-chain), Pokechain's warehouse actions (the
 operator buttons), the seeded demo accounts and slabs (`seedSlab`, operator-only), and the Hardhat test wallets that stand in for MetaMask locally.
 
 ### Can't sign up or log in?
@@ -175,14 +175,30 @@ npm run lint                 # eslint
    **Accept bid** settles: the slab leaves your vault and the cash (plus any slabs) comes in.
 6. **Report lost**: from any trade room, file a report for a slab you should have received, a
    slab you sent, or a payment. It gets a case id, posts to the room, and is listed on `/trades`.
-6a. **Lost slab, bounty and return** (on-chain custody, simulated parcels): from **Vault → Withdrawn** (on its way
-   to you) or **Vault → Awaiting vault** (never got vaulted), **Report lost** with an optional bounty. The
-   Pokechain NFT stays alive and locked (custody `Lost`); **Cancel lost status** puts it back. Anyone who finds it
-   searches the cert (top search bar or **Lost cards**), presses **Found Slab**, adds evidence and the tracking
-   number of the parcel they send to Pokechain. The operator verifies it on **/outtake**
-   (`SlabVault.markRecoveredShipped`), and when the owner presses **Confirm received** the NFT is burned
-   (`confirmDelivery`) and the bounty is released to the finder. Collector Crypt's own NFT was already burned
-   (simulated) when it released the slab; Pokechain's burns only on the owner's confirmation.
+6a. **Lost slab, bounty and found-slab case** (all on-chain; only the parcels are simulated):
+   - **Owner:** **Vault → Withdrawn**, **Report lost** with an optional bounty. `SlabVault.reportLost` sets
+     custody `Lost`; `LostAndFound.setBounty` escrows the bounty from their Pokechain balance (the app checks
+     the balance first and says how much to deposit). **Edit bounty** on **Lost cards** or **Cancel bounty** in
+     the Vault escrows more or refunds the difference. **Cancel lost status** refunds it in the same transaction,
+     and **Withdraw & claim insurance** (`writeOffLost`) refunds it and burns the token.
+   - **Lost cards** is read from the chain (`SlabReportedLost` events, `custodyOf`, `bountyOf`), so every
+     collector sees the same reports and bounties; nothing about them is kept in the browser. The seeded demo
+     has test2's Shining Celebi ($250) and test1's Alakazam ★ ($100) missing from the vault, so either user
+     can play the finder and earn the other's bounty.
+   - **Finder:** searches the cert (top search bar or **Lost cards**) → **Found Slab** → where/how they found it,
+     its condition, photos, tracking to Pokechain. `LostAndFound.fileClaim` stores the evidence hash. The case
+     appears in **Submissions → Found slabs** for both the finder and the owner, and the owner can no longer
+     cancel the report (`ClaimInProgress`).
+   - **Pokechain** (**/intake → Found-slab claims**, or curl): **Received & authenticated** (`markReceived`).
+   - **Owner:** **Return to my vault** or **Deliver to me** (`chooseReturn`; only the address hash goes on-chain).
+   - **Pokechain:** **Back into intake for re-vaulting** / **Ship to owner** (`completeReturn`, which itself calls
+     `SlabVault.resolveLostReport(At Pokechain)` or `markRecoveredShipped`).
+     Vault: the slab is physically at Pokechain, so it goes through normal intake again. **Open cert #… above** →
+     **Forwarded to Collector Crypt** (`markForwarded`) → **Vaulted at Collector Crypt**. Collector Crypt mints a new
+     NFT, since the old one was burnt when the slab left, and `confirmVaulted` puts the NFT back in the owner's Vault.
+     Delivery: on its way for them to **Confirm received** (`confirmDelivery`, which burns it).
+   - **Finder:** **Claim $X bounty** (`claimBounty`). The contract reads SlabVault and pays only if the slab is
+     `Vaulted` again or `Delivered`. Both sides get a toast at each step the other side takes.
 7. **List from the vault**, **make an offer**, **accept an offer** on a slab you own, and
    **request shipping**.
 8. **Reset demo data** in the user menu wipes `localStorage`.

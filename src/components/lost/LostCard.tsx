@@ -5,7 +5,8 @@ import Link from "next/link";
 import { AlertTriangle, Coins, Copy, Check, PackageCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { usd } from "@/lib/format";
-import { IS_DEPLOYED } from "@/lib/chain/config";
+import { CLAIM_STATUS, IS_DEPLOYED } from "@/lib/chain/config";
+import { isOpenCase, useFoundCases, useLostReport } from "@/lib/chain/useLostAndFound";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { isActiveRecovery, useStore, type LostSlabItem } from "@/lib/store";
 import { Slab } from "../slab/Slab";
@@ -22,10 +23,17 @@ export function LostCard({
   onManageBounty?: (listingId: string) => void;
 }) {
   const { listing, loss, recovery } = item;
-  const recovering = isActiveRecovery(recovery);
-  const { user, isOwned, withdrawLostForInsurance, confirmRecoveredSlab, pushToast } = useStore();
+  // A tokenised slab: its report is on SlabVault and a finder's claim on LostAndFound.
+  const onChain = IS_DEPLOYED && Boolean(listing.tokenId);
+  const { data: cases = [] } = useFoundCases();
+  const chainCase = onChain ? cases.find((c) => c.tokenId === listing.tokenId && isOpenCase(c)) : undefined;
+  const recovering = isActiveRecovery(recovery) || Boolean(chainCase);
+  const { user, isOwned, confirmRecoveredSlab, pushToast } = useStore();
   const { confirmDelivery } = useSlabChain();
-  const owned = isOwned(listing.id) || (user && listing.owner.toLowerCase() === user.username.toLowerCase());
+  const lostReport = useLostReport();
+  const owned = item.owner
+    ? Boolean(user?.address && item.owner.toLowerCase() === user.address.toLowerCase())
+    : isOwned(listing.id) || (user && listing.owner.toLowerCase() === user.username.toLowerCase());
   const small = size === "small";
 
   const [copied, setCopied] = useState(false);
@@ -142,7 +150,12 @@ export function LostCard({
               </div>
             ) : null}
           </div>
-          {recovery ? (
+          {chainCase ? (
+            <div className="mt-2 rounded-lg border border-accent/25 bg-accent/5 px-2.5 py-2 text-[11px] text-muted">
+              <span className="font-bold text-accent">Found · case #{chainCase.claimId}</span> · {CLAIM_STATUS[chainCase.status]} on LostAndFound
+            </div>
+          ) : null}
+          {recovery && !onChain ? (
             <div className="mt-2 rounded-lg border border-accent/25 bg-accent/5 px-2.5 py-2 text-[11px] text-muted">
               <span className="font-bold text-accent">Recovery {recovery.id}</span> · {recovery.status}
               {recovery.returnTracking ? <span className="block pt-1">{recovery.returnCarrier} {recovery.returnTracking}</span> : null}
@@ -154,7 +167,11 @@ export function LostCard({
         <div className="mt-3.5 pt-2.5 border-t border-hairline">
           {owned ? (
             <div className="flex gap-2">
-              {recovery?.status === "Returning to owner" ? (
+              {chainCase ? (
+                <Link href="/submissions?tab=found" className="flex-1">
+                  <Button size="sm" className="w-full text-[11.5px]">Open found case</Button>
+                </Link>
+              ) : recovery?.status === "Returning to owner" ? (
                 <Button size="sm" className="flex-1 text-[11.5px]" disabled={confirming} onClick={() => void confirmRecovered()}>
                   {confirming ? "Confirming…" : item.source === "transit" ? "Confirm received" : "Confirm back in vault"}
                 </Button>
@@ -203,8 +220,10 @@ export function LostCard({
               variant="danger"
               className="flex-1"
               onClick={() => {
-                withdrawLostForInsurance(listing.id);
                 setWithdrawOpen(false);
+                void lostReport.writeOff(listing.id, onChain ? listing.tokenId : undefined).catch((error: Error) =>
+                  pushToast({ title: "Could not withdraw the report", body: error.message, tone: "error" }),
+                );
               }}
             >
               Withdraw and claim insurance
@@ -212,7 +231,7 @@ export function LostCard({
           </div>
         </div>
       </Modal>
-      <FoundSlabModal listing={listing} open={foundOpen} onClose={() => setFoundOpen(false)} />
+      <FoundSlabModal listing={listing} open={foundOpen} onClose={() => setFoundOpen(false)} onChain={onChain} />
     </div>
   );
 }

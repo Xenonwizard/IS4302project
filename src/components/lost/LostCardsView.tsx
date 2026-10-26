@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usd } from "@/lib/format";
+import { IS_DEPLOYED } from "@/lib/chain/config";
+import { useLostReport } from "@/lib/chain/useLostAndFound";
 import { useLostSlabs, useStore } from "@/lib/store";
 import { Button, Modal, inputClass } from "../ui/primitives";
 import { Select } from "../ui/Select";
@@ -48,7 +50,8 @@ export function LostCardsView() {
   const params = useSearchParams();
   const router = useRouter();
   const lostSlabs = useLostSlabs();
-  const { setVaultBounty, cancelVaultBounty } = useStore();
+  const { pushToast } = useStore();
+  const lostReport = useLostReport();
 
   const [query, setQuery] = useState(params.get("q") ?? "");
   const [bountyFilter, setBountyFilter] = useState<BountyFilter>(
@@ -356,11 +359,16 @@ export function LostCardsView() {
               </Button>
               <Button
                 variant="primary"
-                onClick={() => {
+                onClick={async () => {
                   const val = parseFloat(bountyInput);
-                  if (Number.isFinite(val) && val > 0) {
-                    setVaultBounty(activeBountyTarget.listing.id, val);
+                  if (!Number.isFinite(val) || val <= 0) return;
+                  const { listing } = activeBountyTarget;
+                  try {
+                    // Escrowed on LostAndFound, not just advertised.
+                    await lostReport.setBounty(listing.id, val, IS_DEPLOYED ? listing.tokenId : undefined);
                     setBountyTargetId(null);
+                  } catch (err) {
+                    pushToast({ title: "Could not set bounty", body: (err as Error).message, tone: "error" });
                   }
                 }}
               >

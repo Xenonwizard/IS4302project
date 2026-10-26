@@ -108,6 +108,14 @@ export function ChainVaultSync() {
           ),
         ),
       ]);
+      // A Lost slab stays in the tab it was lost from (see vaultStatusFor).
+      const lostFrom = await Promise.all(
+        candidates.map((id, i) =>
+          CUSTODY[read[i].custody] === "Lost"
+            ? client!.readContract({ ...contracts.slabVault, functionName: "custodyBeforeLossOf", args: [id] }).then((c) => CUSTODY[c])
+            : undefined,
+        ),
+      );
       const owned = candidates.flatMap((id, i) => {
         const s = read[i];
         const mListing = marketListings[i];
@@ -137,6 +145,7 @@ export function ChainVaultSync() {
             redemptionRef: s.redemptionRef,
             isListed: isListedOnChain,
             listedPrice: isListedOnChain && mListing ? fromUsdcUnits(mListing.price) : undefined,
+            custodyBeforeLoss: lostFrom[i],
           },
         ];
       });

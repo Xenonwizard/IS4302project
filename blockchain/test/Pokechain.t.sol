@@ -619,12 +619,51 @@ contract PokechainTest is Test {
         vault.ownerOf(tokenId);
     }
 
-    function test_CannotReportLostWhileVaulted() public {
+    function test_ReportLostFromTheVaultThenCancel() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+        assertEq(vault.vaultedCount(alice), 1);
+
+        vm.prank(alice);
+        vault.reportLost(tokenId, "Missing at the vault audit");
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.Lost));
+        assertEq(uint8(vault.custodyBeforeLossOf(tokenId)), uint8(SlabVault.Custody.Vaulted));
+        assertEq(vault.vaultedCount(alice), 0);
+
+        vm.prank(alice);
+        vault.cancelLostReport(tokenId);
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.Vaulted));
+        assertEq(vault.vaultedCount(alice), 1);
+    }
+
+    function test_CannotReportLostTwice() public {
+        _register(alice, "alice");
+        uint256 tokenId = _mint(alice, "12345678");
+        vm.prank(alice);
+        vault.reportLost(tokenId, "");
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.WrongCustody.selector, tokenId, SlabVault.Custody.Lost));
+        vault.reportLost(tokenId, "");
+    }
+
+    function test_WriteOffBurnsALostSlab() public {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(SlabVault.WrongCustody.selector, tokenId, SlabVault.Custody.Vaulted));
-        vault.reportLost(tokenId, "");
+        vault.writeOffLost(tokenId);
+
+        vm.prank(alice);
+        vault.reportLost(tokenId, "Gone");
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.NotSlabOwner.selector, tokenId));
+        vault.writeOffLost(tokenId);
+
+        vm.prank(alice);
+        vault.writeOffLost(tokenId);
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.WrittenOff));
+        vm.expectRevert();
+        vault.ownerOf(tokenId);
     }
 
     function test_OwnerCanCancelLostStatus() public {

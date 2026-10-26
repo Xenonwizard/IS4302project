@@ -6,6 +6,7 @@ import { PackageCheck, PackageX, Route } from "lucide-react";
 import { useState } from "react";
 import { useReadContracts } from "wagmi";
 import { CUSTODY, contracts, type CustodyName } from "@/lib/chain/config";
+import { useLostReport } from "@/lib/chain/useLostAndFound";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { shortDate } from "@/lib/format";
 import { isActiveRecovery, useStore } from "@/lib/store";
@@ -60,8 +61,9 @@ function Row({
   custody: CustodyName | null;
   onChange: () => void;
 }) {
-  const { confirmDelivery, reportLost, cancelLost } = useSlabChain();
-  const { pushToast, reportVaultLost, cancelVaultLost, setVaultBounty, recoveries, confirmRecoveredSlab } = useStore();
+  const { confirmDelivery } = useSlabChain();
+  const { pushToast, recoveries, confirmRecoveredSlab } = useStore();
+  const lostReport = useLostReport();
   const recovering = isActiveRecovery(recoveries[listing.id]);
   const [busy, setBusy] = useState(false);
   const [lostOpen, setLostOpen] = useState(false);
@@ -86,10 +88,7 @@ function Row({
 
   const fileLost = async () => {
     await act(async () => {
-      await reportLost(token!.tokenId, details.trim() || "Lost in transit");
-      reportVaultLost(listing.id, details.trim() || "Lost in transit", true);
-      const amount = Number(bounty);
-      if (Number.isFinite(amount) && amount > 0) setVaultBounty(listing.id, amount);
+      await lostReport.report(listing.id, token!.tokenId, details.trim() || "Lost in transit", { inTransit: true, bounty: Number(bounty) });
     }, Number(bounty) > 0 ? "Lost report and bounty filed" : "Lost report filed");
   };
 
@@ -159,8 +158,7 @@ function Row({
           ) : null}
           {custody === "Lost" && !recovering ? (
             <Button size="sm" variant="outline" onClick={() => act(async () => {
-              await cancelLost(token!.tokenId);
-              cancelVaultLost(listing.id);
+              await lostReport.cancel(listing.id, token!.tokenId);
             }, "Lost report cancelled")} disabled={busy}>
               Cancel lost status
             </Button>
@@ -174,6 +172,7 @@ function Row({
             Calls <Fn>SlabVault.reportLost(tokenId, details)</Fn>. Custody becomes <b className="text-white">Lost</b> and{" "}
             <Fn>SlabReportedLost</Fn> is emitted with the tracking number. The Trace page lines this up with Collector
             Crypt&apos;s redemption record, the carrier scans and the Pokechain NFT, which stays locked until receipt is confirmed.
+            A bounty is escrowed from your Pokechain balance with <Fn>LostAndFound.setBounty</Fn> and refunded if you cancel.
           </p>
           <div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]">
             <input className={inputClass} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Not delivered after 10 days, carrier has no scan since dispatch" />

@@ -1,21 +1,45 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PackageCheck, Upload } from "lucide-react";
+import { useLostAndFound } from "@/lib/chain/useLostAndFound";
 import type { Listing } from "@/lib/types";
 import { useStore } from "@/lib/store";
+import { Fn } from "../chain/ui";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
 
-export function FoundSlabModal({ listing, open, onClose }: { listing: Listing; open: boolean; onClose: () => void }) {
-  const { reportFoundSlab, requireAuth } = useStore();
+/**
+ * `onChain`: the slab is Lost on SlabVault, so the claim is filed on LostAndFound and followed in
+ * Submissions. Otherwise (a demo report with no token) it stays the simulated recovery flow.
+ */
+export function FoundSlabModal({ listing, open, onClose, onChain = false }: { listing: Listing; open: boolean; onClose: () => void; onChain?: boolean }) {
+  const { reportFoundSlab, requireAuth, pushToast } = useStore();
+  const { fileClaim } = useLostAndFound();
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
   const [details, setDetails] = useState("");
   const [evidence, setEvidence] = useState("");
   const [files, setFiles] = useState<string[]>([]);
   const [carrier, setCarrier] = useState("");
   const [tracking, setTracking] = useState("");
 
-  const submit = () => {
+  const submit = async () => {
     if (!requireAuth()) return;
+    if (onChain) {
+      setBusy(true);
+      try {
+        const claimId = await fileClaim({ tokenId: listing.tokenId, details, evidence, files, carrier, tracking });
+        pushToast({ title: `Claim #${claimId} filed on-chain`, body: "Ship the slab to Pokechain. Follow the case in Submissions.", tone: "success" });
+        onClose();
+        router.push("/submissions?tab=found");
+      } catch (error) {
+        pushToast({ title: "Can't file this claim", body: (error as Error).message, tone: "error" });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     const claim = reportFoundSlab(listing.id, {
       details,
       evidence,
@@ -50,8 +74,14 @@ export function FoundSlabModal({ listing, open, onClose }: { listing: Listing; o
           <Field label="Carrier to Pokechain"><input className={inputClass} value={carrier} onChange={(e) => setCarrier(e.target.value)} placeholder="DHL" /></Field>
           <Field label="Tracking number"><input className={inputClass} value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="Recovery shipment" /></Field>
         </div>
-        <p className="text-[11px] leading-relaxed text-dim">Any advertised bounty is locked at submission. It is not paid when you file or when Pokechain verifies the slab—only after the owner confirms receiving the returned slab.</p>
-        <Button className="w-full" disabled={!valid} onClick={submit}><PackageCheck size={16} /> Submit found-slab claim</Button>
+        {onChain ? (
+          <p className="text-[11px] leading-relaxed text-dim">
+            Calls <Fn>LostAndFound.fileClaim(tokenId, evidenceHash, carrier, tracking)</Fn>. Your evidence is hashed, not uploaded. The bounty is already escrowed in the contract and is paid to you once the slab is back in the owner&apos;s vault or they confirm delivery.
+          </p>
+        ) : (
+          <p className="text-[11px] leading-relaxed text-dim">Any advertised bounty is locked at submission. It is not paid when you file or when Pokechain verifies the slab—only after the owner confirms receiving the returned slab.</p>
+        )}
+        <Button className="w-full" disabled={!valid || busy} onClick={() => void submit()}><PackageCheck size={16} /> {busy ? "Filing on-chain…" : "Submit found-slab claim"}</Button>
       </div>
     </Modal>
   );

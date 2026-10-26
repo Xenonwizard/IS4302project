@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { BRAND } from "./brand";
 import { LISTINGS, buildOnChainListing, getListing, makeStarterListings, makeSubmittedListing, registerListing } from "./catalog";
 import { IS_DEPLOYED, PENDING_CUSTODY, type CustodyName } from "./chain/config";
+import { useChainLostSlabs } from "./chain/lostRegistry";
 import { usd } from "./format";
 import {
   botReply,
@@ -128,6 +129,15 @@ const INITIAL_DEMO_LOSSES: Record<string, VaultLossReport> = {
   },
 };
 
+/**
+ * With a chain, public lost reports live on SlabVault (see useChainLostSlabs): this browser keeps
+ * only private vaulting-delay reports that haven't been published yet.
+ */
+function localLosses(saved?: Record<string, VaultLossReport>): Record<string, VaultLossReport> {
+  if (!IS_DEPLOYED) return saved && Object.keys(saved).length > 0 ? saved : INITIAL_DEMO_LOSSES;
+  return Object.fromEntries(Object.entries(saved ?? {}).filter(([, loss]) => loss.published === false));
+}
+
 const EMPTY: PersistShape = {
   user: null,
   watchlist: [],
@@ -138,7 +148,7 @@ const EMPTY: PersistShape = {
   negotiations: {},
   ledger: [],
   lostReports: [],
-  vaultLosses: INITIAL_DEMO_LOSSES,
+  vaultLosses: localLosses(),
   pendingLossDecisions: {},
   insuranceBurnedTokenIds: [],
   recoveries: {},
@@ -160,6 +170,8 @@ export interface ChainSlab {
   redemptionRef?: string;
   isListed?: boolean;
   listedPrice?: number;
+  /** While custody is Lost: where it was when reported (SlabVault.custodyBeforeLossOf). */
+  custodyBeforeLoss?: string;
 }
 
 /** A finder's claim that is still open: the slab is with Pokechain or on its way back. */
@@ -173,13 +185,16 @@ function isAwaitingVaulting(custody: string): boolean {
 }
 
 /**
- * Which Vault tab a token belongs in. "Lost" alone doesn't say which way the parcel was going,
- * so a slab lost on its way in stays in Awaiting vaulting instead of looking like a withdrawal.
+ * Which Vault tab a token belongs in. A Lost slab stays where it was when it was reported: in the
+ * Vault if it went missing there, Awaiting vaulting if it was lost on its way in, else Withdrawn.
  */
 function vaultStatusFor(o: ChainSlab, previous?: VaultItem["status"]): VaultItem["status"] {
   if (o.custody === "Vaulted") return o.isListed ? "Listed" : "Vaulted";
   if (isAwaitingVaulting(o.custody)) return "Awaiting vaulting";
-  if (o.custody === "Lost" && previous === "Awaiting vaulting") return "Awaiting vaulting";
+  if (o.custody === "Lost") {
+    if (o.custodyBeforeLoss === "Vaulted") return "Vaulted";
+    if (o.custodyBeforeLoss ? isAwaitingVaulting(o.custodyBeforeLoss) : previous === "Awaiting vaulting") return "Awaiting vaulting";
+  }
   return "Withdrawn";
 }
 
@@ -250,6 +265,8 @@ interface StoreValue extends PersistShape {
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
   /* vault missing reports and their optional bounties */
   reportVaultLost: (listingId: string, details: string, inTransit?: boolean) => void;
+  /** A slab reported lost on-chain: take it off sale here and close buyers' chats. The report itself is on SlabVault. */
+  delistLostSlab: (listingId: string) => void;
   completeLossInvestigation: (listingId: string) => void;
   resolveLossDecision: (listingId: string) => void;
   cancelVaultLost: (listingId: string) => void;
@@ -611,7 +628,7 @@ function loadUser(username: string): PersistShape {
     const raw = window.localStorage.getItem(userKey(username));
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as PersistShape;
-    const vaultLosses = parsed.vaultLosses && Object.keys(parsed.vaultLosses).length > 0 ? parsed.vaultLosses : INITIAL_DEMO_LOSSES;
+    const vaultLosses = localLosses(parsed.vaultLosses);
     return { ...EMPTY, ...parsed, vaultLosses, recoveries: parsed.recoveries ?? {} };
   } catch {
     return EMPTY;
@@ -624,7 +641,7 @@ function loadState(): PersistShape {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as PersistShape;
-    const vaultLosses = parsed.vaultLosses && Object.keys(parsed.vaultLosses).length > 0 ? parsed.vaultLosses : INITIAL_DEMO_LOSSES;
+    const vaultLosses = localLosses(parsed.vaultLosses);
     return { ...EMPTY, ...parsed, vaultLosses, recoveries: parsed.recoveries ?? {} };
   } catch {
     return EMPTY;
@@ -1197,9 +1214,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           contract: o.token.contract,
         });
         registerListing(listing);
-        const awaitingVaulting = isAwaitingVaulting(o.custody);
-        const withdrawn = o.custody !== "Vaulted" && !awaitingVaulting;
-        const status: VaultItem["status"] = awaitingVaulting ? "Awaiting vaulting" : withdrawn ? "Withdrawn" : o.isListed ? "Listed" : "Vaulted";
+        const status = vaultStatusFor(o);
+        const withdrawn = status === "Withdrawn";
         added.push({
           listing,
           item: {
@@ -1988,6 +2004,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const delistLostSlab = useCallback((listingId: string) => {
+    setState((prev) => {
+      const pendingLossDecisions = { ...prev.pendingLossDecisions };
+      const vaultLosses = { ...prev.vaultLosses };
+      // A private vaulting-delay report that is now public on-chain.
+      delete pendingLossDecisions[listingId];
+      delete vaultLosses[listingId];
+      return {
+        ...prev,
+        negotiations: closeSellerChats(prev, listingId, "This slab was reported lost."),
+        vault: prev.vault.map((item) =>
+          item.listingId === listingId && item.status === "Listed" ? { ...item, status: "Vaulted", listedPrice: undefined } : item,
+        ),
+        overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
+        pendingLossDecisions,
+        vaultLosses,
+      };
+    });
+  }, []);
+
   const completeLossInvestigation = useCallback((listingId: string) => {
     setState((prev) => ({
       ...prev,
@@ -2310,6 +2346,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     withdrawOffer,
     fileLostReport,
     reportVaultLost,
+    delistLostSlab,
     completeLossInvestigation,
     resolveLossDecision,
     cancelVaultLost,
@@ -2364,13 +2401,34 @@ export interface LostSlabItem {
   listing: Listing;
   loss: VaultLossReport;
   source: "vault" | "transit";
+  /** The owner's wallet, for reports read from the chain. */
+  owner?: string;
   recovery?: FoundSlabRecovery;
 }
 
-/** Slabs currently reported lost in vault or in transit. */
+/**
+ * Slabs currently reported lost in vault or in transit. With a chain this is SlabVault's public
+ * registry (useChainLostSlabs), the same for every collector; without one it is the local demo.
+ */
 export function useLostSlabs(): LostSlabItem[] {
   const { vaultLosses, recoveries, slabs, vault, resolve } = useStore();
+  const { data: chainLost } = useChainLostSlabs();
   return useMemo(() => {
+    if (IS_DEPLOYED) {
+      return (chainLost ?? []).map((c) => ({
+        listing: c.listing,
+        loss: {
+          reportedAt: c.reportedAt,
+          details: c.details,
+          published: true,
+          inTransit: c.source === "transit",
+          bounty: c.bounty > 0 ? { amount: c.bounty, addedAt: c.reportedAt } : undefined,
+        },
+        source: c.source,
+        owner: c.owner,
+      }));
+    }
+
     const map = new Map<string, LostSlabItem>();
 
     // 1. Vault losses reported by collectors
@@ -2385,14 +2443,13 @@ export function useLostSlabs(): LostSlabItem[] {
         map.set(item.id, {
           listing: item,
           loss,
-          // Stored on the report, since a finder or the operator doesn't have the owner's Vault.
           source: loss.inTransit ? "transit" : "vault",
           recovery: recoveries[listingId],
         });
       }
     }
 
-    // 2. On-chain slabs whose custody is marked "Lost"
+    // 2. Slabs whose custody is marked "Lost"
     for (const v of vault) {
       if (v.status === "Withdrawn" && v.withdrawal?.carrier === "Lost") {
         const found = getListing(v.listingId) || slabs.find((s) => s.id === v.listingId);
@@ -2410,5 +2467,5 @@ export function useLostSlabs(): LostSlabItem[] {
     }
 
     return Array.from(map.values());
-  }, [vaultLosses, recoveries, slabs, vault, resolve]);
+  }, [chainLost, vaultLosses, recoveries, slabs, vault, resolve]);
 }

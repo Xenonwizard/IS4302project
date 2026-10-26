@@ -20,7 +20,8 @@
  *                     (/outtake) then notifies CC to ship to the current token owner and records
  *                     it with SlabVault.markShipped
  *   confirmDelivery() SlabVault.confirmDelivery                       collector's wallet
- *   reportLost()      SlabVault.reportLost (inbound or outbound post)  collector's wallet
+ *   reportLost()      SlabVault.reportLost (in the post, or missing from the vault)  collector's wallet
+ *   writeOffLost()    SlabVault.writeOffLost: refunds the bounty, burns the token    collector's wallet
  *   resolveLost()     SlabVault.resolveLostReport                     operator (simulated carrier finds it)
  */
 import { useQueryClient } from "@tanstack/react-query";
@@ -210,7 +211,13 @@ export function useSlabChain() {
 
   const reportLost = useCallback(
     (tokenId: string, details: string) =>
-      send({ contract: "slabVault", functionName: "reportLost", args: [BigInt(tokenId), details], label: "Report lost in transit" }),
+      send({ contract: "slabVault", functionName: "reportLost", args: [BigInt(tokenId), details], label: "Report slab lost" }),
+    [send],
+  );
+
+  const writeOffLost = useCallback(
+    (tokenId: string) =>
+      send({ contract: "slabVault", functionName: "writeOffLost", args: [BigInt(tokenId)], label: "Write off lost slab" }),
     [send],
   );
 
@@ -226,5 +233,5 @@ export function useSlabChain() {
     [operator],
   );
 
-  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost, cancelLost, resolveLost };
+  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost, cancelLost, writeOffLost, resolveLost };
 }

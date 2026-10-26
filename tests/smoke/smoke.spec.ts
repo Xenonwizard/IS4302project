@@ -3,7 +3,7 @@ import { createPublicClient, createWalletClient, http, keccak256, toBytes } from
 import { hardhat } from "viem/chains";
 import { deployments, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect, test } from "./fixtures";
-import { ASH, MISTY, TEST1, TEST2, custodyDollars, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, resetDemo, resetSeeded } from "./helpers";
+import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, resetDemo, resetSeeded } from "./helpers";
 
 // One test per role's main job, against the real app and local chain. Each test starts from a
 // freshly reset chain and a fresh browser (empty localStorage).
@@ -533,6 +533,19 @@ test("outtake: the operator dispatches a pending redemption from /outtake by PSA
   await expect(page.getByText(/Already dispatched:/)).toBeVisible();
 });
 
+/**
+ * A found slab returned to the vault is back in normal intake at Pokechain: from the queue, open its
+ * cert in the steps above, forward it to Collector Crypt, and have CC vault it (under a new NFT).
+ */
+async function revaultFoundSlab(intake: Page, cert: string) {
+  await intake.getByTestId("found-intake-1").getByRole("button", { name: `Open cert #${cert} above` }).click();
+  await expect(intake.getByText(/Current status: Received by Pokechain/)).toBeVisible();
+  await intake.getByRole("button", { name: "Forwarded to Collector Crypt", exact: true }).click();
+  await expect(intake.getByText(/Current status: At Collector Crypt/)).toBeVisible();
+  await intake.getByRole("button", { name: "Vaulted at Collector Crypt", exact: true }).click();
+  await expect(intake.getByText("No found-slab claims are waiting at intake.")).toBeVisible();
+}
+
 async function signOut(page: Page, handle: string) {
   await page.goto("/");
   await page.locator("header").getByRole("button", { name: new RegExp(handle) }).click();
@@ -540,86 +553,182 @@ async function signOut(page: Page, handle: string) {
   await expect(page.locator("header").getByRole("button", { name: "Log in" })).toBeVisible();
 }
 
-test("lost & found: a shipped slab is reported lost with a bounty, found by another collector, returned, and the finder is paid on receipt", async ({ page, request }) => {
-  test.setTimeout(180_000);
+test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through intake, the owner picks the vault, and the finder claims the bounty", async ({ page, request }) => {
+  test.setTimeout(240_000);
   const cert = "8887773";
   const shipTo = "Ash Ketchum, 1 Pallet Town Road";
   await vaultedForAsh(page, request, cert);
+  await depositAsTest1(200);
   await page.goto("/vault");
   await page.getByRole("button", { name: "Ship to me" }).first().click();
   await page.getByPlaceholder(/Ash Ketchum/).fill(shipTo);
   await page.getByRole("button", { name: "Withdraw and ship to me" }).click();
   await page.getByRole("button", { name: "Done" }).click();
-  // Pokechain notifies Collector Crypt, which releases the slab and burns its own (simulated) NFT.
   const shipped = await request.post("/api/chain/outtake", { data: { certNumber: cert } });
   expect(shipped.ok(), await shipped.text()).toBeTruthy();
 
-  // The owner reports it lost in the post with a $50 bounty, cancels, then reports it again.
+  // The owner reports it lost with a $50 bounty: LostAndFound escrows it from their balance.
   await page.goto("/vault?tab=withdrawn");
   await page.getByRole("button", { name: "Report lost" }).click();
   await page.getByPlaceholder(/Not delivered after 10 days/).fill("No carrier scan for two weeks");
   await page.getByPlaceholder("Bounty (optional)").fill("50");
   await page.getByRole("button", { name: "File", exact: true }).click();
   await expect(page.getByText("Lost report and bounty filed")).toBeVisible();
+  expect(await escrowedBounty(Number(cert))).toBe(50);
+  expect(await custodyDollars(TEST1)).toBe(150);
+  // Cancelling the report refunds the escrow; reporting again escrows it again.
   await page.getByRole("button", { name: "Cancel lost status" }).click();
   await expect(page.getByRole("button", { name: /Confirm delivery/ })).toBeVisible();
+  await expect.poll(() => custodyDollars(TEST1)).toBe(200);
   await page.getByRole("button", { name: "Report lost" }).click();
   await page.getByPlaceholder("Bounty (optional)").fill("50");
   await page.getByRole("button", { name: "File", exact: true }).click();
   await expect(page.getByRole("button", { name: "Cancel lost status" })).toBeVisible();
-  // The token stays alive while it's lost: custody Lost, still owned by the collector.
-  expect(await ownerOf(Number(cert))).toBe(ASH);
+  await expect.poll(() => escrowedBounty(Number(cert))).toBe(50);
 
-  // Another collector finds it and searches the cert from the top bar: the Marketplace only has
-  // listed slabs, so it points them to Lost cards, where they file a claim.
+  // Another collector finds it, searches the cert, and files a claim on-chain.
   await signOut(page, "smoke_out");
   await openAccount(page, "smoke_finder", 2);
   await page.getByPlaceholder(/Search Pokechain/).fill(cert);
   await page.getByPlaceholder(/Search Pokechain/).press("Enter");
   await page.getByRole("link", { name: new RegExp(`cert #${cert} is reported lost`) }).click();
-  await expect(page).toHaveURL(new RegExp(`/lost\\?q=${cert}`));
   await page.getByRole("button", { name: "Found Slab" }).click();
   await page.getByPlaceholder(/Location, date/).fill("Bought at a Sunday flea market stall in Bugis");
   await page.getByPlaceholder(/Front\/back label/).fill("PSA label shows the cert number, case intact, no tamper marks");
   await page.getByPlaceholder("DHL").fill("SingPost");
   await page.getByPlaceholder("Recovery shipment").fill("RR555000111SG");
   await page.getByRole("button", { name: "Submit found-slab claim" }).click();
-  await expect(page.getByText(/Recovery REC-\w+ opened/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Recovery in progress" })).toBeDisabled();
+  await expect(page).toHaveURL(/\/submissions\?tab=found/);
+  const finderCase = page.getByTestId("found-case-1");
+  await expect(finderCase).toContainText("You found it");
+  await expect(finderCase).toContainText("$50.00 bounty in escrow");
 
-  // Pokechain verifies it and ships it back to the owner on-chain.
-  await page.goto("/outtake");
-  await page.getByRole("button", { name: "Verify & return to owner" }).click();
-  await expect(page.getByText("Slab verified")).toBeVisible();
+  // Pokechain's intake authenticates it. The finder gets the case update without reloading.
+  const intake = await page.context().newPage();
+  await intake.goto("/intake");
+  await intake.getByTestId("found-intake-1").getByRole("button", { name: "Received & authenticated" }).click();
+  await expect(intake.getByText("Waiting for the owner to choose vault or delivery.")).toBeVisible();
+  await expect(finderCase).toContainText("Pokechain authenticated the slab you found");
 
-  // The owner confirms receipt: the Pokechain token burns and the bounty is released.
+  // The owner chooses the vault; Pokechain returns it, which closes the lost report on SlabVault.
   await signOut(page, "smoke_finder");
   await logIn(page, 1, "smoke_out");
-  await page.goto("/lost");
-  await page.getByPlaceholder("Search by card, cert #, notes...").fill(cert);
-  // The report can't be cancelled while the slab is on its way back.
-  await expect(page.getByRole("button", { name: "Found / Cancel" })).toBeDisabled();
-  await page.getByRole("button", { name: "Confirm received" }).click();
-  await expect(page.getByText("$50.00 was released to @smoke_finder.")).toBeVisible();
-  await expect(ownerOf(Number(cert))).rejects.toThrow();
-  // The delivered slab stays in the Withdrawn tab as its record; it's no longer listed as lost.
+  // The owner can't dodge the bounty now: cancelling the lost report reverts on-chain.
   await page.goto("/vault?tab=withdrawn");
-  await expect(page.getByText("burned after your receipt confirmation")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Cancel lost status" }).click();
+  await expect(page.getByText(/A finder's claim on this slab is open/)).toBeVisible();
+  await page.goto("/submissions?tab=found");
+  const ownerCase = page.getByTestId("found-case-1");
+  await expect(ownerCase).toContainText("Your lost slab");
+  await ownerCase.getByRole("button", { name: "Return to my vault" }).click();
+  await expect(page.getByText("Returning to your vault")).toBeVisible();
+  await intake.reload();
+  await intake.getByTestId("found-intake-1").getByRole("button", { name: "Back into intake for re-vaulting" }).click();
+  // It's at Pokechain, not in the vault yet, so the finder can't be paid.
+  await expect.poll(() => custodyOf(Number(cert))).toBe(7); // At Pokechain
+  await revaultFoundSlab(intake, cert);
+  await intake.close();
+  expect(await custodyOf(Number(cert))).toBe(1); // Vaulted
+  expect(await ownerOf(Number(cert))).toBe(ASH);
+
+  // The NFT is back in the owner's Vault, and the slab is off the Lost page.
+  await page.goto("/vault?tab=unlisted");
+  await expect(page.getByRole("button", { name: "Ship to me" })).toBeVisible({ timeout: 15_000 });
   await page.goto("/lost");
   await page.getByPlaceholder("Search by card, cert #, notes...").fill(cert);
-  await expect(page.getByRole("button", { name: "Confirm received" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Open found case|Found Slab/ })).toHaveCount(0);
 
-  // The finder sees the bounty in their wallet, and the closed report doesn't come back.
+  // The finder claims the bounty: LostAndFound checks SlabVault says Vaulted, then pays from escrow.
   await signOut(page, "smoke_out");
   await logIn(page, 2, "smoke_finder");
+  await page.goto("/submissions?tab=found");
+  await page.getByTestId("found-case-1").getByRole("button", { name: "Claim $50.00 bounty" }).click();
+  await expect(page.getByText("Bounty claimed")).toBeVisible();
+  await expect(page.getByTestId("found-case-1")).toContainText("$50.00 paid to the finder");
+  expect(await custodyDollars(TEST2)).toBe(50);
+  expect(await escrowedBounty(Number(cert))).toBe(0);
+  await page.reload();
+  await expect(page.getByTestId("found-case-1")).toContainText("Paid");
+
+  // The payout is in the finder's Wallet history, read from AccountRegistry/LostAndFound events.
   await page.goto("/wallet");
-  await expect(page.getByText("Lost slab recovery bounty")).toBeVisible();
-  await page.goto("/lost");
-  await page.getByPlaceholder("Search by card, cert #, notes...").fill(cert);
-  await expect(page.getByRole("button", { name: /Found Slab|Recovery in progress/ })).toHaveCount(0);
+  const finderHistory = page.getByTestId("onchain-payments");
+  await expect(finderHistory.getByRole("listitem").filter({ hasText: "Recovery bounty received · case #1" })).toContainText("+$50.00");
+
+  // The owner's history shows the escrow, the refund on cancel, and the second escrow.
+  await signOut(page, "smoke_finder");
+  await logIn(page, 1, "smoke_out");
+  await page.goto("/wallet");
+  const ownerHistory = page.getByTestId("onchain-payments");
+  await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Lost-slab bounty escrowed" })).toHaveCount(2);
+  await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Lost-slab bounty refunded" })).toContainText("+$50.00");
+  await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Deposit from wallet" })).toContainText("+$200.00");
 });
 
-test("lost & found: a slab that never reached the vault is reported lost on-chain with a bounty, then the owner cancels it", async ({ page, request }) => {
+test("lost & found: the owner picks delivery, and the bounty unlocks only after they confirm receipt", async ({ page, request }) => {
+  test.setTimeout(240_000);
+  const cert = "8887775";
+  await vaultedForAsh(page, request, cert);
+  await depositAsTest1(100);
+  await page.goto("/vault");
+  await page.getByRole("button", { name: "Ship to me" }).first().click();
+  await page.getByPlaceholder(/Ash Ketchum/).fill("Ash Ketchum, 1 Pallet Town Road");
+  await page.getByRole("button", { name: "Withdraw and ship to me" }).click();
+  await page.getByRole("button", { name: "Done" }).click();
+  expect((await request.post("/api/chain/outtake", { data: { certNumber: cert } })).ok()).toBeTruthy();
+  await page.goto("/vault?tab=withdrawn");
+  await page.getByRole("button", { name: "Report lost" }).click();
+  await page.getByPlaceholder("Bounty (optional)").fill("40");
+  await page.getByRole("button", { name: "File", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Cancel lost status" })).toBeVisible();
+
+  await signOut(page, "smoke_out");
+  await openAccount(page, "smoke_finder", 2);
+  await page.goto(`/lost?q=${cert}`);
+  await page.getByRole("button", { name: "Found Slab" }).click();
+  await page.getByPlaceholder(/Location, date/).fill("Left on an MRT seat at Dhoby Ghaut");
+  await page.getByPlaceholder(/Front\/back label/).fill("Label matches the cert, small scuff on the case");
+  await page.getByPlaceholder("DHL").fill("Ninja Van");
+  await page.getByPlaceholder("Recovery shipment").fill("NV0001SG");
+  await page.getByRole("button", { name: "Submit found-slab claim" }).click();
+  await expect(page.getByTestId("found-case-1")).toContainText("You found it");
+  // Pokechain's intake step, run with curl as the /intake page shows it.
+  expect((await request.post("/api/chain/found", { data: { claimId: "1", step: "receive" } })).ok()).toBeTruthy();
+
+  await signOut(page, "smoke_finder");
+  await logIn(page, 1, "smoke_out");
+  await page.goto("/submissions?tab=found");
+  const ownerCase = page.getByTestId("found-case-1");
+  await ownerCase.getByRole("button", { name: "Deliver to me" }).click();
+  await ownerCase.getByPlaceholder("Ash Ketchum, 1 Pallet Town Road").fill("Ash Ketchum, 1 Pallet Town Road");
+  await ownerCase.getByRole("button", { name: "Deliver here" }).click();
+  await expect(page.getByText("Delivery requested")).toBeVisible();
+  const returned = await request.post("/api/chain/found", { data: { claimId: "1", step: "return" } });
+  expect(returned.ok(), await returned.text()).toBeTruthy();
+  expect(await custodyOf(Number(cert))).toBe(3); // Shipped
+
+  // Shipped isn't enough: the finder's button stays disabled until the owner confirms receipt.
+  await signOut(page, "smoke_out");
+  await logIn(page, 2, "smoke_finder");
+  await page.goto("/submissions?tab=found");
+  await expect(page.getByTestId("found-case-1").getByRole("button", { name: "Claim $40.00 bounty" })).toBeDisabled();
+
+  await signOut(page, "smoke_finder");
+  await logIn(page, 1, "smoke_out");
+  await page.goto("/submissions?tab=found");
+  await page.getByTestId("found-case-1").getByRole("button", { name: "Confirm received" }).click();
+  await expect(page.getByText("Delivery confirmed")).toBeVisible();
+  await expect(ownerOf(Number(cert))).rejects.toThrow(); // burned on confirmed delivery
+
+  await signOut(page, "smoke_out");
+  await logIn(page, 2, "smoke_finder");
+  await page.goto("/submissions?tab=found");
+  await page.getByTestId("found-case-1").getByRole("button", { name: "Claim $40.00 bounty" }).click();
+  await expect(page.getByTestId("found-case-1")).toContainText("$40.00 paid to the finder");
+  expect(await custodyDollars(TEST2)).toBe(40);
+});
+
+test("lost & found: a slab that never reached the vault: a delay report, Pokechain's investigation, then an on-chain lost report with a bounty, then written off", async ({ page, request }) => {
   const cert = "8887774";
   await openAccount(page, "smoke_inbound");
   await page.goto("/submit");
@@ -634,24 +743,189 @@ test("lost & found: a slab that never reached the vault is reported lost on-chai
   await expect(page).toHaveURL(/\/submissions$/);
   const received = await request.post("/api/chain/receive", { data: { submissionId: cert } });
   expect(received.ok(), await received.text()).toBeTruthy();
+  await depositAsTest1(100);
 
-  // Months later it still isn't vaulted: report it lost from the Awaiting vault tab, with a bounty.
+  // Months later it still isn't vaulted: the owner reports the delay privately (nothing public yet).
   await page.goto("/vault?tab=awaiting");
-  await page.getByRole("button", { name: "Report lost" }).click();
+  await page.getByRole("button", { name: "Report vaulting delay" }).click();
+  await page.getByPlaceholder(/The card has not been vaulted yet/).fill("Still not vaulted after three months");
+  await page.getByRole("button", { name: "Submit report" }).click();
+  await expect(page.getByRole("main").getByText("Vaulting delay reported")).toBeVisible();
+  expect(await custodyOf(Number(cert))).toBe(7); // still At Pokechain
+
+  // The vault team's investigation (simulated on /intake) confirms it was lost.
+  const intake = await page.context().newPage();
+  await intake.goto("/intake");
+  await intake.getByPlaceholder("4324324").fill(cert);
+  await intake.getByRole("button", { name: "Simulate investigation" }).click();
+  await intake.close();
+
+  // The owner publishes it with a $75 bounty: SlabVault.reportLost, then LostAndFound escrows the $75.
+  await page.goto("/vault?tab=awaiting");
+  await page.getByRole("button", { name: "Pokechain replied — review" }).click();
+  await page.getByRole("button", { name: /Publish a lost-card bounty/ }).click();
   await page.getByPlaceholder("e.g. 150").fill("75");
-  await page.getByRole("dialog").getByRole("button", { name: "Report lost" }).click();
-  await expect(page.getByRole("button", { name: "Lost · $75.00 bounty" })).toBeVisible();
-  const pub = createPublicClient({ chain: hardhat, transport: http() });
-  const custody = async () =>
-    (await pub.readContract({ address: deployments["31337"].SlabVault, abi: slabVaultAbi, functionName: "slabOf", args: [BigInt(cert)] })).custody;
-  expect(await custody()).toBe(5); // Lost
+  await page.getByRole("button", { name: "Publish lost card" }).click();
+  await expect.poll(() => escrowedBounty(Number(cert))).toBe(75);
+  expect(await custodyOf(Number(cert))).toBe(5); // Lost
+  expect(await custodyDollars(TEST1)).toBe(25);
+  await expect(page.getByRole("button", { name: "Edit bounty" })).toBeVisible();
+  await page.goto(`/lost?q=${cert}`);
+  await expect(page.locator("div.rounded-card").filter({ hasText: `#${cert}` })).toContainText("$75.00 PokeCredits");
 
-  // Anyone can see it on Lost cards; the owner cancels it there and custody goes back on-chain.
-  await page.getByRole("button", { name: "Lost · $75.00 bounty" }).click();
-  await expect(page).toHaveURL(new RegExp(`/lost\\?q=${cert}`));
-  await page.reload();
-  await page.getByRole("button", { name: "Found / Cancel" }).click();
-  await expect.poll(custody).toBe(7); // back to At Pokechain
+  // The owner gives up and claims insurance: the bounty comes back and the token is burned.
   await page.goto("/vault?tab=awaiting");
-  await expect(page.getByRole("button", { name: "Report lost" })).toBeVisible();
+  await page.getByRole("button", { name: "Withdraw & claim insurance" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Withdraw and claim insurance" }).click();
+  await expect.poll(() => custodyOf(Number(cert))).toBe(10); // Written off
+  expect(await escrowedBounty(Number(cert))).toBe(0);
+  expect(await custodyDollars(TEST1)).toBe(100);
+  await page.goto(`/lost?q=${cert}`);
+  await expect(page.locator("div.rounded-card").filter({ hasText: `#${cert}` })).toHaveCount(0);
+});
+
+test("lost & found: a slab one collector reports lost is on every collector's Lost page, read from the chain", async ({ page, browser, request }) => {
+  test.setTimeout(180_000);
+  await resetSeeded(request);
+  // The seeded demo already has two slabs reported lost on-chain, visible to a logged-out visitor.
+  await page.goto("/lost");
+  await expect(page.getByText(/Showing\s*2\s*cards/)).toBeVisible();
+  await expect(page.getByText("$350.00 PokeCredits").first()).toBeVisible();
+
+  // test2 withdraws one of their slabs; it never arrives, so they report it lost with a $150 bounty.
+  await depositAsTest2(150);
+  const ownerCtx = await browser.newContext();
+  const owner = await ownerCtx.newPage();
+  await logIn(owner, 2, "test2");
+  await owner.goto("/vault");
+  await owner.getByRole("button", { name: "Ship to me" }).first().click();
+  const cert = (await owner.getByRole("dialog").getByText(/PSA cert \d+/).innerText()).match(/cert (\d+)/)![1];
+  await owner.getByPlaceholder(/Ash Ketchum/).fill("test2, 2 Cerulean Way");
+  await owner.getByRole("button", { name: "Withdraw and ship to me" }).click();
+  await owner.getByRole("button", { name: "Done" }).click();
+  expect((await request.post("/api/chain/outtake", { data: { certNumber: cert } })).ok()).toBeTruthy();
+  await owner.goto("/vault?tab=withdrawn");
+  await owner.getByRole("button", { name: "Report lost" }).click();
+  await owner.getByPlaceholder(/Not delivered after 10 days/).fill("Courier lost the parcel at the Tampines hub");
+  await owner.getByPlaceholder("Bounty (optional)").fill("150");
+  await owner.getByRole("button", { name: "File", exact: true }).click();
+  await expect(owner.getByText("Lost report and bounty filed")).toBeVisible();
+  expect(await custodyOf(Number(cert))).toBe(5); // Lost
+  expect(await escrowedBounty(Number(cert))).toBe(150);
+  // Nothing about the public report is kept in the owner's browser.
+  const savedPublicLosses = await owner.evaluate(() =>
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith("pokechain.state"))
+      .flatMap((k) => Object.values((JSON.parse(localStorage.getItem(k)!).vaultLosses ?? {}) as Record<string, { published?: boolean }>))
+      .filter((loss) => loss.published !== false),
+  );
+  expect(savedPublicLosses).toEqual([]);
+
+  // test1, in their own browser, sees it on the Lost page with its bounty and report, and after a reload.
+  await logIn(page, 1, "test1");
+  await page.goto(`/lost?q=${cert}`);
+  const card = page.locator("div.rounded-card").filter({ hasText: `#${cert}` });
+  await expect(card).toContainText("Courier lost the parcel at the Tampines hub");
+  await expect(card).toContainText("$150.00 PokeCredits");
+  await expect(card.getByRole("button", { name: "Found Slab" })).toBeVisible();
+  await page.reload();
+  await expect(card).toContainText("$150.00 PokeCredits");
+  await page.goto("/lost");
+  await expect(page.getByText(/Showing\s*3\s*cards/)).toBeVisible();
+
+  // test2 writes it off for insurance: SlabVault refunds the bounty and burns the token, so it leaves everyone's Lost page.
+  await owner.goto(`/lost?q=${cert}`);
+  await owner.locator("div.rounded-card").filter({ hasText: `#${cert}` }).getByRole("button", { name: "Withdraw", exact: true }).click();
+  await owner.getByRole("button", { name: "Withdraw and claim insurance" }).click();
+  await expect.poll(() => custodyOf(Number(cert))).toBe(10); // Written off
+  expect(await escrowedBounty(Number(cert))).toBe(0);
+  await expect(ownerOf(Number(cert))).rejects.toThrow();
+  await page.goto("/lost");
+  await expect(page.getByText(/Showing\s*2\s*cards/)).toBeVisible();
+  await ownerCtx.close();
+});
+
+test("bounty: the owner raises and lowers it from escrow, can't overspend, and a finder of a slab lost in the vault is paid", async ({ page, browser, request }) => {
+  test.setTimeout(240_000);
+  await resetSeeded(request);
+  // Seeded: test2's Shining Celebi went missing in the vault with $250 escrowed; test1's Alakazam with $100.
+  const celebi = 79961445;
+  const alakazam = 92596655;
+  expect(await escrowedBounty(celebi)).toBe(250);
+  expect(await custodyDollars(TEST2)).toBe(0);
+
+  const ownerCtx = await browser.newContext();
+  const owner = await ownerCtx.newPage();
+  await logIn(owner, 2, "test2");
+  await owner.goto("/vault");
+  await expect(owner.getByText("Lost in vault")).toBeVisible();
+  await expect(owner.getByText("Bounty: $250.00")).toBeVisible();
+
+  // Raising it with no Pokechain balance is refused before anything is sent.
+  const editBounty = async (dollars: number) => {
+    await owner.goto(`/lost?q=${celebi}`);
+    await owner.locator("div.rounded-card").filter({ hasText: `#${celebi}` }).getByRole("button", { name: "Edit bounty" }).click();
+    await owner.getByRole("spinbutton").fill(String(dollars));
+    await owner.getByRole("button", { name: "Save bounty" }).click();
+  };
+  await editBounty(400);
+  await expect(owner.getByText(/needs \$150\.00 more, but your Pokechain balance is \$0\.00/)).toBeVisible();
+  expect(await escrowedBounty(celebi)).toBe(250);
+
+  // With $200 deposited: raise to $400 (escrows $150 more), then lower to $300 (refunds $100).
+  await depositAsTest2(200);
+  await owner.getByRole("button", { name: "Save bounty" }).click();
+  await expect.poll(() => escrowedBounty(celebi)).toBe(400);
+  expect(await custodyDollars(TEST2)).toBe(50);
+  await editBounty(300);
+  await expect.poll(() => escrowedBounty(celebi)).toBe(300);
+  expect(await custodyDollars(TEST2)).toBe(150);
+  await owner.reload();
+  await expect(owner.locator("div.rounded-card").filter({ hasText: `#${celebi}` })).toContainText("$300.00 PokeCredits");
+
+  // test1 cancels the bounty on their own lost Alakazam from the Vault: the $100 comes back.
+  await logIn(page, 1, "test1");
+  const test1Before = await custodyDollars(TEST1);
+  await page.goto("/vault");
+  await page.getByRole("button", { name: "Cancel bounty" }).click();
+  await expect.poll(() => escrowedBounty(alakazam)).toBe(0);
+  expect(await custodyDollars(TEST1)).toBe(test1Before + 100);
+
+  // test1 finds test2's Celebi and files a claim; the case shows the escrowed bounty.
+  await page.goto(`/lost?q=${celebi}`);
+  await page.getByRole("button", { name: "Found Slab" }).click();
+  await page.getByPlaceholder(/Location, date/).fill("Spotted at a card show in Suntec, seller had no paperwork");
+  await page.getByPlaceholder(/Front\/back label/).fill("BGS label matches the cert, subgrades 8 / 9.5 / 8 / 8.5");
+  await page.getByPlaceholder("DHL").fill("SingPost");
+  await page.getByPlaceholder("Recovery shipment").fill("RR777000111SG");
+  await page.getByRole("button", { name: "Submit found-slab claim" }).click();
+  const finderCase = page.getByTestId("found-case-1");
+  await expect(finderCase).toContainText("$300.00 bounty in escrow");
+
+  // Pokechain authenticates it, test2 picks their vault, and Pokechain puts it back.
+  const intake = await page.context().newPage();
+  await intake.goto("/intake");
+  await intake.getByTestId("found-intake-1").getByRole("button", { name: "Received & authenticated" }).click();
+  await expect(intake.getByText("Waiting for the owner to choose vault or delivery.")).toBeVisible();
+  await owner.goto("/submissions?tab=found");
+  await owner.getByTestId("found-case-1").getByRole("button", { name: "Return to my vault" }).click();
+  await expect(owner.getByText("Returning to your vault")).toBeVisible();
+  await intake.reload();
+  await intake.getByTestId("found-intake-1").getByRole("button", { name: "Back into intake for re-vaulting" }).click();
+  await revaultFoundSlab(intake, String(celebi));
+  await intake.close();
+  expect(await custodyOf(celebi)).toBe(1); // Vaulted again
+  await owner.goto("/vault");
+  await expect(owner.getByText("Lost in vault")).toHaveCount(0);
+
+  // test1 claims the bounty: LostAndFound pays the $300 from escrow.
+  const finderBefore = await custodyDollars(TEST1);
+  await page.goto("/submissions?tab=found");
+  await page.getByTestId("found-case-1").getByRole("button", { name: "Claim $300.00 bounty" }).click();
+  await expect(page.getByTestId("found-case-1")).toContainText("$300.00 paid to the finder");
+  expect(await custodyDollars(TEST1)).toBe(finderBefore + 300);
+  expect(await escrowedBounty(celebi)).toBe(0);
+  await page.goto("/lost");
+  await expect(page.getByText(/Showing\s*1\s*card/)).toBeVisible();
+  await ownerCtx.close();
 });

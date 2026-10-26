@@ -11,10 +11,10 @@ import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useEscrowedByMe } from "@/lib/chain/trades";
-import { useStore } from "@/lib/store";
+import { useLostSlabs, useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
-import { useSlabChain } from "@/lib/chain/useSlabChain";
+import { useLostReport } from "@/lib/chain/useLostAndFound";
 import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { RedeemModal } from "../chain/RedeemModal";
 import { TransferModal } from "../chain/TransferModal";
@@ -47,16 +47,19 @@ export function VaultView() {
     balance,
     vaultLosses,
     reportVaultLost,
-    cancelVaultLost,
     setVaultBounty,
-    cancelVaultBounty,
-    withdrawLostForInsurance,
     pendingLossDecisions,
     resolveLossDecision,
     pushToast,
   } = useStore();
   const { cancelListing } = useMarketChain();
-  const { reportLost } = useSlabChain();
+  const lost = useLostReport();
+  const lostSlabs = useLostSlabs();
+  // A slab reported lost on-chain: its report comes from SlabVault, not this browser.
+  const chainLoss = (entry: VaultItem) =>
+    entry.token ? lostSlabs.find((item) => item.listing.tokenId === entry.token!.tokenId) : undefined;
+  const lossFor = (entry: VaultItem, listing: Listing) => chainLoss(entry)?.loss ?? vaultLosses[listing.id];
+  const lostTokenId = (entry: VaultItem) => (chainLoss(entry) ? entry.token!.tokenId : undefined);
   const [delistingId, setDelistingId] = useState<string | null>(null);
   const [gridSize, setGridSize] = useState<"medium" | "small">("medium");
 
@@ -110,14 +113,23 @@ export function VaultView() {
     (id) => id === listing.id || id === listing.tokenId || id === `token-${listing.tokenId}`,
   );
 
-  const submitLossDecision = () => {
+  const submitLossDecision = async () => {
     if (!decisionTarget || !decisionChoice) return;
     const decisionId = Object.keys(pendingLossDecisions).find(
       (id) => id === decisionTarget.listing.id || id === decisionTarget.listing.tokenId || id === `token-${decisionTarget.listing.tokenId}`,
     ) ?? decisionTarget.listing.id;
     if (decisionChoice === "bounty") {
       const amount = Number(decisionBounty);
-      if (Number.isFinite(amount) && amount > 0) setVaultBounty(decisionId, amount);
+      const tokenId = decisionTarget.entry.token?.tokenId;
+      if (IS_DEPLOYED && tokenId) {
+        // Publishing the private delay report: it becomes a public lost report on SlabVault.
+        try {
+          await lost.report(decisionTarget.listing.id, tokenId, vaultLosses[decisionId]?.details ?? "Lost on its way to the vault", { inTransit: true, bounty: amount });
+        } catch (err) {
+          pushToast({ title: "Could not publish the lost report", body: (err as Error).message, tone: "error" });
+          return;
+        }
+      } else if (Number.isFinite(amount) && amount > 0) setVaultBounty(decisionId, amount);
     }
     resolveLossDecision(decisionId);
     setDecisionTarget(null);
@@ -163,13 +175,13 @@ export function VaultView() {
       if (entry.status === "Listed" && user?.address && entry.token?.tokenId) {
         await cancelListing(entry.token.tokenId);
       }
-      if (entry.status === "Awaiting vaulting" && entry.token?.tokenId) {
-        await reportLost(entry.token.tokenId, missingDetails.trim() || "Reported lost while in transit to the vault");
-      }
-      const inTransit = entry.status === "Awaiting vaulting" && Boolean(entry.token?.tokenId);
-      reportVaultLost(listing.id, missingDetails.trim() || (inTransit ? "Reported lost while in transit to the vault" : "Reported missing from the vault"), inTransit);
-      const bounty = Number(missingBounty);
-      if (Number.isFinite(bounty) && bounty > 0) setVaultBounty(listing.id, bounty);
+      const inTransit = entry.status === "Awaiting vaulting";
+      await lost.report(
+        listing.id,
+        entry.token?.tokenId,
+        missingDetails.trim() || (inTransit ? "Reported lost while in transit to the vault" : "Reported missing from the vault"),
+        { inTransit, bounty: Number(missingBounty) },
+      );
       setMissingTarget(null);
       setMissingDetails("");
       setMissingBounty("");
@@ -297,10 +309,18 @@ export function VaultView() {
                       onReportLost={entry.token?.tokenId ? () => setMissingTarget({ entry, listing }) : undefined}
                       decisionPending={hasPendingDecision(listing)}
                       onReviewDecision={() => setDecisionTarget({ entry, listing })}
-                      loss={vaultLosses[listing.id]}
-                      onCancelMissing={() => cancelVaultLost(listing.id)}
+                      loss={lossFor(entry, listing)}
+                      onCancelMissing={() =>
+                        void lost.cancel(listing.id, lostTokenId(entry)).catch((err: Error) =>
+                          pushToast({ title: "Could not cancel the report", body: err.message, tone: "error" }),
+                        )
+                      }
                       onAddBounty={() => setBountyTarget({ entry, listing })}
-                      onCancelBounty={() => cancelVaultBounty(listing.id)}
+                      onCancelBounty={() =>
+                        void lost.setBounty(listing.id, 0, lostTokenId(entry)).catch((err: Error) =>
+                          pushToast({ title: "Could not cancel bounty", body: err.message, tone: "error" }),
+                        )
+                      }
                       onWithdrawInsurance={() => setInsuranceWithdrawTarget({ entry, listing })}
                     />
                   </div>
@@ -334,7 +354,7 @@ export function VaultView() {
                   key={listing.id}
                   entry={entry}
                   listing={listing}
-                  loss={vaultLosses[listing.id]}
+                  loss={lossFor(entry, listing)}
                   decisionPending={hasPendingDecision(listing)}
                   onReviewDecision={() => setDecisionTarget({ entry, listing })}
                   onReportLost={() => setAwaitingReportTarget({ entry, listing })}
@@ -445,7 +465,7 @@ export function VaultView() {
                 <input className={inputClass} inputMode="decimal" value={decisionBounty} onChange={(event) => setDecisionBounty(event.target.value.replace(/[^\d.]/g, ""))} placeholder="e.g. 150" />
               </Field>
             ) : null}
-            <Button className="w-full" onClick={submitLossDecision} disabled={!decisionChoice}>{decisionChoice === "insurance" ? "Submit insurance claim" : decisionChoice === "bounty" ? "Publish lost card" : "Choose an outcome"}</Button>
+            <Button className="w-full" onClick={() => void submitLossDecision()} disabled={!decisionChoice}>{decisionChoice === "insurance" ? "Submit insurance claim" : decisionChoice === "bounty" ? "Publish lost card" : "Choose an outcome"}</Button>
           </div>
         ) : null}
       </Modal>
@@ -465,8 +485,11 @@ export function VaultView() {
                 variant="danger"
                 className="flex-1"
                 onClick={() => {
-                  withdrawLostForInsurance(insuranceWithdrawTarget.listing.id);
+                  const { entry, listing } = insuranceWithdrawTarget;
                   setInsuranceWithdrawTarget(null);
+                  void lost.writeOff(listing.id, lostTokenId(entry)).catch((err: Error) =>
+                    pushToast({ title: "Could not withdraw the report", body: err.message, tone: "error" }),
+                  );
                 }}
               >
                 Withdraw and claim insurance
@@ -563,12 +586,16 @@ export function VaultView() {
       <BountyModal
         key={bountyTarget?.listing.id ?? "no-bounty-target"}
         target={bountyTarget}
-        existing={bountyTarget ? vaultLosses[bountyTarget.listing.id]?.bounty?.amount : undefined}
+        existing={bountyTarget ? lossFor(bountyTarget.entry, bountyTarget.listing)?.bounty?.amount : undefined}
         onClose={() => setBountyTarget(null)}
-        onSave={(amount) => {
+        onSave={async (amount) => {
           if (!bountyTarget) return;
-          setVaultBounty(bountyTarget.listing.id, amount);
-          setBountyTarget(null);
+          try {
+            await lost.setBounty(bountyTarget.listing.id, amount, lostTokenId(bountyTarget.entry));
+            setBountyTarget(null);
+          } catch (err) {
+            pushToast({ title: "Could not set bounty", body: (err as Error).message, tone: "error" });
+          }
         }}
       />
 

@@ -104,6 +104,8 @@ export interface CcCard {
   burnt?: boolean;
   vaultedAt: string;
   redemptionId?: string;
+  /** 1 for the first deposit; higher when the slab came back after a redemption. */
+  deposit?: number;
   history: SolanaTx[];
 }
 
@@ -143,10 +145,14 @@ function solanaTx(seed: string, type: SolanaTx["type"], description: string): So
 export function intake(input: { grader: Grader; certNumber: string; owner?: string; depositorRef?: string }) {
   const db = load();
   const key = keyOf(input.grader, input.certNumber);
-  if (db.cards[key]) return { card: db.cards[key], created: false };
+  const previous = db.cards[key];
+  if (previous && !previous.burnt && previous.vaultStatus === "Vaulted") return { card: previous, created: false };
   const preview = certPreview(input.grader, input.certNumber);
   if (!preview) return { error: `${input.grader} has no record of cert ${input.certNumber}` };
-  const assetId = base58(digest(`collector-crypt:asset:${key}`));
+  // A slab that left the vault (its NFT was burnt) and came back, e.g. a found lost slab, is a
+  // new deposit: CC mints a new NFT, and the old one's history stays attached to the record.
+  const deposit = previous ? (previous.deposit ?? 1) + 1 : 1;
+  const assetId = base58(digest(deposit === 1 ? `collector-crypt:asset:${key}` : `collector-crypt:asset:${key}:${deposit}`));
   const owner = input.owner ?? POKECHAIN_ESCROW;
   const card: CcCard = {
     assetId,
@@ -160,8 +166,16 @@ export function intake(input: { grader: Grader; certNumber: string; owner?: stri
     vaultStatus: "Vaulted",
     frozen: false,
     vaultedAt: new Date().toISOString(),
+    deposit,
     history: [
-      solanaTx(`${assetId}:mint`, "MINT", `Minted ${preview.title} to ${owner} on vault intake`),
+      ...(previous?.history ?? []),
+      solanaTx(
+        `${assetId}:mint`,
+        "MINT",
+        previous
+          ? `Re-deposited; minted ${preview.title} to ${owner} (replaces burnt NFT ${previous.assetId})`
+          : `Minted ${preview.title} to ${owner} on vault intake`,
+      ),
     ],
   };
   db.cards[key] = card;
