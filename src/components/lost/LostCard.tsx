@@ -2,8 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { AlertTriangle, Coins, Copy, Check, MessageSquare, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertTriangle, Coins, Copy, Check, ShieldAlert, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { usd } from "@/lib/format";
 import { useStore, type LostSlabItem } from "@/lib/store";
@@ -19,9 +18,8 @@ export function LostCard({
   size?: "medium" | "small";
   onManageBounty?: (listingId: string) => void;
 }) {
-  const router = useRouter();
   const { listing, loss } = item;
-  const { user, isOwned, openChat, cancelVaultLost, pushToast } = useStore();
+  const { user, isOwned, cancelVaultLost } = useStore();
   const owned = isOwned(listing.id) || (user && listing.owner.toLowerCase() === user.username.toLowerCase());
   const small = size === "small";
 
@@ -35,25 +33,12 @@ export function LostCard({
     setTimeout(() => setCopied(false), 1800);
   };
 
-  const handleContactOwner = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!user) {
-      pushToast({ title: "Sign in required", body: "Connect your wallet or sign in to message the owner.", tone: "error" });
-      return;
-    }
-    const chatId = openChat(listing);
-    if (chatId) {
-      router.push(`/trades/${chatId}`);
-    } else {
-      router.push("/trades");
-    }
-  };
+  const lostDetailsHref = `/asset/${listing.id}?lost=1`;
 
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-card border border-hairline bg-surface transition-all duration-200 hover:-translate-y-0.5 hover:border-warn/40 hover:shadow-lg hover:shadow-warn/5 motion-reduce:transition-none">
       {/* Slab visual with interactive tilt */}
-      <Link href={`/asset/${listing.id}`} className="block">
+      <Link href={lostDetailsHref} className="block">
         <div className={clsx("relative bg-[#101014]", small ? "p-2" : "p-4")}>
           <Slab listing={listing} interactive maxTilt={9} />
 
@@ -79,7 +64,7 @@ export function LostCard({
       <div className={clsx("flex flex-1 flex-col justify-between", small ? "p-2.5 pt-2" : "p-3.5 pt-3")}>
         <div>
           {/* Card Title */}
-          <Link href={`/asset/${listing.id}`}>
+          <Link href={lostDetailsHref}>
             <h3
               className={clsx(
                 "line-clamp-2 font-semibold leading-snug hover:underline text-white",
@@ -118,7 +103,7 @@ export function LostCard({
           )}>
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-muted">
-                Reported by <span className="font-semibold text-white/90">@{listing.owner}</span>
+                Reported to <span className="font-semibold text-white/90">Pokechain</span>
               </span>
               <span className="text-dim text-[10.5px]">
                 <TimeAgo value={loss.reportedAt} />
@@ -133,7 +118,7 @@ export function LostCard({
                   <Sparkles size={12} /> Recovery Bounty:
                 </span>
                 <span className="font-extrabold text-white">
-                  {usd(loss.bounty.amount)} USDC
+                  {usd(loss.bounty.amount)} PokeCredits
                 </span>
               </div>
             ) : null}
@@ -163,18 +148,9 @@ export function LostCard({
             </div>
           ) : (
             <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                className="flex-1 text-[11.5px] flex items-center justify-center gap-1.5"
-                onClick={handleContactOwner}
-              >
-                <MessageSquare size={13} />
-                Message owner
-              </Button>
-              <Link href={`/asset/${listing.id}`} className="shrink-0">
-                <Button size="sm" variant="outline" className="text-[11.5px]">
-                  Details
+              <Link href={lostDetailsHref} className="w-full">
+                <Button size="sm" variant="outline" className="w-full text-[11.5px]">
+                  View details
                 </Button>
               </Link>
             </div>

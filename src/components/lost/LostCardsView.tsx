@@ -97,9 +97,9 @@ export function LostCardsView() {
     const terms = q ? q.split(/\s+/) : [];
 
     let pool = lostSlabs.filter(({ listing, loss }) => {
-      // Search text across title, subject, set, certNumber, owner, and loss details
+        // Search public card metadata and loss details; owner identity is private.
       if (terms.length) {
-        const haystack = `${listing.title} ${listing.subject} ${listing.set} ${listing.certNumber} ${listing.owner} ${loss.details}`.toLowerCase();
+          const haystack = `${listing.title} ${listing.subject} ${listing.set} ${listing.certNumber} ${loss.details}`.toLowerCase();
         if (!terms.every((t) => haystack.includes(t))) return false;
       }
       // Bounty filter
@@ -152,7 +152,7 @@ export function LostCardsView() {
             </div>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
               Registry of physical slabs currently reported missing from the vault or in transit.
-              If you have custody information or locate a card, contact the owner directly to arrange recovery and claim active bounties.
+                If you locate a card, use its details to help Pokechain verify and recover it; active bounties remain visible.
             </p>
           </div>
 
@@ -173,7 +173,7 @@ export function LostCardsView() {
               </span>
               <p className="mt-0.5 text-xl font-extrabold text-good flex items-center gap-1.5">
                 <Coins size={16} />
-                {usd(totalBounties)}
+                {usd(totalBounties)} PokeCredits
               </p>
             </div>
           </div>
@@ -232,7 +232,7 @@ export function LostCardsView() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by card, cert #, owner, notes..."
+              placeholder="Search by card, cert #, notes..."
             className={`${inputClass} h-10 pl-10 pr-9`}
           />
           {query ? (
@@ -266,14 +266,20 @@ export function LostCardsView() {
       {filtered.length ? (
         <div
           className={clsx(
-            "mt-4 grid gap-3.5",
+            "mt-4 grid gap-3",
             gridSize === "small"
-              ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7"
-              : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5",
+              ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9"
+              : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
           )}
         >
-          {filtered.map((item) => (
-            <div key={item.listing.id} className="min-w-0">
+          {filtered.map((item, index) => {
+            const shouldAnimate = index < 12;
+            return (
+            <div
+              key={item.listing.id}
+              className={clsx("min-w-0", shouldAnimate && "fade-up motion-reduce:animate-none")}
+              style={shouldAnimate ? { animationDelay: `${index * 22}ms` } : undefined}
+            >
               <LostCard
                 item={item}
                 size={gridSize}
@@ -283,7 +289,8 @@ export function LostCardsView() {
                 }}
               />
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         /* Empty State */
@@ -332,7 +339,7 @@ export function LostCardsView() {
               Offer a PokeCredit reward to community members or courier agents who help locate this slab.
             </p>
             <div>
-              <label className="text-[12px] font-semibold text-muted">Bounty amount (USDC)</label>
+              <label className="text-[12px] font-semibold text-muted">Bounty amount (PokeCredits)</label>
               <input
                 type="number"
                 min="5"

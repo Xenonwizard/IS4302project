@@ -18,7 +18,7 @@ import {
   Truck,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
@@ -79,6 +79,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const client = usePublicClient();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const lostView = searchParams.get("lost") === "1";
 
   const tokenIdBigInt = resolvedTokenId ? BigInt(resolvedTokenId) : null;
   const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
@@ -162,11 +164,11 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     if (awaitingVaulting) router.replace("/vault?tab=awaiting");
   }, [awaitingVaulting, router]);
 
-  const listed = enabledOnChain
+  const listed = !lostView && (enabledOnChain
     ? onChainMarketListing !== undefined
       ? Boolean(onChainMarketListing)
       : isListed(listing.id)
-    : isListed(listing.id);
+    : isListed(listing.id));
 
   const displayPrice = enabledOnChain && onChainMarketListing
     ? onChainMarketListing.price
@@ -175,13 +177,13 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const effectiveListing = useMemo(
     () => ({
       ...listing,
-      owner: currentOwner,
-      ownerAddress: currentOwnerAddress,
+      owner: lostView ? "Anonymous owner" : currentOwner,
+      ownerAddress: lostView ? "" : currentOwnerAddress,
       price: displayPrice,
       acceptsLoan: onChainMarketListing?.acceptsLoan ?? listing.acceptsLoan,
       loanAsk: onChainMarketListing?.loanAsk ?? listing.loanAsk,
     }),
-    [listing, currentOwner, currentOwnerAddress, displayPrice, onChainMarketListing],
+    [listing, lostView, currentOwner, currentOwnerAddress, displayPrice, onChainMarketListing],
   );
 
   const refreshActivity = () => {
@@ -551,16 +553,20 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <h1 className="text-[22px] font-bold leading-tight">{listing.title}</h1>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
-            <span className="flex items-center gap-2 text-muted">
-              Owned by
-              <Link
-                href={`/profile/${currentOwner}`}
-                className="flex items-center gap-1.5 font-semibold text-accent hover:underline"
-              >
-                <Avatar name={currentOwner} size={18} />
-                {currentOwner}
-              </Link>
-            </span>
+            {lostView ? (
+              <span className="text-muted">Owner identity hidden for lost-card recovery</span>
+            ) : (
+              <span className="flex items-center gap-2 text-muted">
+                Owned by
+                <Link
+                  href={`/profile/${currentOwner}`}
+                  className="flex items-center gap-1.5 font-semibold text-accent hover:underline"
+                >
+                  <Avatar name={currentOwner} size={18} />
+                  {currentOwner}
+                </Link>
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -659,7 +665,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               loading: enabledOnChain && onChainOwner === undefined,
               contractAddress: IS_DEPLOYED ? contracts.slabVault.address : null,
               tokenId: onChainOwner?.address ? resolvedTokenId : null,
-              ownerAddress: onChainOwner?.address ?? null,
+              ownerAddress: lostView ? null : onChainOwner?.address ?? null,
             }}
           />
         </div>
@@ -677,8 +683,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-semibold">{e.price ? usd(e.price) : "—"}</p>
                 <p className="truncate text-[12px] text-muted">
-                  From <span className="text-white/80">{e.from}</span> to{" "}
-                  <span className="text-white/80">{e.to}</span>
+                  From <span className="text-white/80">{lostView ? "Anonymous" : e.from}</span> to{" "}
+                  <span className="text-white/80">{lostView ? "Anonymous" : e.to}</span>
                 </p>
               </div>
               <span className="shrink-0 text-[12px] text-dim">
@@ -704,7 +710,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <p className="mt-1 text-[12px] text-muted">
                 {listing.grader} Cert #{listing.certNumber}
               </p>
-              <p className="mt-1 text-[12px] text-muted">Seller: @{currentOwner}</p>
+              <p className="mt-1 text-[12px] text-muted">{lostView ? "Seller identity hidden" : `Seller: @${currentOwner}`}</p>
             </div>
           </div>
 
