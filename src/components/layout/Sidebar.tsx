@@ -6,9 +6,11 @@ import { usePathname } from "next/navigation";
 import {
   ChevronsLeft,
   ChevronsRight,
+  ClipboardList,
   Heart,
   House,
   MessagesSquare,
+  Plus,
   ShieldCheck,
   Store,
   UserRound,
@@ -19,6 +21,7 @@ const NAV = [
   { href: "/", label: "Home", short: "Home", icon: House },
   { href: "/marketplace", label: "Marketplace", short: "Market", icon: Store },
   { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
+  { href: "/submissions", label: "Submissions", short: "Submit", icon: ClipboardList },
   { href: "/vault", label: "Vault", short: "Vault", icon: ShieldCheck },
   { href: "/watchlist", label: "Watchlist", short: "Watchlist", icon: Heart },
   { href: "/wallet", label: "Wallet", short: "Wallet", icon: Wallet },
@@ -72,6 +75,19 @@ export function Sidebar({
           })}
         </ul>
       </nav>
+      <div className="border-t border-hairline p-3 pb-[72px]">
+        <Link
+          href="/submit"
+          title={collapsed ? "Add a slab" : undefined}
+          className={clsx(
+            "flex h-11 items-center gap-3 rounded-xl bg-accent px-3 text-sm font-semibold text-white transition hover:bg-accent-hover active:scale-[0.99]",
+            collapsed && "justify-center px-0",
+          )}
+        >
+          <Plus size={19} strokeWidth={2.3} />
+          {!collapsed ? <span>Add a slab</span> : null}
+        </Link>
+      </div>
     </aside>
   );
 }

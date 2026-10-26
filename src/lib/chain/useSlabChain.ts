@@ -80,8 +80,11 @@ export function useSlabChain() {
         label: "Submit slab",
       });
       const [event] = parseEventLogs({ abi: contracts.slabVault.abi, logs: receipt.logs, eventName: "SubmissionRequested" });
-      // Show the new submission's tracker straight away rather than on the next poll.
-      await queryClient.invalidateQueries({ queryKey: ["pending-submissions"] });
+      // Show the new request in Submissions before navigating back to the list.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["submissions"] }),
+        queryClient.invalidateQueries({ queryKey: ["pending-submissions"] }),
+      ]);
       return event.args.submissionId.toString();
     },
     [send, queryClient],

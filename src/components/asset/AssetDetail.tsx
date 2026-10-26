@@ -17,7 +17,8 @@ import {
   Tag,
   Truck,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { truncMiddle, usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
@@ -77,6 +78,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const acct = useOnchainAccount();
   const client = usePublicClient();
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const tokenIdBigInt = resolvedTokenId ? BigInt(resolvedTokenId) : null;
   const enabledOnChain = Boolean(client && tokenIdBigInt !== null && IS_DEPLOYED);
@@ -155,6 +157,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     : isOwned(listing.id);
   const vaultEntry = vault.find((entry) => entry.listingId === listing.id || entry.token?.tokenId === resolvedTokenId);
   const awaitingVaulting = owned && vaultEntry?.status === "Awaiting vaulting";
+  // A slab still being vaulted has no page of its own: it lives in the Vault's Awaiting vault tab.
+  useEffect(() => {
+    if (awaitingVaulting) router.replace("/vault?tab=awaiting");
+  }, [awaitingVaulting, router]);
 
   const listed = enabledOnChain
     ? onChainMarketListing !== undefined
@@ -453,6 +459,10 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     (n) => n.listingId === listing.id && n.status === "open",
   ).length;
 
+  if (awaitingVaulting) {
+    return <div className="px-4 py-10 text-center text-sm text-muted">Opening Awaiting vault…</div>;
+  }
+
   return (
     <div className="px-4 py-5 lg:px-6">
       <div className="mb-4 empty:hidden">
@@ -509,7 +519,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           <div className="flex items-center justify-between gap-3">
             <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
               <ShieldCheck size={13} className="text-good" />
-              {awaitingVaulting ? "Awaiting vaulting" : "Vaulted and insured"}
+              Vaulted and insured
             </Badge>
             <div className="flex items-center gap-2">
               <button
@@ -578,27 +588,17 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <div className="min-w-0">
                 <p className="text-[12px] font-semibold text-muted">{listed ? "Listed for" : "Listing status"}</p>
                 <p className="mt-1 text-[30px] font-bold leading-tight">
-                  {listed ? usd(displayPrice, { cents: Boolean(onChainTokenId) }) : awaitingVaulting ? "Awaiting vaulting" : "Not listed"}
+                  {listed ? usd(displayPrice, { cents: Boolean(onChainTokenId) }) : "Not listed"}
                 </p>
                 {!listed ? (
                   <p className="mt-2 text-[12px] leading-relaxed text-muted">
-                    {awaitingVaulting
-                      ? "Received at Pokechain and waiting for Collector Crypt to vault it. The NFT stays locked until then; the only action is reporting it lost from your Vault."
-                      : owned
-                        ? "Held in your vault and ready to list."
-                        : "This slab is not for sale right now."}
+                    {owned ? "Held in your vault and ready to list." : "This slab is not for sale right now."}
                   </p>
                 ) : null}
               </div>
 
               <div className="grid min-w-0 gap-2">
-                {awaitingVaulting ? (
-                  <Link href="/vault">
-                    <Button size="lg" variant="secondary" className="w-full">
-                      Open Vault
-                    </Button>
-                  </Link>
-                ) : owned ? listed ? (
+                {owned ? listed ? (
                   <>
                     <Link href={`/trades?listing=${listing.id}`}>
                       <Button size="lg" className="w-full">

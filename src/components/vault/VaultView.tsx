@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Blocks, Grid2x2, Grid3x3, Lock, MessagesSquare, Package, PackageOpen, Plus, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, Grid2x2, Grid3x3, Lock, MessagesSquare, Package, PackageOpen, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
 import type { Address } from "viem";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
@@ -16,7 +16,6 @@ import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import type { Listing, VaultItem } from "@/lib/types";
-import { PendingSubmissions } from "../chain/PendingSubmissions";
 import { RedeemModal } from "../chain/RedeemModal";
 import { TransferModal } from "../chain/TransferModal";
 import { WithdrawnList } from "../chain/WithdrawnList";
@@ -29,7 +28,7 @@ type Tab = "all" | "awaiting" | "listed" | "unlisted" | "withdrawn";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "awaiting", label: "Awaiting vaulting" },
+  { value: "awaiting", label: "Awaiting vault" },
   { value: "listed", label: "Listed" },
   { value: "unlisted", label: "Unlisted" },
   { value: "withdrawn", label: "Withdrawn" },
@@ -52,15 +51,6 @@ export function VaultView() {
   const { reportLost } = useSlabChain();
   const [delistingId, setDelistingId] = useState<string | null>(null);
   const [gridSize, setGridSize] = useState<"medium" | "small">("medium");
-
-  const handleReportLost = async (tokenId: string) => {
-    try {
-      await reportLost(tokenId, "Reported from the awaiting-vaulting card");
-      pushToast({ title: "Loss report filed", body: "The token is locked while Pokechain investigates.", tone: "success" });
-    } catch (err) {
-      pushToast({ title: "Could not report the slab lost", body: (err as Error).message, tone: "error" });
-    }
-  };
 
   const handleDelist = async (listingId: string, tokenId?: string) => {
     setDelistingId(listingId);
@@ -96,12 +86,11 @@ export function VaultView() {
         .filter((x): x is { entry: VaultItem; listing: Listing } => Boolean(x)),
     [vault, resolve, user?.address],
   );
-  // Withdrawn slabs have left the vault but keep their token, so they get their own tab.
   const items = allItems.filter((i) => i.entry.status !== "Withdrawn");
+  const awaiting = items.filter((i) => i.entry.status === "Awaiting vaulting");
   const withdrawn = allItems.filter((i) => i.entry.status === "Withdrawn");
 
   const totalValue = items.reduce((sum, i) => sum + (i.entry.status === "Listed" ? i.entry.listedPrice ?? i.listing.price : 0), 0);
-  const awaiting = items.filter((i) => i.entry.status === "Awaiting vaulting");
   const listed = items.filter((i) => i.entry.status === "Listed");
   const unlisted = items.filter((i) => i.entry.status === "Vaulted");
   const counts: Record<Tab, number> = {
@@ -110,6 +99,15 @@ export function VaultView() {
     listed: listed.length,
     unlisted: unlisted.length,
     withdrawn: withdrawn.length,
+  };
+
+  const handleReportLost = async (tokenId: string) => {
+    try {
+      await reportLost(tokenId, "Reported lost from Awaiting vault");
+      pushToast({ title: "Lost slab reported", body: "The vault team has been notified.", tone: "success" });
+    } catch (err) {
+      pushToast({ title: "Could not report slab", body: (err as Error).message, tone: "error" });
+    }
   };
 
   if (!ready) {
@@ -134,25 +132,14 @@ export function VaultView() {
 
   return (
     <div className="px-4 py-5 lg:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[24px] font-bold">Vault</h1>
-        <Link href="/submit">
-          <Button size="sm">
-            <Plus size={14} /> Vault a slab
-          </Button>
-        </Link>
-      </div>
+      <h1 className="text-[24px] font-bold">Vault</h1>
       <p className="mt-1 text-[13px] text-muted">
         {user.address
           ? "Stored by Collector Crypt. Each slab's token is yours on Polygon, and its Collector Crypt NFT is held in Pokechain's escrow."
           : `Held in the ${BRAND.vaultCity} vault, insured.`}
+        {" "}
+        <Link href="/submissions" className="font-semibold text-accent hover:underline">Track inbound requests in Submissions.</Link>
       </p>
-
-      {user.address ? (
-        <div className="mt-5">
-          <PendingSubmissions />
-        </div>
-      ) : null}
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Slabs owned" value={String(items.length)} />
@@ -211,15 +198,16 @@ export function VaultView() {
             </div>
           </div>
         ) : null}
-        {tab === "all" || tab === "awaiting" || tab === "unlisted" ? (
-          (tab === "all" ? items : tab === "awaiting" ? awaiting : unlisted).length ? (
+        {/* Awaiting vault has its own block below, so it isn't drawn twice. */}
+        {tab === "all" || tab === "unlisted" ? (
+          (tab === "all" ? items : unlisted).length ? (
             <div className={clsx(
               "grid gap-3",
               gridSize === "small"
                 ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9"
                 : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
             )}>
-              {(tab === "all" ? items : tab === "awaiting" ? awaiting : unlisted).map(({ entry, listing }, index) => {
+              {(tab === "all" ? items : unlisted).map(({ entry, listing }, index) => {
                 const shouldAnimate = index < 12;
                 return (
                   <div
@@ -235,8 +223,8 @@ export function VaultView() {
                       onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
                       onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                       onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
-                      onReportLost={entry.status === "Awaiting vaulting" && entry.token ? () => void handleReportLost(entry.token!.tokenId) : undefined}
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
+                      onReportLost={entry.token?.tokenId ? () => void handleReportLost(entry.token!.tokenId) : undefined}
                     />
                   </div>
                 );
@@ -246,14 +234,8 @@ export function VaultView() {
             <Empty
               icon={<Package size={24} />}
               title="No slabs yet"
-              body="Vault a graded slab you own, or win one with an offer in a negotiation room. Either way it lands here."
-              cta={{ href: "/submit", label: "Vault a graded slab" }}
-            />
-          ) : tab === "awaiting" ? (
-            <Empty
-              icon={<Package size={24} />}
-              title="Nothing awaiting vaulting"
-              body="Cards appear here after Pokechain receives them, while Collector Crypt finishes vaulting them."
+              body="Add a graded slab, or win one with an offer in a negotiation room. Vaulted slabs land here; inbound requests stay in Submissions."
+              cta={{ href: "/submit", label: "Add a slab" }}
             />
           ) : (
             <Empty
@@ -261,6 +243,21 @@ export function VaultView() {
               title="No vaulted slabs to list"
               body="Slabs arrive here once Collector Crypt has vaulted and unlocked them."
             />
+          )
+        ) : null}
+
+        {tab === "awaiting" ? (
+          awaiting.length ? (
+            <div className={clsx(
+              "grid gap-3",
+              gridSize === "small" ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
+            )}>
+              {awaiting.map(({ entry, listing }) => (
+                <AwaitingSlabCard key={listing.id} entry={entry} listing={listing} onReportLost={entry.token?.tokenId ? () => void handleReportLost(entry.token!.tokenId) : undefined} />
+              ))}
+            </div>
+          ) : (
+            <Empty icon={<Package size={24} />} title="Nothing awaiting vaulting" body="Newly received slabs will appear here until Collector Crypt completes vaulting." />
           )
         ) : null}
 
@@ -395,8 +392,8 @@ function SlabCard({
   onSell,
   onShip,
   onTransfer,
-  onReportLost,
   inOffer,
+  onReportLost,
 }: {
   entry: VaultItem;
   listing: Listing;
@@ -406,11 +403,14 @@ function SlabCard({
   onShip: () => void;
   /** tokenised slabs on a wallet account only */
   onTransfer?: () => void;
-  onReportLost?: () => void;
   /** the open trade offer that has this slab locked in escrow */
   inOffer?: { offerId: string; taker: string; room: string };
+  onReportLost?: () => void;
 }) {
   const small = size === "small";
+  if (entry.status === "Awaiting vaulting") {
+    return <AwaitingSlabCard entry={entry} listing={listing} onReportLost={onReportLost} />;
+  }
   if (inOffer) {
     return (
       <div className="overflow-hidden rounded-card border border-accent/50 bg-surface ring-1 ring-accent/30">
@@ -446,8 +446,8 @@ function SlabCard({
           {listing.title}
         </Link>
         <div className={clsx("mt-2", small ? "space-y-1.5" : "flex items-center justify-between gap-2")}>
-          <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : entry.status === "Awaiting vaulting" ? "Locked until vaulted" : "Not listed"}</span>
-          <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" || entry.status === "Awaiting vaulting" ? "warn" : "good"}>
+          <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : "Not listed"}</span>
+          <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" ? "warn" : "good"}>
             {entry.status}
           </Badge>
         </div>
@@ -486,10 +486,37 @@ function SlabCard({
               Transfer
             </Button>
           ) : null}
-          {entry.status === "Awaiting vaulting" && onReportLost ? (
-            <Button size="sm" variant="outline" onClick={onReportLost}>Report lost</Button>
-          ) : null}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AwaitingSlabCard({
+  entry,
+  listing,
+  onReportLost,
+}: {
+  entry: VaultItem;
+  listing: Listing;
+  onReportLost?: () => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-card border border-hairline bg-surface">
+      <div className="bg-[#101014] p-4">
+        <Slab listing={listing} />
+      </div>
+      <div className="space-y-2 p-3.5">
+        <p className="line-clamp-2 text-[12px] font-semibold leading-snug">{listing.title}</p>
+        <Badge tone="warn">Awaiting Vaulting</Badge>
+        <p className="text-[11px] text-muted">
+          Submitted <TimeAgo value={entry.acquiredAt} />
+        </p>
+        {onReportLost ? (
+          <Button size="sm" variant="outline" className="w-full" onClick={onReportLost}>
+            Report lost
+          </Button>
+        ) : null}
       </div>
     </div>
   );

@@ -50,7 +50,9 @@ export async function POST(request: Request) {
       );
     }
     const next = await rpc<string>("evm_snapshot");
-    writeFileSync(SNAPSHOT_FILE, JSON.stringify({ snapshotId: next }));
+    // A new epoch tells every open tab that its saved copy belongs to the rolled-back chain.
+    const epoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    writeFileSync(SNAPSHOT_FILE, JSON.stringify({ snapshotId: next, epoch }));
     rmSync(join(DATA, "collector-crypt.json"), { force: true });
     rmSync(join(DATA, "evidence"), { recursive: true, force: true });
     rmSync(join(DATA, "pokechain-forward-records.json"), { force: true });

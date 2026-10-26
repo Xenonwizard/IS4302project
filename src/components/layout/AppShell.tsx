@@ -4,6 +4,7 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { ChainConsole } from "../chain/ChainConsole";
 import { ChainDownBanner } from "../chain/ChainDownBanner";
+import { ChainEpochGuard } from "../chain/ChainEpochGuard";
 import { ChainMarketSync } from "../chain/ChainMarketSync";
 import { ChainSessionSync } from "../chain/ChainSessionSync";
 import { ChainVaultSync } from "../chain/ChainVaultSync";
@@ -26,6 +27,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <main>{children}</main>
         <ChainConsole presentationOnly />
+        <ChainEpochGuard />
         <Toasts />
       </div>
     );
@@ -48,6 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ChainVaultSync />
       <ChainMarketSync />
       <ChainConsole />
+      <ChainEpochGuard />
       <Toasts />
     </div>
   );

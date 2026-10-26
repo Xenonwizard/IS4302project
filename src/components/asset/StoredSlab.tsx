@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
 import { zeroAddress } from "viem";
-import { buildOnChainListing } from "@/lib/catalog";
+import { buildOnChainListing, certPreview } from "@/lib/catalog";
 import { cardFromTokenURI } from "@/lib/comparables";
 import { chain, contracts, fromUsdcUnits, IS_DEPLOYED, shortHash } from "@/lib/chain/config";
 import { useStore } from "@/lib/store";
@@ -30,10 +30,14 @@ export function StoredSlab({ id }: { id: string }) {
         client!.readContract({ ...contracts.slabMarket, functionName: "getListing", args }),
       ]);
       const card = cardFromTokenURI(uri);
+      const preview = certPreview(card.grader as Grader, card.certNumber);
+      const displayCard = card.image
+        ? card
+        : { ...card, title: preview?.title ?? card.title, image: preview?.image ?? "" };
       const account = await client!.readContract({ ...contracts.accounts, functionName: "accountOf", args: [owner] });
       const listed = ask.seller !== zeroAddress && ask.price > BigInt(0);
       return {
-        ...buildOnChainListing({ ...card, grader: card.grader as Grader, tokenId: tokenId!, owner: account.handle || shortHash(owner), ownerAddress: owner, price: listed ? fromUsdcUnits(ask.price) : undefined, contract: contracts.slabVault.address }),
+        ...buildOnChainListing({ ...displayCard, grader: displayCard.grader as Grader, tokenId: tokenId!, owner: account.handle || shortHash(owner), ownerAddress: owner, price: listed ? fromUsdcUnits(ask.price) : undefined, contract: contracts.slabVault.address }),
         isListed: listed,
       };
     },
