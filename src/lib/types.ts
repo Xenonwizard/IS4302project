@@ -120,6 +120,17 @@ export interface VaultItem {
   withdrawal?: Withdrawal;
 }
 
+/** A reversible report that a slab cannot be located inside the vault. */
+export interface VaultLossReport {
+  reportedAt: string;
+  details: string;
+  /** Optional reward offered by the owner to help locate the slab. */
+  bounty?: {
+    amount: number;
+    addedAt: string;
+  };
+}
+
 /* ---------------- negotiations ---------------- */
 
 /** What a buyer puts up: full cash, or slabs from their vault plus a cash top-up. */
