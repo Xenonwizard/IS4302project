@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { Button } from "../ui/primitives";
 
-/** Empty state for the vault, watchlist and wallet pages. */
+/** Empty state shared by vault and wallet pages. */
 export function Empty({
   icon,
   title,

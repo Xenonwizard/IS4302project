@@ -173,7 +173,7 @@ export function LostCardsView() {
               </span>
               <p className="mt-0.5 text-xl font-extrabold text-good flex items-center gap-1.5">
                 <Coins size={16} />
-                {usd(totalBounties)} PokeCredits
+                {usd(totalBounties)} USDC
               </p>
             </div>
           </div>
@@ -336,10 +336,10 @@ export function LostCardsView() {
         >
           <div className="space-y-4">
             <p className="text-sm text-muted">
-              Offer a PokeCredit reward to community members or courier agents who help locate this slab.
+              Offer a USDC reward to community members or courier agents who help locate this slab.
             </p>
             <div>
-              <label className="text-[12px] font-semibold text-muted">Bounty amount (PokeCredits)</label>
+              <label className="text-[12px] font-semibold text-muted">Bounty amount (USDC)</label>
               <input
                 type="number"
                 min="5"

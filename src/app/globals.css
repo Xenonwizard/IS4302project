@@ -171,7 +171,7 @@ button:disabled,
   }
 }
 .spin-slab {
-  animation: spin-slab 9s linear infinite;
+  animation: spin-slab 5s linear 1;
   transform-style: preserve-3d;
 }
 

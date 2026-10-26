@@ -70,7 +70,7 @@ export interface Listing {
   isListed?: boolean;
   /** Seller opted this listing into slab-secured loan offers. */
   acceptsLoan?: boolean;
-  /** Minimum principal the seller will consider, in PokeCredits. */
+  /** Minimum principal the seller will consider, in USDC. */
   loanAsk?: number;
   chain: "Polygon";
   note: string;

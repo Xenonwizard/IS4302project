@@ -43,7 +43,7 @@ export function TradeBuilder({
   negotiationId: string;
   me: { address: Address; handle: string };
   them: { address: Address; handle: string };
-  /** PokeCredits in my Pokechain account, the cash I can put in an offer */
+  /** USDC in my Pokechain account, the cash I can put in an offer */
   cash: number;
   counterOf?: CounterOf;
   /** Slab whose asset page opened this trade builder. */
@@ -221,7 +221,7 @@ function Form({
       <header className="flex items-center justify-between gap-3 border-b border-hairline px-4 py-3">
         <div className="min-w-0">
           <h2 className="truncate text-[14px] font-bold">{counterOf ? `Counter offer #${counterOf.offerId}` : `Trade offer to @${them.handle}`}</h2>
-          <p className="text-[11px] text-muted">Choose slabs and PokeCredits to exchange</p>
+          <p className="text-[11px] text-muted">Choose slabs and USDC to exchange</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {draftReady ? (
@@ -235,7 +235,7 @@ function Form({
 
       <div className="cy-scroll flex-1 space-y-3 overflow-y-auto p-4">
         <p className="text-[12px] leading-relaxed text-muted">
-          Build your side of the offer, then request the cards or PokeCredits you want. Compare each card&apos;s Pokechain listings and completed trades to agree on your terms.
+          Build your side of the offer, then request the cards or USDC you want. Compare each card&apos;s Pokechain listings and completed trades to agree on your terms.
         </p>
 
         <TradeHeader
@@ -284,7 +284,7 @@ function Form({
     </section>
       <Modal open={restartOpen} onClose={() => setRestartOpen(false)} title="Start a fresh offer?" width="max-w-md">
         <div className="space-y-4 p-5">
-          <p className="text-[13px] leading-relaxed text-muted">This clears the saved draft and resets the slabs and PokeCredits in this offer. You can save a new draft at any time.</p>
+          <p className="text-[13px] leading-relaxed text-muted">This clears the saved draft and resets the slabs and USDC in this offer. You can save a new draft at any time.</p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setRestartOpen(false)}>Keep draft</Button>
             <Button variant="danger" onClick={restartFresh}>Discard draft</Button>
@@ -352,7 +352,7 @@ function Form({
       <Modal
         open={cashDialog !== null}
         onClose={() => setCashDialog(null)}
-        title={cashDialog?.side === "get" ? "Request PokeCredits" : "Add PokeCredits to your offer"}
+        title={cashDialog?.side === "get" ? "Request USDC" : "Add USDC to your offer"}
         width="max-w-lg"
       >
         <div className="space-y-5 p-5">
@@ -366,14 +366,14 @@ function Form({
                 placeholder="0"
                 value={cashDialog?.value ?? ""}
                 onChange={(event) => setCashDialog((current) => current ? { ...current, value: event.target.value.replace(/[^\d.]/g, "") } : current)}
-                aria-label="PokeCredits amount"
+                aria-label="USDC amount"
               />
-              <span className="shrink-0 text-[12px] font-semibold text-muted">PokeCredits</span>
+              <span className="shrink-0 text-[12px] font-semibold text-muted">USDC</span>
             </div>
           </label>
           <div className="flex items-center justify-between rounded-xl bg-surface px-3 py-3 text-[12px]">
-            <span className="text-muted">{cashDialog?.side === "get" ? "Requested amount" : "Available PokeCredits"}</span>
-            <strong>{cashDialog?.side === "get" ? exact(Number(cashDialog.value || 0)) : exact(cash)} PokeCredits</strong>
+            <span className="text-muted">{cashDialog?.side === "get" ? "Requested amount" : "Available USDC"}</span>
+            <strong>{cashDialog?.side === "get" ? exact(Number(cashDialog.value || 0)) : exact(cash)} USDC</strong>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setCashDialog(null)}>Cancel</Button>
@@ -459,7 +459,7 @@ function Column({
         <p className="text-[11.5px] font-bold uppercase tracking-wide text-muted">{title}</p>
         <span className="text-[10px] font-medium text-muted">{selectedSlabs.length} selected</span>
       </div>
-      {cash ? <p className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-[12px] text-muted">{title === "You give" ? "Adding" : "Requesting"} <strong className="text-white">{exact(Number(cash))} PokeCredits</strong></p> : null}
+      {cash ? <p className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-[12px] text-muted">{title === "You give" ? "Adding" : "Requesting"} <strong className="text-white">{exact(Number(cash))} USDC</strong></p> : null}
 
       {selectedSlabs.length ? (
         <div className="mb-3 grid grid-cols-2 gap-2 2xl:grid-cols-3">

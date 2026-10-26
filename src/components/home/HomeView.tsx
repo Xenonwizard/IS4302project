@@ -46,8 +46,8 @@ export function HomeView() {
 
 
       <Rail
-        title="Most watched"
-        subtitle="The slabs collectors are hearting and bidding on."
+        title="Popular slabs"
+        subtitle="The slabs drawing the most collector interest."
         href="/marketplace"
         listings={mostWatched}
       />

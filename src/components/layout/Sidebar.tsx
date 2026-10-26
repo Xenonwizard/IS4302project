@@ -7,7 +7,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ClipboardList,
-  Heart,
   House,
   MessagesSquare,
   Plus,
@@ -25,7 +24,6 @@ const NAV = [
   { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
   { href: "/submissions", label: "Submissions", short: "Submit", icon: ClipboardList },
   { href: "/vault", label: "Vault", short: "Vault", icon: ShieldCheck },
-  { href: "/watchlist", label: "Watchlist", short: "Watch", icon: Heart },
   { href: "/wallet", label: "Wallet", short: "Wallet", icon: Wallet },
   { href: "/account", label: "Account", short: "Account", icon: UserRound, desktopOnly: true },
 ];

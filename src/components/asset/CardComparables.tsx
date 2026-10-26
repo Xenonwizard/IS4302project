@@ -7,9 +7,9 @@ import { useComparables, type ComparableSlab, type ComparableTransaction } from 
 import { explorerTx, shortHash } from "@/lib/chain/config";
 import { shortDate, usd } from "@/lib/format";
 
-const exact = (value: number) => `${usd(value, { cents: true })} PokeCredits`;
+const exact = (value: number) => `${usd(value, { cents: true })} USDC`;
 
-export function CardComparables({ card, tokenId }: { card: CardIdentity; tokenId?: string }) {
+export function CardComparables({ card, tokenId, embedded = false }: { card: CardIdentity; tokenId?: string; embedded?: boolean }) {
   const [tab, setTab] = useState<"listings" | "transactions">("listings");
   const [grader, setGrader] = useState("all");
   const [grade, setGrade] = useState<GradeFilter>("all");
@@ -20,11 +20,11 @@ export function CardComparables({ card, tokenId }: { card: CardIdentity; tokenId
   const selectClass = "min-w-0 rounded-lg border border-hairline bg-surface-2 px-2 py-2 text-[12px] text-white";
 
   return (
-    <section id="comparables" className="rounded-card border border-hairline bg-surface" data-testid="card-comparables">
-      <div className="border-b border-hairline px-4 py-3">
+    <section id="comparables" className={embedded ? "" : "rounded-card border border-hairline bg-surface"} data-testid="card-comparables">
+      {!embedded ? <div className="border-b border-hairline px-4 py-3">
         <h2 className="text-sm font-bold">Compare on Pokechain</h2>
         <p className="mt-1 text-[12px] leading-relaxed text-muted">Explore the same card across slabs. Asking prices and completed transactions help you decide what to pay.</p>
-      </div>
+      </div> : null}
       <div className="space-y-3 p-4">
         <div className="grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-1 text-[11px] text-muted">Grader

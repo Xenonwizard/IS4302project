@@ -2,9 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { Heart } from "lucide-react";
 import { usd } from "@/lib/format";
-import { useStore } from "@/lib/store";
 import type { Listing } from "@/lib/types";
 import { Slab } from "../slab/Slab";
 
@@ -15,8 +13,6 @@ export function ListingCard({
   listing: Listing;
   size?: "medium" | "small";
 }) {
-  const { isWatched, toggleWatch, requireAuth } = useStore();
-  const watched = isWatched(listing.id);
   const small = size === "small";
 
   return (
@@ -26,17 +22,6 @@ export function ListingCard({
           <Slab listing={listing} interactive maxTilt={9} />
         </div>
       </Link>
-
-      <button
-        onClick={() => requireAuth(() => toggleWatch(listing.id)) && toggleWatch(listing.id)}
-        aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
-        className={clsx(
-          "absolute right-2 top-2 z-10 grid h-8 w-8 place-items-center rounded-full bg-black/60 backdrop-blur transition",
-          watched ? "text-bad opacity-100" : "text-white opacity-0 group-hover:opacity-100",
-        )}
-      >
-        <Heart size={15} fill={watched ? "currentColor" : "none"} />
-      </button>
 
       <div className={clsx(small ? "px-2 pb-2 pt-2" : "px-3.5 pb-3 pt-2.5")}>
         <Link href={`/asset/${listing.id}`}>

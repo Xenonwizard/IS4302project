@@ -54,7 +54,7 @@ export function Slab({
   const rootRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const live = interactive && !flat && !spinning;
-  useTilt(rootRef, bodyRef, live, maxTilt);
+  useTilt(rootRef, bodyRef, live, maxTilt, side === "back" ? 180 : 0);
 
   return (
     <div
@@ -145,6 +145,7 @@ function useTilt(
   bodyRef: React.RefObject<HTMLDivElement | null>,
   enabled: boolean,
   maxTilt: number,
+  baseRotationY: number,
 ) {
   useEffect(() => {
     const root = rootRef.current;
@@ -164,7 +165,7 @@ function useTilt(
       cur.a += (target.a - cur.a) * 0.1;
       const rx = (0.5 - cur.y) * 2 * maxTilt * cur.a;
       const ry = (cur.x - 0.5) * 2 * maxTilt * cur.a;
-      body.style.transform = `rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
+      body.style.transform = `rotateX(${rx.toFixed(2)}deg) rotateY(${(baseRotationY + ry).toFixed(2)}deg)`;
       root.style.setProperty("--rx", rx.toFixed(2));
       root.style.setProperty("--ry", ry.toFixed(2));
       root.style.setProperty("--px", `${(cur.x * 100).toFixed(1)}%`);
@@ -202,7 +203,7 @@ function useTilt(
       root.removeEventListener("pointerleave", onLeave);
       cancelAnimationFrame(frame);
     };
-  }, [rootRef, bodyRef, enabled, maxTilt]);
+  }, [rootRef, bodyRef, enabled, maxTilt, baseRotationY]);
 }
 
 /* ---------------- grading labels ---------------- */
@@ -406,7 +407,7 @@ export function SlabStage({
         <Slab
           listing={listing}
           fit
-          interactive={!side}
+          interactive
           spinning={!side && spinning}
           side={side}
           maxTilt={18}

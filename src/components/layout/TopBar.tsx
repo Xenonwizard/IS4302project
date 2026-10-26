@@ -47,7 +47,7 @@ export function TopBar() {
   const { user, balance, logout, setAuthOpen } = useStore();
   const { request: requestReset, armed, resetting } = useResetDemo();
   const [menuOpen, setMenuOpen] = useState(false);
-  const { disconnect } = useDisconnect();
+  const { disconnectAsync } = useDisconnect();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -122,11 +122,10 @@ export function TopBar() {
                   {resetting ? "Resetting…" : armed ? "Click again to wipe everything" : "Reset demo data"}
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setMenuOpen(false);
-                    // A wallet account signs out by disconnecting; ChainSessionSync then clears the session.
-                    if (user.address) disconnect();
-                    else logout();
+                    if (user.address) await disconnectAsync();
+                    logout();
                   }}
                   className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-muted transition hover:bg-white/5 hover:text-white"
                 >

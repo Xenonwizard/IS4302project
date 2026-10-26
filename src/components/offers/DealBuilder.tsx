@@ -185,7 +185,7 @@ export function DealBuilder({
           <Line
             label={
               <span className="flex items-center gap-1.5">
-                <Wallet size={13} /> {user?.address ? "PokeCredits balance" : "Wallet balance"}
+                <Wallet size={13} /> {user?.address ? "USDC balance" : "Wallet balance"}
                 <Link href="/wallet" className="text-[11px] font-semibold text-accent hover:underline">
                   see history
                 </Link>
@@ -208,7 +208,7 @@ export function DealBuilder({
           <p className="text-[12px] text-warn">
             Your wallet is {exact(-after)} short of the cash.{" "}
             {user?.address
-              ? "Lower the offer or get more PokeCredits available."
+              ? "Lower the offer or get more USDC available."
               : kind === "trade"
               ? "Lower the cash amount or top up."
               : "Lower the offer or top up."}

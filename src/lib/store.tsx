@@ -88,7 +88,6 @@ interface PersistShape {
   user: SessionUser | null;
   /** whose data this is: kept after sign-out so a different user gets their own state */
   owner?: string;
-  watchlist: string[];
   vault: VaultItem[];
   /** slabs the user submitted, which are not part of the catalog */
   slabs: Listing[];
@@ -127,7 +126,6 @@ const INITIAL_DEMO_LOSSES: Record<string, VaultLossReport> = {
 
 const EMPTY: PersistShape = {
   user: null,
-  watchlist: [],
   vault: [],
   slabs: [],
   overrides: {},
@@ -179,9 +177,6 @@ interface StoreValue extends PersistShape {
   requireAuth: (then?: () => void) => boolean;
   authOpen: boolean;
   setAuthOpen: (open: boolean) => void;
-  /* watchlist */
-  toggleWatch: (id: string) => void;
-  isWatched: (id: string) => boolean;
   /* slabs */
   submitSlab: (input: SlabSubmission, token?: SlabToken) => Listing | null;
   listFromVault: (id: string, price: number, acceptsLoan?: boolean, loanAsk?: number) => void;
@@ -612,6 +607,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const toastSeq = useRef(0);
   const pendingAction = useRef<(() => void) | null>(null);
+  const applyingCrossTabState = useRef(false);
   /** latest state for timers, which outlive the render that scheduled them */
   const latest = useRef(state);
   useEffect(() => {
@@ -630,6 +626,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
+    if (applyingCrossTabState.current) {
+      applyingCrossTabState.current = false;
+      return;
+    }
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
@@ -644,7 +644,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(event.newValue) as PersistShape;
         const next = { ...EMPTY, ...parsed };
         next.slabs.forEach(registerListing);
-        setState((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+        setState((current) => {
+          if (JSON.stringify(current) === JSON.stringify(next)) return current;
+          applyingCrossTabState.current = true;
+          return next;
+        });
       } catch {
         /* Ignore malformed or inaccessible cross-tab storage updates. */
       }
@@ -857,20 +861,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return true;
     },
     [state.overrides, state.slabs],
-  );
-
-  const toggleWatch = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      watchlist: prev.watchlist.includes(id)
-        ? prev.watchlist.filter((w) => w !== id)
-        : [...prev.watchlist, id],
-    }));
-  }, []);
-
-  const isWatched = useCallback(
-    (id: string) => state.watchlist.includes(id),
-    [state.watchlist],
   );
 
   /* ---------------- slabs ---------------- */
@@ -2104,8 +2094,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     requireAuth,
     authOpen,
     setAuthOpen,
-    toggleWatch,
-    isWatched,
     submitSlab,
     listFromVault,
     delist,

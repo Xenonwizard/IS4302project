@@ -119,7 +119,7 @@ export function LostCard({
                   <Sparkles size={12} /> Recovery Bounty:
                 </span>
                 <span className="font-extrabold text-white">
-                  {usd(loss.bounty.amount)} PokeCredits
+                  {usd(loss.bounty.amount)} USDC
                 </span>
               </div>
             ) : null}

@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Blocks, Grid2x2, Grid3x3, Lock, MessagesSquare, Package, PackageOpen, Route, Send, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, Grid2x2, Grid3x3, Lock, MessagesSquare, Package, PackageOpen, Route, ShieldCheck, Tag, Truck } from "lucide-react";
 import type { Address } from "viem";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
@@ -11,25 +11,26 @@ import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useEscrowedByMe } from "@/lib/chain/trades";
+import { useLoanOffers } from "@/lib/chain/loans";
 import { useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { RedeemModal } from "../chain/RedeemModal";
-import { TransferModal } from "../chain/TransferModal";
 import { WithdrawnList } from "../chain/WithdrawnList";
 import { Slab } from "../slab/Slab";
 import { Badge, Button, Field, Modal, TimeAgo, inputClass } from "../ui/primitives";
 import { ListForSaleForm } from "./ListForSaleForm";
 import { Empty, LoginPrompt } from "./shared";
 
-type Tab = "all" | "awaiting" | "listed" | "unlisted" | "withdrawn";
+type Tab = "all" | "awaiting" | "listed" | "unlisted" | "loans" | "withdrawn";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "all", label: "All" },
   { value: "awaiting", label: "Awaiting vault" },
   { value: "listed", label: "Listed" },
   { value: "unlisted", label: "Unlisted" },
+  { value: "loans", label: "Used for Loan" },
   { value: "withdrawn", label: "Withdrawn" },
 ];
 
@@ -39,6 +40,7 @@ export function VaultView() {
     user,
     ready,
     vault,
+    slabs,
     delist,
     requestShipping,
     resolve,
@@ -77,7 +79,6 @@ export function VaultView() {
   );
   const [sellTarget, setSellTarget] = useState<Listing | null>(null);
   const [redeemTarget, setRedeemTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
-  const [transferTarget, setTransferTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [missingTarget, setMissingTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [bountyTarget, setBountyTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [missingDetails, setMissingDetails] = useState("");
@@ -92,6 +93,11 @@ export function VaultView() {
   const [insuranceWithdrawTarget, setInsuranceWithdrawTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   // Slabs locked in one of my open trade offers (held by TradeEscrow): tokenId → offerId
   const { data: escrowed = {} } = useEscrowedByMe(user?.address as Address | undefined);
+  const { data: loanOffers = [] } = useLoanOffers(user?.address as Address | undefined);
+  const activeBorrowedLoans = loanOffers.filter(
+    (loan) => loan.status === "Active" && user?.address && loan.borrower.toLowerCase() === user.address.toLowerCase(),
+  );
+  const loanTokenIds = new Set(activeBorrowedLoans.map((loan) => loan.tokenId));
 
   const allItems = useMemo(
     () =>
@@ -123,7 +129,12 @@ export function VaultView() {
     setDecisionBounty("");
     pushToast({ title: decisionChoice === "insurance" ? "Insurance claim submitted" : "Lost-card bounty published", body: decisionChoice === "insurance" ? "The vault service provider will review your claim." : "Your card is now visible on the Lost page.", tone: "success" });
   };
-  const items = allItems.filter((i) => i.entry.status !== "Withdrawn");
+  const loanCards = activeBorrowedLoans.flatMap((loan) => {
+    const listing = allItems.find((item) => item.listing.tokenId === loan.tokenId)?.listing
+      ?? slabs.find((slab) => slab.tokenId === loan.tokenId);
+    return listing ? [{ loan, listing }] : [];
+  });
+  const items = allItems.filter((i) => i.entry.status !== "Withdrawn" && !loanTokenIds.has(i.listing.tokenId ?? ""));
   const awaiting = items.filter((i) => i.entry.status === "Awaiting vaulting");
   const withdrawn = allItems.filter((i) => i.entry.status === "Withdrawn");
 
@@ -135,6 +146,7 @@ export function VaultView() {
     awaiting: awaiting.length,
     listed: listed.length,
     unlisted: unlisted.length,
+    loans: loanCards.length,
     withdrawn: withdrawn.length,
   };
 
@@ -232,7 +244,7 @@ export function VaultView() {
       </div>
 
       <div className="mt-5">
-        {tab === "all" || tab === "awaiting" || tab === "unlisted" ? (
+        {tab === "all" || tab === "awaiting" || tab === "unlisted" || tab === "loans" ? (
           <div className="mb-3 flex justify-end">
             <div className="flex h-10 items-center rounded-xl border border-hairline bg-surface p-1" role="group" aria-label="Vault grid size">
               <button
@@ -286,7 +298,6 @@ export function VaultView() {
                       onManage={() => setTab("listed")}
                       onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
                       onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
-                      onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
                       onReportLost={entry.token?.tokenId ? () => setAwaitingReportTarget({ entry, listing }) : undefined}
                       decisionPending={hasPendingDecision(listing)}
@@ -339,6 +350,37 @@ export function VaultView() {
             </div>
           ) : (
             <Empty icon={<Package size={24} />} title="Nothing awaiting vaulting" body="Newly received slabs will appear here until Collector Crypt completes vaulting." />
+          )
+        ) : null}
+
+        {tab === "loans" ? (
+          loanCards.length ? (
+            <div className={clsx(
+              "grid gap-3",
+              gridSize === "small" ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
+            )}>
+              {loanCards.map(({ loan, listing }) => (
+                <div key={loan.id} className="overflow-hidden rounded-card border border-accent/40 bg-surface ring-1 ring-accent/15">
+                  <Link href={`/asset/${listing.id}`} className={clsx("block bg-[#101014]", gridSize === "small" ? "p-2" : "p-4")}>
+                    <Slab listing={listing} interactive maxTilt={9} />
+                  </Link>
+                  <div className={gridSize === "small" ? "space-y-2 p-2" : "space-y-3 p-3.5"}>
+                    <p className={clsx("line-clamp-2 font-semibold leading-snug", gridSize === "small" ? "text-[10.5px]" : "text-[12px]")}>{listing.title}</p>
+                    <Badge tone="accent"><Lock size={11} /> Used for Loan</Badge>
+                    <div className={clsx("space-y-1 text-muted", gridSize === "small" ? "text-[9.5px]" : "text-[11px]")}>
+                      <p>Principal: <span className="font-semibold text-white">{usd(loan.principal, { cents: true })}</span></p>
+                      <p>Repayment: <span className="font-semibold text-white">{usd(loan.principal + loan.interest, { cents: true })}</span></p>
+                      <p>Due: <span className="font-semibold text-white">{new Date(loan.deadline * 1000).toLocaleDateString()}</span></p>
+                    </div>
+                    <Link href={`/trades/${loan.room}`} className="block">
+                      <Button size="sm" variant="secondary" className="w-full">View loan</Button>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty icon={<Lock size={24} />} title="No cards used for loans" body="Cards securing an active accepted loan will be stored here until repayment or default." />
           )
         ) : null}
 
@@ -418,7 +460,6 @@ export function VaultView() {
       </div>
 
       <RedeemModal target={redeemTarget} onClose={() => setRedeemTarget(null)} />
-      <TransferModal target={transferTarget} onClose={() => setTransferTarget(null)} />
 
       <Modal open={Boolean(decisionTarget)} onClose={() => { setDecisionTarget(null); setDecisionChoice(null); }} title="Investigation complete" width="max-w-sm">
         {decisionTarget ? (
@@ -431,11 +472,11 @@ export function VaultView() {
               </button>
               <button className={`rounded-xl border p-3 text-left ${decisionChoice === "bounty" ? "border-accent bg-accent/10" : "border-hairline"}`} onClick={() => setDecisionChoice("bounty")}>
                 <p className="text-[13px] font-bold">Publish a lost-card bounty</p>
-                <p className="mt-1 text-[11px] text-muted">Keep searching and offer PokeCredits if someone returns it.</p>
+                <p className="mt-1 text-[11px] text-muted">Keep searching and offer USDC if someone returns it.</p>
               </button>
             </div>
             {decisionChoice === "bounty" ? (
-              <Field label="Recovery bounty (PokeCredits)" hint="Optional">
+              <Field label="Recovery bounty (USDC)" hint="Optional">
                 <input className={inputClass} inputMode="decimal" value={decisionBounty} onChange={(event) => setDecisionBounty(event.target.value.replace(/[^\d.]/g, ""))} placeholder="e.g. 150" />
               </Field>
             ) : null}
@@ -534,7 +575,7 @@ export function VaultView() {
                 disabled={reportingMissing}
               />
             </Field>
-            <Field label="Recovery bounty (PokeCredits)" hint="Optional">
+            <Field label="Recovery bounty (USDC)" hint="Optional">
               <input
                 className={inputClass}
                 inputMode="decimal"
@@ -621,7 +662,7 @@ function BountyModal({
           <p className="text-[13px] leading-relaxed text-muted">
             Offer a reward to help locate <span className="font-semibold text-white">{target.listing.title}</span>.
           </p>
-          <Field label="Bounty amount (PokeCredits)" hint="You can cancel this bounty while the missing-card report is open.">
+          <Field label="Bounty amount (USDC)" hint="You can cancel this bounty while the missing-card report is open.">
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">$</span>
               <input
@@ -670,7 +711,6 @@ function SlabCard({
   onManage,
   onSell,
   onShip,
-  onTransfer,
   inOffer,
   onReportLost,
   decisionPending,
@@ -687,8 +727,6 @@ function SlabCard({
   onManage: () => void;
   onSell: () => void;
   onShip: () => void;
-  /** tokenised slabs on a wallet account only */
-  onTransfer?: () => void;
   /** the open trade offer that has this slab locked in escrow */
   inOffer?: { offerId: string; taker: string; room: string };
   /** A reversible report that this card cannot be located in the physical vault. */
@@ -709,7 +747,7 @@ function SlabCard({
     return (
       <div className="overflow-hidden rounded-card border border-accent/50 bg-surface ring-1 ring-accent/30">
         <Link href={`/asset/${listing.id}`} className={clsx("block bg-[#101014] opacity-70", small ? "p-2" : "p-4")}>
-          <Slab listing={listing} />
+          <Slab listing={listing} interactive maxTilt={9} />
         </Link>
         <div className={small ? "p-2" : "p-3.5"}>
           <p className={clsx("line-clamp-2 font-semibold leading-snug", small ? "text-[10.5px]" : "text-[12px]")}>{listing.title}</p>
@@ -730,7 +768,7 @@ function SlabCard({
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
       <Link href={`/asset/${listing.id}`} className={clsx("block bg-[#101014]", small ? "p-2" : "p-4")}>
-        <Slab listing={listing} />
+        <Slab listing={listing} interactive maxTilt={9} />
       </Link>
       <div className={small ? "p-2" : "p-3.5"}>
         <Link
@@ -790,12 +828,6 @@ function SlabCard({
                 Ship to me
               </Button>
             ) : null}
-            {entry.status === "Vaulted" && onTransfer ? (
-              <Button size="sm" variant="outline" onClick={onTransfer}>
-                <Send size={13} />
-                Transfer
-              </Button>
-            ) : null}
           </div>
         )}
       </div>
@@ -825,7 +857,7 @@ function AwaitingSlabCard({
   return (
     <div className="overflow-hidden rounded-card border border-hairline bg-surface">
       <div className="bg-[#101014] p-4">
-        <Slab listing={listing} />
+        <Slab listing={listing} interactive maxTilt={9} />
       </div>
       <div className="space-y-2 p-3.5">
         <p className="line-clamp-2 text-[12px] font-semibold leading-snug">{listing.title}</p>

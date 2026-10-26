@@ -1,15 +1,13 @@
 "use client";
 
-import { CardComparables } from "./CardComparables";
+import { MarketInsightsSlider } from "./MarketInsightsSlider";
 
 import clsx from "clsx";
 import Link from "next/link";
 import {
   MessagesSquare,
   BadgeCheck,
-  Clock,
   Gavel,
-  Heart,
   Play,
   Share2,
   ShieldCheck,
@@ -36,7 +34,6 @@ import {
   Avatar,
   Badge,
   Button,
-  Countdown,
   Modal,
   TimeAgo,
 } from "../ui/primitives";
@@ -47,8 +44,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     balance,
     resolve,
     isOwned,
-    isWatched,
-    toggleWatch,
     requireAuth,
     pushToast,
     isListed,
@@ -416,8 +411,15 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const [buyBusy, setBuyBusy] = useState(false);
   const [delisting, setDelisting] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
-  const [view, setView] = useState<"slab" | "back">("slab");
-  const [spin, setSpin] = useState(false);
+  const [view, setView] = useState<"video" | "front" | "back">("video");
+  const [spinRun, setSpinRun] = useState(0);
+  const [videoPlaying, setVideoPlaying] = useState(true);
+
+  useEffect(() => {
+    if (view !== "video" || !videoPlaying) return;
+    const stop = window.setTimeout(() => setVideoPlaying(false), 5000);
+    return () => window.clearTimeout(stop);
+  }, [view, spinRun, videoPlaying]);
 
   const handleBuy = async () => {
     setBuyBusy(true);
@@ -473,39 +475,54 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
       </div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* ---------------- left ---------------- */}
-        <div className="min-w-0">
+        <div className="min-w-0 xl:h-full">
           <div
-            className="relative mx-auto flex aspect-square w-full flex-col overflow-hidden rounded-card border border-hairline bg-[#0c0c10]"
+            className="relative mx-auto flex aspect-square w-full flex-col overflow-hidden rounded-card border border-hairline bg-[#0c0c10] xl:h-full xl:aspect-auto"
             style={{ maxWidth: "min(100%, 80vh)" }}
           >
             <div className="relative min-h-0 w-full flex-1">
               <SlabStage
+                key={view === "video" ? `video-${spinRun}` : view}
                 listing={listing}
-                spinning={view === "slab" && spin}
-                side={view === "slab" ? undefined : "back"}
+                spinning={view === "video" && videoPlaying}
+                side={view === "front" ? "front" : view === "back" ? "back" : undefined}
               />
             </div>
 
             <div className="flex items-center gap-2.5 border-t border-hairline p-3">
               <button
                 onClick={() => {
-                  setView("slab");
-                  setSpin((v) => !v);
+                  setView("video");
+                  setVideoPlaying(true);
+                  setSpinRun((run) => run + 1);
                 }}
                 className={clsx(
                   "grid h-14 w-14 shrink-0 place-items-center rounded-xl border transition",
-                  spin ? "border-accent bg-accent/15 text-accent" : "border-hairline bg-surface text-muted hover:text-white",
+                  view === "video" ? "border-accent bg-accent/15 text-accent" : "border-hairline bg-surface text-muted hover:text-white",
                 )}
-                aria-label="Rotate slab"
+                aria-label="Play one slab rotation"
+                title="Play one slab rotation"
               >
                 <Play size={17} />
               </button>
-              <Thumb active={view === "slab"} onClick={() => setView("slab")}>
+              <Thumb
+                active={view === "front"}
+                onClick={() => {
+                  setView("front");
+                  setVideoPlaying(false);
+                }}
+              >
                 <div className="relative h-full aspect-[0.62]">
                   <Slab listing={listing} flat fit />
                 </div>
               </Thumb>
-              <Thumb active={view === "back"} onClick={() => setView("back")}>
+              <Thumb
+                active={view === "back"}
+                onClick={() => {
+                  setView("back");
+                  setVideoPlaying(false);
+                }}
+              >
                 <div className="relative h-full aspect-[0.62]">
                   <Slab listing={listing} fit side="back" />
                 </div>
@@ -525,17 +542,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               Vaulted and insured
             </Badge>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => requireAuth(() => toggleWatch(listing.id)) && toggleWatch(listing.id)}
-                className="flex h-9 items-center gap-1.5 rounded-xl border border-hairline px-3 text-[13px] font-semibold text-muted transition hover:text-white"
-              >
-                <Heart
-                  size={15}
-                  className={isWatched(listing.id) ? "text-bad" : ""}
-                  fill={isWatched(listing.id) ? "currentColor" : "none"}
-                />
-                {listing.likes + (isWatched(listing.id) ? 1 : 0)}
-              </button>
               <button
                 onClick={() => {
                   if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -579,7 +585,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <p className="mt-2 text-[13px] leading-relaxed text-muted">{lostReport.details}</p>
               {lostReport.bounty ? (
                 <p className="mt-3 border-t border-warn/15 pt-3 text-[13px] font-semibold text-good">
-                  Recovery bounty: {usd(lostReport.bounty.amount)} PokeCredits
+                  Recovery bounty: {usd(lostReport.bounty.amount)} USDC
                 </p>
               ) : null}
             </div>
@@ -658,7 +664,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             {listed ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-4 py-3 text-[11px] text-muted sm:px-5">
                 <span className="flex items-center gap-1.5"><ShieldCheck size={13} className="text-good" />0% platform fee · Atomic on-chain settlement</span>
-                <span className="flex items-center gap-1.5"><Clock size={13} />Renews in <Countdown to={listing.endsAt} every={7 * 86_400_000} className="font-semibold text-white" /></span>
               </div>
             ) : null}
           </div>
@@ -670,8 +675,14 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             <Trust icon={<Truck size={15} />} text="Ship to you anytime" />
           </div>
 
-          <CardComparables key={listing.id} card={listing} tokenId={onChainTokenId ?? undefined} />
+          <MarketInsightsSlider key={listing.id} card={listing} tokenId={onChainTokenId ?? undefined} />
 
+          </> : null}
+        </div>
+      </div>
+
+      {!lostView ? (
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
           <Details
             listing={effectiveListing}
             blockchain={{
@@ -682,39 +693,40 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               loading: enabledOnChain && onChainOwner === undefined,
               contractAddress: IS_DEPLOYED ? contracts.slabVault.address : null,
               tokenId: onChainOwner?.address ? resolvedTokenId : null,
-              ownerAddress: lostView ? null : onChainOwner?.address ?? null,
+              ownerAddress: onChainOwner?.address ?? null,
             }}
           />
-          </> : null}
-        </div>
-      </div>
 
-      {/* Full-width history sits below the gallery and listing details. */}
-      {!lostView ? <section className="mt-8">
-        <h2 className="mb-3 text-base font-bold">Activity history</h2>
-        <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-          {allActivity.map((e, i) => (
-            <li key={`${e.txHash}-${i}`} className="flex items-center gap-4 p-4">
-              <Badge tone={e.kind === "Mint" ? "accent" : e.kind === "Sale" ? "good" : "neutral"}>
-                {e.kind}
-              </Badge>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-semibold">{e.price ? usd(e.price) : "—"}</p>
-                <p className="truncate text-[12px] text-muted">
-                  From <span className="text-white/80">{lostView ? "Anonymous" : e.from}</span> to{" "}
-                  <span className="text-white/80">{lostView ? "Anonymous" : e.to}</span>
-                </p>
-              </div>
-              <span className="shrink-0 text-[12px] text-dim">
-                <TimeAgo value={e.at} />
-              </span>
-              <span className="hidden shrink-0 items-center gap-1 text-[12px] text-dim sm:flex">
-                <CopyText text={e.txHash} title={truncMiddle(e.txHash, 6, 4)} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section> : null}
+          <section className="relative flex h-full flex-col overflow-hidden rounded-card border border-hairline bg-surface">
+            <h2 className="border-b border-hairline px-4 py-3 text-sm font-bold">Activity history</h2>
+            <ul
+              className="flex flex-1 flex-col divide-y divide-[rgba(255,255,255,0.08)] lg:absolute lg:inset-x-0 lg:bottom-0 lg:top-[45px] lg:grid lg:overflow-y-auto"
+              style={{ gridTemplateRows: `repeat(${Math.max(allActivity.length, 1)}, minmax(72px, 1fr))` }}
+            >
+              {allActivity.map((e, i) => (
+                <li key={`${e.txHash}-${i}`} className="flex min-h-[72px] items-center gap-4 p-4">
+                  <Badge tone={e.kind === "Mint" ? "accent" : e.kind === "Sale" ? "good" : "neutral"}>
+                    {e.kind}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold">{e.price ? usd(e.price) : "—"}</p>
+                    <p className="truncate text-[12px] text-muted">
+                      From <span className="text-white/80">{e.from}</span> to{" "}
+                      <span className="text-white/80">{e.to}</span>
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[12px] text-dim">
+                    <TimeAgo value={e.at} />
+                  </span>
+                  <span className="hidden shrink-0 items-center gap-1 text-[12px] text-dim sm:flex">
+                    <CopyText text={e.txHash} title={truncMiddle(e.txHash, 6, 4)} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      ) : null}
 
       {/* Buy Confirmation Modal */}
       <Modal open={buyOpen} onClose={() => !buyBusy && setBuyOpen(false)} title="Confirm Purchase">
@@ -744,20 +756,20 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             <div className="h-px bg-hairline" />
             <div className="flex justify-between">
               <dt className="text-muted">Total payment from your Pokechain account</dt>
-              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} PokeCredits</dd>
+              <dd className="text-base font-bold text-accent">{usd(displayPrice, { cents: true })} USDC</dd>
             </div>
           </dl>
 
           <div className="mt-4 flex items-center justify-between rounded-xl border border-hairline p-3 text-[12px]">
             <span className="text-muted">Your Pokechain account balance:</span>
             <span className="font-bold">
-              {user?.address ? `${usd(acct.custodyBalance, { cents: true })} PokeCredits` : usd(balance, { cents: true })}
+              {user?.address ? `${usd(acct.custodyBalance, { cents: true })} USDC` : usd(balance, { cents: true })}
             </span>
           </div>
 
           {user?.address && acct.custodyBalance < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
-              You need {usd(displayPrice - acct.custodyBalance, { cents: true })} more PokeCredits in your Pokechain account. Deposit more before buying.
+              You need {usd(displayPrice - acct.custodyBalance, { cents: true })} more USDC in your Pokechain account. Deposit more before buying.
             </p>
           ) : !user?.address && balance < displayPrice ? (
             <p className="mt-3 text-[12px] text-bad">
@@ -841,7 +853,6 @@ function Details({
     ownerAddress: string | null;
   };
 }) {
-  const [open, setOpen] = useState(false);
   // Older sets share their era's name (e.g. Base, Platinum), so drop the repeat.
   const chips = [
     ...new Set([
@@ -868,45 +879,36 @@ function Details({
           ))}
         </div>
 
-        {open ? (
-          <div className="fade-up mt-4 border-t border-hairline pt-4 motion-reduce:animate-none">
-            <p className="mb-2 text-[12px] font-bold uppercase tracking-wide text-muted">Blockchain details</p>
-            <dl className="space-y-2.5 text-[12px]">
-              <BlockchainRow label="Network" value={blockchain.network} />
-              <BlockchainRow label="Chain ID" value={String(blockchain.chainId)} />
-              {blockchain.contractAddress ? (
-                <BlockchainRow label="Contract address" value={blockchain.contractAddress} copy />
-              ) : null}
-              {blockchain.tokenId && blockchain.ownerAddress ? (
-                <>
-                  <BlockchainRow label="Token ID" value={blockchain.tokenId} copy />
-                  <BlockchainRow label="Owner address" value={blockchain.ownerAddress} copy />
-                </>
-              ) : null}
-              {!blockchain.tokenId || !blockchain.ownerAddress ? (
-                <div>
-                  <dt className="sr-only">Token record status</dt>
-                  <dd className="rounded-lg bg-surface-2 px-3 py-2 text-[12px] leading-relaxed text-muted">
-                    {!blockchain.configured
-                      ? `No SlabVault deployment is configured for ${blockchain.network}.`
-                      : !blockchain.readerReady
-                        ? "The blockchain read provider is not available."
-                        : blockchain.loading
-                          ? "Reading token data from the blockchain…"
-                          : "No on-chain token was found for this listing on the selected network."}
-                  </dd>
-                </div>
-              ) : null}
-            </dl>
-          </div>
-        ) : null}
-
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="mt-4 w-full rounded-xl bg-surface-2 py-2.5 text-[12px] font-bold text-muted transition hover:bg-surface-3 hover:text-white"
-        >
-          {open ? "Show less" : "Show more"}
-        </button>
+        <div className="mt-4 border-t border-hairline pt-4">
+          <p className="mb-2 text-[12px] font-bold uppercase tracking-wide text-muted">Blockchain details</p>
+          <dl className="space-y-2.5 text-[12px]">
+            <BlockchainRow label="Network" value={blockchain.network} />
+            <BlockchainRow label="Chain ID" value={String(blockchain.chainId)} />
+            {blockchain.contractAddress ? (
+              <BlockchainRow label="Contract address" value={blockchain.contractAddress} copy />
+            ) : null}
+            {blockchain.tokenId && blockchain.ownerAddress ? (
+              <>
+                <BlockchainRow label="Token ID" value={blockchain.tokenId} copy />
+                <BlockchainRow label="Owner address" value={blockchain.ownerAddress} copy />
+              </>
+            ) : null}
+            {!blockchain.tokenId || !blockchain.ownerAddress ? (
+              <div>
+                <dt className="sr-only">Token record status</dt>
+                <dd className="rounded-lg bg-surface-2 px-3 py-2 text-[12px] leading-relaxed text-muted">
+                  {!blockchain.configured
+                    ? `No SlabVault deployment is configured for ${blockchain.network}.`
+                    : !blockchain.readerReady
+                      ? "The blockchain read provider is not available."
+                      : blockchain.loading
+                        ? "Reading token data from the blockchain…"
+                        : "No on-chain token was found for this listing on the selected network."}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
       </div>
     </section>
   );
