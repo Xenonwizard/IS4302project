@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { countdown, timeAgo } from "@/lib/format";
 
 export function Button({
@@ -112,12 +113,14 @@ export function Modal({
   title,
   children,
   width = "max-w-md",
+  fullscreen = false,
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
   width?: string;
+  fullscreen?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -131,14 +134,17 @@ export function Modal({
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  // Rendered on <body>: a transformed ancestor (a card's hover lift or entry animation) would
+  // otherwise trap this "fixed" overlay inside that card instead of covering the screen.
+  return createPortal(
     <div className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
       <div
         role="dialog"
         aria-modal
         className={clsx(
-          "pop-in relative z-10 max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-hairline bg-[#0d0d11] sm:rounded-2xl cy-scroll",
+          "pop-in relative z-10 w-full overflow-y-auto border border-hairline bg-[#0d0d11] cy-scroll",
+          fullscreen ? "h-full max-h-none rounded-none" : "max-h-[92vh] rounded-t-2xl sm:rounded-2xl",
           width,
         )}
       >
@@ -156,7 +162,8 @@ export function Modal({
         ) : null}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

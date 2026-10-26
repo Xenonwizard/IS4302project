@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { zeroAddress } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
-import { contracts, fromUsdcUnits, IS_DEPLOYED, shortHash } from "@/lib/chain/config";
+import { contracts, DEPLOY_BLOCK, fromUsdcUnits, IS_DEPLOYED, shortHash } from "@/lib/chain/config";
 import { buildOnChainListing } from "@/lib/catalog";
 import { useStore } from "@/lib/store";
 import type { Grader, Listing } from "@/lib/types";
@@ -87,15 +87,15 @@ export function ChainMarketSync() {
             functionName: "getActiveListings",
           });
         } catch {
-          // Fallback to reading nextTokenId and getListing per token
+          // Fallback: PSA cert-based token ids are sparse, so discover ids from market events.
           try {
-            const nextId = await client.readContract({
-              ...contracts.slabVault,
-              functionName: "nextTokenId",
+            const events = await client.getContractEvents({
+              ...contracts.slabMarket,
+              eventName: "CardListed",
+              fromBlock: DEPLOY_BLOCK,
             });
-            const maxId = Number(nextId);
-            if (maxId > 1) {
-              const tokenIds = Array.from({ length: maxId - 1 }, (_, i) => BigInt(i + 1));
+            const tokenIds = [...new Set(events.map((event) => event.args.tokenId).filter((id): id is bigint => id !== undefined))];
+            if (tokenIds.length > 0) {
               const listings = await Promise.all(
                 tokenIds.map((id) =>
                   client
@@ -107,14 +107,14 @@ export function ChainMarketSync() {
                     .catch(() => null)
                 )
               );
-              const activeTokenIds = tokenIds.filter((_, idx) => {
+              const active = tokenIds.flatMap((id, idx) => {
                 const l = listings[idx];
-                return Boolean(l && l.seller && l.seller !== zeroAddress && l.price > BigInt(0));
+                return l && l.seller && l.seller !== zeroAddress && l.price > BigInt(0) ? [{ id, listing: l }] : [];
               });
-              if (activeTokenIds.length > 0) {
+              if (active.length > 0) {
                 const [slabs, accountsList] = await Promise.all([
                   Promise.all(
-                    activeTokenIds.map((id) =>
+                    active.map(({ id }) =>
                       client.readContract({
                         ...contracts.slabVault,
                         functionName: "slabOf",
@@ -123,21 +123,18 @@ export function ChainMarketSync() {
                     )
                   ),
                   Promise.all(
-                    activeTokenIds.map((id) => {
-                      const l = listings[Number(id) - 1];
-                      if (!l?.seller) return null;
+                    active.map(({ listing }) => {
                       return client
                         .readContract({
                           ...contracts.accounts,
                           functionName: "accountOf",
-                          args: [l.seller],
+                          args: [listing.seller],
                         })
                         .catch(() => null);
                     })
                   ),
                 ]);
-                rawListings = activeTokenIds.map((id, idx) => {
-                  const l = listings[Number(id) - 1]!;
+                rawListings = active.map(({ id, listing: l }, idx) => {
                   const s = slabs[idx];
                   const acct = accountsList[idx];
                   return {

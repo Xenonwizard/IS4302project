@@ -2,7 +2,7 @@ import { createPublicClient, createWalletClient, http, parseEventLogs, type Addr
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { accountRegistryAbi, deployments, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
+import { accountRegistryAbi, deployments, lostAndFoundAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect } from "./fixtures";
 
 const local = deployments["31337"];
@@ -121,4 +121,42 @@ export async function forwardedSubmission(request: APIRequestContext, cert: stri
   const forwarded = await (await request.post("/api/chain/forward", { data: { submissionId } })).json();
   expect(forwarded.trackingNumber, JSON.stringify(forwarded)).toBeTruthy();
   return { submissionId, trackingNumber: forwarded.trackingNumber as string };
+}
+
+/** Hardhat's published test key for account #1 (test1 / @ash). Local test chain only. */
+const TEST1_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+
+/** Test wallet #1 moves dollars from its wallet into its Pokechain balance (approve + deposit). */
+export async function depositAsTest1(dollars: number) {
+  await depositAs(TEST1_KEY, dollars);
+}
+
+/** test2 (wallet #2, the same Hardhat account as @misty) tops up their Pokechain balance. */
+export async function depositAsTest2(dollars: number) {
+  await depositAs(MISTY_KEY, dollars);
+}
+
+async function depositAs(key: `0x${string}`, dollars: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const wallet = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(key) });
+  const units = BigInt(dollars * 1_000_000);
+  await pub.waitForTransactionReceipt({
+    hash: await wallet.writeContract({ address: local.MockUSDC, abi: mockUSDCAbi, functionName: "approve", args: [local.AccountRegistry, units] }),
+  });
+  await pub.waitForTransactionReceipt({
+    hash: await wallet.writeContract({ address: local.AccountRegistry, abi: accountRegistryAbi, functionName: "deposit", args: [units] }),
+  });
+}
+
+/** The bounty LostAndFound holds in escrow for a slab, in dollars. */
+export async function escrowedBounty(tokenId: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const units = await pub.readContract({ address: local.LostAndFound, abi: lostAndFoundAbi, functionName: "bountyOf", args: [BigInt(tokenId)] });
+  return Number(units) / 1e6;
+}
+
+/** A slab's SlabVault custody (1 Vaulted, 5 Lost, …). Still answers after the token burns. */
+export async function custodyOf(tokenId: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  return pub.readContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "custodyOf", args: [BigInt(tokenId)] });
 }

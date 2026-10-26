@@ -3,10 +3,12 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { Plus, Wallet } from "lucide-react";
+import type { Address } from "viem";
 import { shortDate, usd } from "@/lib/format";
 import { pendingOffer } from "@/lib/negotiation";
 import { useStore } from "@/lib/store";
 import { OnChainFunds } from "../chain/OnChainFunds";
+import { OnChainPayments } from "../chain/OnChainPayments";
 import { Button } from "../ui/primitives";
 import { Empty, LoginPrompt } from "./shared";
 
@@ -72,6 +74,8 @@ export function WalletView() {
         )}
       </div>
 
+      {user.address ? <OnChainPayments address={user.address as Address} /> : null}
+
       {rows.length ? (
         <div className="overflow-hidden rounded-card border border-hairline bg-surface">
           <div className="grid grid-cols-[1fr_auto_auto] gap-4 border-b border-hairline px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-dim">
@@ -101,7 +105,7 @@ export function WalletView() {
             ))}
           </ul>
         </div>
-      ) : (
+      ) : user.address ? null : (
         <Empty icon={<Wallet size={24} />} title="No payments yet" body="Purchases, sales and top-ups show up here." />
       )}
     </div>

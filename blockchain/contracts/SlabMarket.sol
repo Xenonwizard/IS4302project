@@ -63,6 +63,8 @@ contract SlabMarket is Ownable, ReentrancyGuard {
 
     /// @notice tokenId => active listing
     mapping(uint256 => Listing) public listings;
+    uint256[] private _activeTokenIds;
+    mapping(uint256 => uint256) private _activeIndexPlusOne;
 
     /// @notice Auditable record of successfully settled marketplace purchases (Rule 6).
     SaleRecord[] public sales;
@@ -144,6 +146,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         // Lock the token from ordinary transfer and redemption while listed (Rule 5).
         if (currentSeller == address(0)) {
             vault.setListingRestriction(tokenId, true);
+            _addActive(tokenId);
         }
 
         emit CardListed(tokenId, msg.sender, price, uint64(block.timestamp));
@@ -166,6 +169,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         if (l.seller != msg.sender) revert NotSeller(tokenId);
 
         delete listings[tokenId];
+        _removeActive(tokenId);
         vault.setListingRestriction(tokenId, false);
 
         emit ListingCancelled(tokenId, msg.sender, uint64(block.timestamp));
@@ -182,6 +186,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         if (l.seller != seller) revert NotSeller(tokenId);
 
         delete listings[tokenId];
+        _removeActive(tokenId);
         vault.setListingRestriction(tokenId, false);
         emit ListingCancelled(tokenId, seller, uint64(block.timestamp));
     }
@@ -206,6 +211,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
 
         // 1. Effects: remove listing and clear listing restriction
         delete listings[tokenId];
+        _removeActive(tokenId);
         vault.setListingRestriction(tokenId, false);
 
         // Record completed sale for auditable comparable sales history (Rule 6)
@@ -265,35 +271,46 @@ contract SlabMarket is Ownable, ReentrancyGuard {
      *         Allows any collector or visitor to view live marketplace inventory on-chain.
      */
     function getActiveListings() external view returns (ActiveListing[] memory) {
-        uint256 maxId = vault.nextTokenId();
-        uint256 count = 0;
-        for (uint256 i = 1; i < maxId; ++i) {
-            if (listings[i].seller != address(0)) {
-                count++;
-            }
-        }
-        ActiveListing[] memory result = new ActiveListing[](count);
-        uint256 idx = 0;
-        for (uint256 i = 1; i < maxId; ++i) {
-            if (listings[i].seller != address(0)) {
-                SlabVault.Slab memory s = vault.slabOf(i);
-                string memory handle = accounts.accountOf(listings[i].seller).handle;
-                result[idx++] = ActiveListing({
-                    tokenId: i,
-                    seller: listings[i].seller,
-                    sellerHandle: handle,
-                    price: listings[i].price,
-                    listedAt: listings[i].listedAt,
-                    acceptsLoan: listings[i].acceptsLoan,
-                    loanAsk: listings[i].loanAsk,
-                    grader: s.grader,
-                    certNumber: s.certNumber,
-                    title: s.title,
-                    image: s.image
-                });
-            }
+        ActiveListing[] memory result = new ActiveListing[](_activeTokenIds.length);
+        for (uint256 i = 0; i < _activeTokenIds.length; ++i) {
+            uint256 tokenId = _activeTokenIds[i];
+            SlabVault.Slab memory s = vault.slabOf(tokenId);
+            Listing storage listing = listings[tokenId];
+            string memory handle = accounts.accountOf(listing.seller).handle;
+            result[i] = ActiveListing({
+                tokenId: tokenId,
+                seller: listing.seller,
+                sellerHandle: handle,
+                price: listing.price,
+                listedAt: listing.listedAt,
+                acceptsLoan: listing.acceptsLoan,
+                loanAsk: listing.loanAsk,
+                grader: s.grader,
+                certNumber: s.certNumber,
+                title: s.title,
+                image: s.image
+            });
         }
         return result;
+    }
+
+    function _addActive(uint256 tokenId) private {
+        if (_activeIndexPlusOne[tokenId] != 0) return;
+        _activeTokenIds.push(tokenId);
+        _activeIndexPlusOne[tokenId] = _activeTokenIds.length;
+    }
+
+    function _removeActive(uint256 tokenId) private {
+        uint256 indexPlusOne = _activeIndexPlusOne[tokenId];
+        if (indexPlusOne == 0) return;
+        uint256 index = indexPlusOne - 1;
+        uint256 lastTokenId = _activeTokenIds[_activeTokenIds.length - 1];
+        if (index != _activeTokenIds.length - 1) {
+            _activeTokenIds[index] = lastTokenId;
+            _activeIndexPlusOne[lastTokenId] = index + 1;
+        }
+        _activeTokenIds.pop();
+        delete _activeIndexPlusOne[tokenId];
     }
 }
 

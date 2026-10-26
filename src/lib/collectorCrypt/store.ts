@@ -13,10 +13,10 @@
  * slab's NFT straight to Pokechain's Solana escrow wallet. That NFT never moves while the slab
  * trades on Pokechain. On redemption, the escrow (as holder) asks CC to ship to the buyer.
  *
- * Traceability: this mock does not burn on redemption. The NFT stays in the escrow, frozen and
- * marked Redeemed, with every step (mint, redemption, carrier scans) as a Solana transaction in
- * its history. If the real CC does burn, the burn is itself a transaction in that history, and
- * Pokechain's own token keeps CC's asset id, redemption id and tracking number regardless.
+ * Traceability: when CC takes the slab out of its vault to ship it, it burns its Solana NFT. The
+ * burn is itself a transaction in the asset's history (mint, redemption, burn, carrier scans), and
+ * Pokechain's own Polygon token keeps CC's asset id, redemption id and tracking number. That token
+ * is only burned once the owner confirms the slab arrived.
  *
  * Records live in .data/collector-crypt.json so they survive a dev-server restart. Addresses,
  * asset ids and signatures are real-format base58.
@@ -70,7 +70,7 @@ export interface SolanaTx {
   slot: number;
   at: string;
   /** DAS-style transaction type */
-  type: "MINT" | "FREEZE" | "REDEEM_REQUEST" | "UPDATE_METADATA";
+  type: "MINT" | "FREEZE" | "REDEEM_REQUEST" | "BURN" | "UPDATE_METADATA";
   description: string;
 }
 
@@ -100,8 +100,12 @@ export interface CcCard {
   depositorRef?: string;
   vaultStatus: VaultStatus;
   frozen: boolean;
+  /** CC burns its NFT when the slab leaves its vault on a redemption */
+  burnt?: boolean;
   vaultedAt: string;
   redemptionId?: string;
+  /** 1 for the first deposit; higher when the slab came back after a redemption. */
+  deposit?: number;
   history: SolanaTx[];
 }
 
@@ -141,10 +145,14 @@ function solanaTx(seed: string, type: SolanaTx["type"], description: string): So
 export function intake(input: { grader: Grader; certNumber: string; owner?: string; depositorRef?: string }) {
   const db = load();
   const key = keyOf(input.grader, input.certNumber);
-  if (db.cards[key]) return { card: db.cards[key], created: false };
+  const previous = db.cards[key];
+  if (previous && !previous.burnt && previous.vaultStatus === "Vaulted") return { card: previous, created: false };
   const preview = certPreview(input.grader, input.certNumber);
   if (!preview) return { error: `${input.grader} has no record of cert ${input.certNumber}` };
-  const assetId = base58(digest(`collector-crypt:asset:${key}`));
+  // A slab that left the vault (its NFT was burnt) and came back, e.g. a found lost slab, is a
+  // new deposit: CC mints a new NFT, and the old one's history stays attached to the record.
+  const deposit = previous ? (previous.deposit ?? 1) + 1 : 1;
+  const assetId = base58(digest(deposit === 1 ? `collector-crypt:asset:${key}` : `collector-crypt:asset:${key}:${deposit}`));
   const owner = input.owner ?? POKECHAIN_ESCROW;
   const card: CcCard = {
     assetId,
@@ -158,8 +166,16 @@ export function intake(input: { grader: Grader; certNumber: string; owner?: stri
     vaultStatus: "Vaulted",
     frozen: false,
     vaultedAt: new Date().toISOString(),
+    deposit,
     history: [
-      solanaTx(`${assetId}:mint`, "MINT", `Minted ${preview.title} to ${owner} on vault intake`),
+      ...(previous?.history ?? []),
+      solanaTx(
+        `${assetId}:mint`,
+        "MINT",
+        previous
+          ? `Re-deposited; minted ${preview.title} to ${owner} (replaces burnt NFT ${previous.assetId})`
+          : `Minted ${preview.title} to ${owner} on vault intake`,
+      ),
     ],
   };
   db.cards[key] = card;
@@ -182,8 +198,8 @@ export function allCards(): CcCard[] {
 const CARRIERS = ["DHL Express", "FedEx", "UPS"];
 
 /**
- * The NFT's holder asks CC to ship the slab. The NFT is not burned: it is frozen and marked
- * "Redemption requested" so it can never be redeemed twice, and the request is a Solana tx.
+ * The NFT's holder asks CC to ship the slab. CC takes the slab out of the vault and burns its NFT,
+ * so it can never be redeemed twice; the request and the burn are both Solana txs.
  */
 export function requestRedemption(input: { assetId: string; shipTo: string; requestedBy: string }) {
   const db = load();
@@ -231,10 +247,12 @@ export function requestRedemption(input: { assetId: string; shipTo: string; requ
     ...card,
     vaultStatus: "Shipped",
     frozen: true,
+    burnt: true,
     redemptionId: id,
     history: [
       ...card.history,
-      solanaTx(`${card.assetId}:redeem`, "REDEEM_REQUEST", `Redemption ${id} requested by ${input.requestedBy}; NFT frozen`),
+      solanaTx(`${card.assetId}:redeem`, "REDEEM_REQUEST", `Redemption ${id} requested by ${input.requestedBy}`),
+      solanaTx(`${card.assetId}:burn`, "BURN", `Slab released from the vault for ${id}; NFT burned`),
     ],
   };
   save(db);
@@ -305,7 +323,7 @@ export function dasAsset(c: CcCard) {
     royalty: { basis_points: 0, primary_sale_happened: true },
     ownership: { owner: c.owner, frozen: c.frozen, delegated: false, ownership_model: "single" },
     mutable: true,
-    burnt: false,
+    burnt: Boolean(c.burnt),
   };
 }
 

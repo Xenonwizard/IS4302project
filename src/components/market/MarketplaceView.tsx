@@ -13,7 +13,8 @@ import {
   applyFilters,
   sortListings,
 } from "@/lib/filters";
-import { useMarketInventory } from "@/lib/store";
+import Link from "next/link";
+import { useLostSlabs, useMarketInventory } from "@/lib/store";
 import { Button, inputClass } from "../ui/primitives";
 import { Select } from "../ui/Select";
 import { FilterDrawer } from "./FilterDrawer";
@@ -69,6 +70,13 @@ export function MarketplaceView() {
     if (window.location.pathname + window.location.search === target) return;
     router.replace(target, { scroll: false });
   }, [query, sort, filters.series, router]);
+
+  // Lost slabs can't be listed, so a cert search here would miss them: point finders to Lost cards.
+  const lostSlabs = useLostSlabs();
+  const lostMatch = useMemo(() => {
+    const cert = query.trim().replace(/^#/, "");
+    return /^\d{4,}$/.test(cert) ? lostSlabs.find((item) => item.listing.certNumber === cert) : undefined;
+  }, [lostSlabs, query]);
 
   const filtered = useMemo(
     () => sortListings(applyFilters(inventory, filters, query), sort),
@@ -177,6 +185,19 @@ export function MarketplaceView() {
             Clear all
           </button>
         </div>
+      ) : null}
+
+      {lostMatch ? (
+        <Link
+          href={`/lost?q=${lostMatch.listing.certNumber}`}
+          className="mt-4 flex items-center justify-between gap-3 rounded-card border border-warn/40 bg-warn/10 px-4 py-3 text-[13px] text-warn transition hover:bg-warn/15"
+        >
+          <span>
+            <b>{lostMatch.listing.grader} cert #{lostMatch.listing.certNumber} is reported lost.</b> Found it? Open it on Lost cards to start a return
+            {lostMatch.loss.bounty ? ` and claim the bounty` : ""}.
+          </span>
+          <span className="shrink-0 font-bold">View →</span>
+        </Link>
       ) : null}
 
       <p className="mt-4 text-[13px] text-muted">

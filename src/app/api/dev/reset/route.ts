@@ -56,6 +56,7 @@ export async function POST(request: Request) {
     rmSync(join(DATA, "collector-crypt.json"), { force: true });
     rmSync(join(DATA, "evidence"), { recursive: true, force: true });
     rmSync(join(DATA, "pokechain-forward-records.json"), { force: true });
+    rmSync(join(DATA, "pokechain-redemption-addresses.json"), { force: true });
     // Chats carry trade offers by their on-chain id, and those ids restart with the chain.
     rmSync(join(DATA, "negotiations.json"), { force: true });
     if (!clean) {

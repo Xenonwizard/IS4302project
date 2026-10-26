@@ -38,7 +38,7 @@ interface ILoanEscrowCommitments {
  *                             Also refused while it has trade offers open (assets in escrow).
  *
  *  Trading and marketplace purchases
- *      `moveBalance`         TradeEscrow and SlabMarket move custody balances: it locks the cash
+ *      `moveBalance`         TradeEscrow, SlabMarket, LoanEscrow and LostAndFound move custody balances: it locks the cash
  *                            in an offer or pays a seller without taking USDC out of custody.
  *
  *  Nothing is deleted. A closed account keeps its record and its handle stays reserved to that
@@ -68,6 +68,8 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     address public slabMarket;
     /// @notice The LoanEscrow contract, which locks principal and settles secured loans.
     address public loanEscrow;
+    /// @notice The LostAndFound contract, which escrows lost-slab bounties until the finder is paid.
+    address public lostAndFound;
 
     mapping(address => Account) private _accounts;
     /// @notice keccak256(handle) => the address that claimed it. Handles are never released.
@@ -85,6 +87,7 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     event TradeEscrowSet(address tradeEscrow);
     event SlabMarketSet(address slabMarket);
     event LoanEscrowSet(address loanEscrow);
+    event LostAndFoundSet(address lostAndFound);
     event BalanceMoved(address indexed from, address indexed to, uint256 amount);
 
     error InvalidHandle();
@@ -98,6 +101,7 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     error TradeEscrowAlreadySet();
     error SlabMarketAlreadySet();
     error LoanEscrowAlreadySet();
+    error LostAndFoundAlreadySet();
     error OnlyBalanceMover();
     error OffersStillOpen(uint256 count);
     error LoansStillOpen(uint256 count);
@@ -134,6 +138,13 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         emit LoanEscrowSet(escrow);
     }
 
+    /// @notice One-time wiring to LostAndFound.
+    function setLostAndFound(address lostAndFound_) external onlyOwner {
+        if (lostAndFound != address(0)) revert LostAndFoundAlreadySet();
+        lostAndFound = lostAndFound_;
+        emit LostAndFoundSet(lostAndFound_);
+    }
+
     /**
      * @notice Moves custody balance from one holder to another without any USDC leaving this
      *         contract, so `totalCustody` is unchanged. TradeEscrow calls it inside a transaction
@@ -144,6 +155,7 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
             (msg.sender != tradeEscrow || tradeEscrow == address(0))
                 && (msg.sender != slabMarket || slabMarket == address(0))
                 && (msg.sender != loanEscrow || loanEscrow == address(0))
+                && (msg.sender != lostAndFound || lostAndFound == address(0))
         ) {
             revert OnlyBalanceMover();
         }

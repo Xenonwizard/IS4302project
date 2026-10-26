@@ -16,10 +16,12 @@
  *   transfer()        SlabVault.safeTransferFrom(me, to, tokenId)     collector's wallet
  *
  *  Outbound (owner → Collector Crypt ships to them)
- *   redeem()          SlabVault.requestRedemption, then the operator asks CC to ship and
- *                     records it with SlabVault.markShipped
+ *   redeem()          SlabVault.requestRedemption (owner's wallet). Pokechain's outtake service
+ *                     (/outtake) then notifies CC to ship to the current token owner and records
+ *                     it with SlabVault.markShipped
  *   confirmDelivery() SlabVault.confirmDelivery                       collector's wallet
- *   reportLost()      SlabVault.reportLost (inbound or outbound post)  collector's wallet
+ *   reportLost()      SlabVault.reportLost (in the post, or missing from the vault)  collector's wallet
+ *   writeOffLost()    SlabVault.writeOffLost: refunds the bounty, burns the token    collector's wallet
  *   resolveLost()     SlabVault.resolveLostReport                     operator (simulated carrier finds it)
  */
 import { useQueryClient } from "@tanstack/react-query";
@@ -186,16 +188,19 @@ export function useSlabChain() {
         requestTx = receipt.transactionHash;
       }
 
-      const shipped = await operator<{
-        redemptionRef: string;
-        carrier: string;
-        trackingNumber: string;
-        tx: OperatorTx;
-        checks: CheckStep[];
-      }>("Collector Crypt ships to you", "/api/chain/ship", { tokenId, shipTo: shipTo.trim() });
-      return { shippingHash, requestTx, ...shipped };
+      // Hand Pokechain the plaintext address (the chain only has its hash) so the outtake step can pass it to CC.
+      const saved = await fetch("/api/chain/outtake/address", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tokenId, shipTo: shipTo.trim() }),
+      });
+      if (!saved.ok) throw new Error(((await saved.json()) as { error?: string }).error ?? "Pokechain did not accept the delivery address");
+
+      // The owner's part ends here. Pokechain's outtake service (/outtake, or POST /api/chain/outtake)
+      // then notifies Collector Crypt to ship and records it with SlabVault.markShipped.
+      return { shippingHash, requestTx };
     },
-    [client, send, operator],
+    [client, send],
   );
 
   const confirmDelivery = useCallback(
@@ -206,7 +211,19 @@ export function useSlabChain() {
 
   const reportLost = useCallback(
     (tokenId: string, details: string) =>
-      send({ contract: "slabVault", functionName: "reportLost", args: [BigInt(tokenId), details], label: "Report lost in transit" }),
+      send({ contract: "slabVault", functionName: "reportLost", args: [BigInt(tokenId), details], label: "Report slab lost" }),
+    [send],
+  );
+
+  const writeOffLost = useCallback(
+    (tokenId: string) =>
+      send({ contract: "slabVault", functionName: "writeOffLost", args: [BigInt(tokenId)], label: "Write off lost slab" }),
+    [send],
+  );
+
+  const cancelLost = useCallback(
+    (tokenId: string) =>
+      send({ contract: "slabVault", functionName: "cancelLostReport", args: [BigInt(tokenId)], label: "Cancel lost report" }),
     [send],
   );
 
@@ -216,5 +233,5 @@ export function useSlabChain() {
     [operator],
   );
 
-  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost, resolveLost };
+  return { uploadEvidence, submit, receive, forward, simulateVault, verifyAndMint, transfer, redeem, confirmDelivery, reportLost, cancelLost, writeOffLost, resolveLost };
 }
