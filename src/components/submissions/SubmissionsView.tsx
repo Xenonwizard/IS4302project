@@ -413,7 +413,7 @@ function SubmissionFormDetails({ request }: { request: SubmissionRequest }) {
             href={request.status === 4 ? "/vault" : "/vault?tab=awaiting"}
             className="inline-flex h-9 items-center rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-white transition hover:bg-accent-hover"
           >
-            View Vaulted NFT
+            View Pending NFT
           </Link>
         </div>
       ) : null}
