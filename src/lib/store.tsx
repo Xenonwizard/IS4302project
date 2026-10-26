@@ -40,6 +40,7 @@ import type {
   Negotiation,
   Sale,
   SlabToken,
+  VaultLossReport,
   TradeBid,
   VaultItem,
   Withdrawal,
@@ -97,6 +98,8 @@ interface PersistShape {
   /** wallet history, newest first; the balance is its sum */
   ledger: LedgerEntry[];
   lostReports: LostReport[];
+  /** Missing-from-vault reports, keyed by listing id. */
+  vaultLosses: Record<string, VaultLossReport>;
 }
 
 const EMPTY: PersistShape = {
@@ -109,6 +112,7 @@ const EMPTY: PersistShape = {
   negotiations: {},
   ledger: [],
   lostReports: [],
+  vaultLosses: {},
 };
 
 /** A slab token the connected wallet owns, as SlabVault reports it. */
@@ -199,6 +203,11 @@ interface StoreValue extends PersistShape {
   /** buyer side: take back a pending offer */
   withdrawOffer: (negotiationId: string, offerId: string) => void;
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
+  /* vault missing reports and their optional bounties */
+  reportVaultLost: (listingId: string, details: string) => void;
+  cancelVaultLost: (listingId: string) => void;
+  setVaultBounty: (listingId: string, amount: number) => void;
+  cancelVaultBounty: (listingId: string) => void;
   addComment: (listingId: string, text: string) => void;
   topUp: (amount: number) => void;
   resetDemo: () => void;
@@ -1864,6 +1873,94 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [pushToast],
   );
 
+  const reportVaultLost = useCallback(
+    (listingId: string, details: string) => {
+      setState((prev) => {
+        if (!prev.vault.some((item) => item.listingId === listingId)) return prev;
+        const negotiations = closeSellerChats(
+          prev,
+          listingId,
+          "This slab was reported missing from the vault.",
+        );
+        return {
+          ...prev,
+          negotiations,
+          vault: prev.vault.map((item) =>
+            item.listingId === listingId && item.status === "Listed"
+              ? { ...item, status: "Vaulted", listedPrice: undefined }
+              : item,
+          ),
+          overrides: {
+            ...prev.overrides,
+            [listingId]: { ...prev.overrides[listingId], delisted: true },
+          },
+          vaultLosses: {
+            ...prev.vaultLosses,
+            [listingId]: { reportedAt: new Date().toISOString(), details },
+          },
+        };
+      });
+      pushToast({
+        title: "Card reported lost",
+        body: "It is no longer available for sale. You can add or cancel a bounty from its vault card.",
+        tone: "success",
+      });
+    },
+    [pushToast],
+  );
+
+  const cancelVaultLost = useCallback(
+    (listingId: string) => {
+      setState((prev) => {
+        if (!prev.vaultLosses[listingId]) return prev;
+        const vaultLosses = { ...prev.vaultLosses };
+        delete vaultLosses[listingId];
+        return { ...prev, vaultLosses };
+      });
+      pushToast({ title: "Missing-card report cancelled", body: "The card is available to manage in your vault again." });
+    },
+    [pushToast],
+  );
+
+  const setVaultBounty = useCallback(
+    (listingId: string, amount: number) => {
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      setState((prev) => {
+        const report = prev.vaultLosses[listingId];
+        if (!report) return prev;
+        return {
+          ...prev,
+          vaultLosses: {
+            ...prev.vaultLosses,
+            [listingId]: {
+              ...report,
+              bounty: { amount: cents(amount), addedAt: new Date().toISOString() },
+            },
+          },
+        };
+      });
+      pushToast({ title: "Bounty attached", body: `${usd(amount, { cents: true })} is now offered for this missing card.`, tone: "success" });
+    },
+    [pushToast],
+  );
+
+  const cancelVaultBounty = useCallback(
+    (listingId: string) => {
+      setState((prev) => {
+        const report = prev.vaultLosses[listingId];
+        if (!report?.bounty) return prev;
+        const withoutBounty = { ...report };
+        delete withoutBounty.bounty;
+        return {
+          ...prev,
+          vaultLosses: { ...prev.vaultLosses, [listingId]: withoutBounty },
+        };
+      });
+      pushToast({ title: "Bounty cancelled", body: "The missing-card report remains open." });
+    },
+    [pushToast],
+  );
+
   const addComment = useCallback((listingId: string, text: string) => {
     setState((prev) => {
       const entry = {
@@ -1937,6 +2034,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     respondToOffer,
     withdrawOffer,
     fileLostReport,
+    reportVaultLost,
+    cancelVaultLost,
+    setVaultBounty,
+    cancelVaultBounty,
     addComment,
     topUp,
     resetDemo,

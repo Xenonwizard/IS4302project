@@ -15,12 +15,12 @@ import { useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
-import type { Listing, VaultItem } from "@/lib/types";
+import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { RedeemModal } from "../chain/RedeemModal";
 import { TransferModal } from "../chain/TransferModal";
 import { WithdrawnList } from "../chain/WithdrawnList";
 import { Slab } from "../slab/Slab";
-import { Badge, Button, Modal, TimeAgo } from "../ui/primitives";
+import { Badge, Button, Field, Modal, TimeAgo, inputClass } from "../ui/primitives";
 import { ListForSaleForm } from "./ListForSaleForm";
 import { Empty, LoginPrompt } from "./shared";
 
@@ -45,6 +45,11 @@ export function VaultView() {
     resolve,
     negotiations,
     balance,
+    vaultLosses,
+    reportVaultLost,
+    cancelVaultLost,
+    setVaultBounty,
+    cancelVaultBounty,
     pushToast,
   } = useStore();
   const { cancelListing } = useMarketChain();
@@ -72,6 +77,10 @@ export function VaultView() {
   const [sellTarget, setSellTarget] = useState<Listing | null>(null);
   const [redeemTarget, setRedeemTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [transferTarget, setTransferTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  const [missingTarget, setMissingTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  const [bountyTarget, setBountyTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
+  const [missingDetails, setMissingDetails] = useState("");
+  const [reportingMissing, setReportingMissing] = useState(false);
   // Slabs locked in one of my open trade offers (held by TradeEscrow): tokenId → offerId
   const { data: escrowed = {} } = useEscrowedByMe(user?.address as Address | undefined);
 
@@ -107,6 +116,25 @@ export function VaultView() {
       pushToast({ title: "Lost slab reported", body: "The vault team has been notified.", tone: "success" });
     } catch (err) {
       pushToast({ title: "Could not report slab", body: (err as Error).message, tone: "error" });
+    }
+  };
+
+  const reportMissingFromVault = async () => {
+    if (!missingTarget) return;
+    setReportingMissing(true);
+    try {
+      const { entry, listing } = missingTarget;
+      if (entry.status === "Listed" && user?.address && entry.token?.tokenId) {
+        await cancelListing(entry.token.tokenId);
+      }
+      reportVaultLost(listing.id, missingDetails.trim() || "Reported missing from the vault");
+      setMissingTarget(null);
+      setMissingDetails("");
+      setBountyTarget({ entry, listing });
+    } catch (err) {
+      pushToast({ title: "Could not report card missing", body: (err as Error).message, tone: "error" });
+    } finally {
+      setReportingMissing(false);
     }
   };
 
@@ -225,6 +253,11 @@ export function VaultView() {
                       onTransfer={entry.token && user.address ? () => setTransferTarget({ entry, listing }) : undefined}
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
                       onReportLost={entry.token?.tokenId ? () => void handleReportLost(entry.token!.tokenId) : undefined}
+                      loss={vaultLosses[listing.id]}
+                      onReportMissing={entry.status === "Vaulted" || entry.status === "Listed" ? () => setMissingTarget({ entry, listing }) : undefined}
+                      onCancelMissing={() => cancelVaultLost(listing.id)}
+                      onAddBounty={() => setBountyTarget({ entry, listing })}
+                      onCancelBounty={() => cancelVaultBounty(listing.id)}
                     />
                   </div>
                 );
@@ -339,6 +372,52 @@ export function VaultView() {
       <RedeemModal target={redeemTarget} onClose={() => setRedeemTarget(null)} />
       <TransferModal target={transferTarget} onClose={() => setTransferTarget(null)} />
 
+      <Modal
+        open={Boolean(missingTarget)}
+        onClose={() => {
+          if (reportingMissing) return;
+          setMissingTarget(null);
+          setMissingDetails("");
+        }}
+        title="Report card lost in vault"
+        width="max-w-sm"
+      >
+        {missingTarget ? (
+          <div className="space-y-4 p-5">
+            <p className="text-[13px] leading-relaxed text-muted">
+              Mark <span className="font-semibold text-white">{missingTarget.listing.title}</span> as lost in the vault. It will be removed from sale until you cancel this report.
+            </p>
+            <Field label="What happened?" hint="Optional">
+              <textarea
+                className={`${inputClass} h-24 resize-none py-2.5`}
+                value={missingDetails}
+                onChange={(event) => setMissingDetails(event.target.value)}
+                placeholder="Last seen during inventory check…"
+                disabled={reportingMissing}
+              />
+            </Field>
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setMissingTarget(null)} disabled={reportingMissing}>Cancel</Button>
+              <Button variant="danger" className="flex-1" onClick={() => void reportMissingFromVault()} disabled={reportingMissing}>
+                {reportingMissing ? "Reporting..." : "Report lost"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <BountyModal
+        key={bountyTarget?.listing.id ?? "no-bounty-target"}
+        target={bountyTarget}
+        existing={bountyTarget ? vaultLosses[bountyTarget.listing.id]?.bounty?.amount : undefined}
+        onClose={() => setBountyTarget(null)}
+        onSave={(amount) => {
+          if (!bountyTarget) return;
+          setVaultBounty(bountyTarget.listing.id, amount);
+          setBountyTarget(null);
+        }}
+      />
+
       {/* list-for-sale modal */}
       <Modal
         open={Boolean(sellTarget)}
@@ -363,6 +442,58 @@ export function VaultView() {
         ) : null}
       </Modal>
     </div>
+  );
+}
+
+function BountyModal({
+  target,
+  existing,
+  onClose,
+  onSave,
+}: {
+  target: { entry: VaultItem; listing: Listing } | null;
+  existing?: number;
+  onClose: () => void;
+  onSave: (amount: number) => void;
+}) {
+  const [amount, setAmount] = useState(existing ? String(existing) : "");
+  const value = Number(amount);
+  const valid = Number.isFinite(value) && value > 0;
+
+  return (
+    <Modal open={Boolean(target)} onClose={onClose} title={existing ? "Edit bounty" : "Attach a bounty"} width="max-w-sm">
+      {target ? (
+        <form
+          className="space-y-4 p-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (valid) onSave(value);
+          }}
+        >
+          <p className="text-[13px] leading-relaxed text-muted">
+            Offer a reward to help locate <span className="font-semibold text-white">{target.listing.title}</span>.
+          </p>
+          <Field label="Bounty amount (PokeCredits)" hint="You can cancel this bounty while the missing-card report is open.">
+            <div className="relative">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">$</span>
+              <input
+                autoFocus
+                className={`${inputClass} pl-7 font-semibold`}
+                inputMode="decimal"
+                value={amount}
+                onChange={(event) => setAmount(event.target.value.replace(/[^\d.]/g, ""))}
+                placeholder="100"
+              />
+            </div>
+          </Field>
+          {!valid && amount ? <p className="text-[12px] font-medium text-bad">Enter a bounty above $0.</p> : null}
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
+            <Button type="submit" className="flex-1" disabled={!valid}>{existing ? "Update bounty" : "Attach bounty"}</Button>
+          </div>
+        </form>
+      ) : null}
+    </Modal>
   );
 }
 
@@ -394,6 +525,11 @@ function SlabCard({
   onTransfer,
   inOffer,
   onReportLost,
+  loss,
+  onReportMissing,
+  onCancelMissing,
+  onAddBounty,
+  onCancelBounty,
 }: {
   entry: VaultItem;
   listing: Listing;
@@ -405,6 +541,12 @@ function SlabCard({
   onTransfer?: () => void;
   /** the open trade offer that has this slab locked in escrow */
   inOffer?: { offerId: string; taker: string; room: string };
+  /** A reversible report that this card cannot be located in the physical vault. */
+  loss?: VaultLossReport;
+  onReportMissing?: () => void;
+  onCancelMissing: () => void;
+  onAddBounty: () => void;
+  onCancelBounty: () => void;
   onReportLost?: () => void;
 }) {
   const small = size === "small";
@@ -447,9 +589,13 @@ function SlabCard({
         </Link>
         <div className={clsx("mt-2", small ? "space-y-1.5" : "flex items-center justify-between gap-2")}>
           <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>{entry.status === "Listed" ? `Asking ${usd(entry.listedPrice ?? listing.price, { cents: true })}` : "Not listed"}</span>
-          <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" ? "warn" : "good"}>
-            {entry.status}
-          </Badge>
+          {loss ? (
+            <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone="warn">Lost in vault</Badge>
+          ) : (
+            <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone={entry.status === "Listed" ? "accent" : entry.status === "Shipping requested" ? "warn" : "good"}>
+              {entry.status}
+            </Badge>
+          )}
         </div>
         <p className={clsx("mt-1.5 text-dim", small ? "text-[9.5px]" : "text-[11px]")}>
           {entry.via} · <TimeAgo value={entry.acquiredAt} />
@@ -463,30 +609,43 @@ function SlabCard({
             <Blocks size={11} /> Token #{entry.token.tokenId} · <Route size={11} /> Trace
           </Link>
         ) : null}
-        <div className={clsx("mt-3 grid", small ? "gap-1.5" : "gap-2")}>
-          {entry.status === "Listed" ? (
-            <Button size="sm" variant="secondary" onClick={onManage}>
-              Manage listing
-            </Button>
-          ) : entry.status === "Vaulted" ? (
-            <Button size="sm" onClick={onSell}>
-              <Tag size={13} />
-              List for sale
-            </Button>
-          ) : null}
-          {entry.status === "Vaulted" ? (
-            <Button size="sm" variant="outline" onClick={onShip}>
-              <Truck size={13} />
-              Ship to me
-            </Button>
-          ) : null}
-          {entry.status === "Vaulted" && onTransfer ? (
-            <Button size="sm" variant="outline" onClick={onTransfer}>
-              <Send size={13} />
-              Transfer
-            </Button>
-          ) : null}
-        </div>
+        {loss ? (
+          <div className={clsx("mt-3 rounded-xl border border-warn/25 bg-warn/10", small ? "space-y-1.5 p-2" : "space-y-2 p-3")}>
+            <p className={clsx("font-semibold text-warn", small ? "text-[10px]" : "text-[12px]")}>Lost-card report open</p>
+            {loss.bounty ? <p className={clsx("text-muted", small ? "text-[9.5px]" : "text-[11px]")}>Bounty: <span className="font-semibold text-white">{usd(loss.bounty.amount, { cents: true })}</span></p> : null}
+            <div className={clsx("grid", small ? "gap-1" : "gap-1.5")}>
+              <Button size="sm" variant="secondary" onClick={onAddBounty}>{loss.bounty ? "Edit bounty" : "Attach bounty"}</Button>
+              {loss.bounty ? <Button size="sm" variant="outline" onClick={onCancelBounty}>Cancel bounty</Button> : null}
+              <Button size="sm" variant="outline" onClick={onCancelMissing}>Cancel lost status</Button>
+            </div>
+          </div>
+        ) : (
+          <div className={clsx("mt-3 grid", small ? "gap-1.5" : "gap-2")}>
+            {entry.status === "Listed" ? (
+              <Button size="sm" variant="secondary" onClick={onManage}>
+                Manage listing
+              </Button>
+            ) : entry.status === "Vaulted" ? (
+              <Button size="sm" onClick={onSell}>
+                <Tag size={13} />
+                List for sale
+              </Button>
+            ) : null}
+            {entry.status === "Vaulted" ? (
+              <Button size="sm" variant="outline" onClick={onShip}>
+                <Truck size={13} />
+                Ship to me
+              </Button>
+            ) : null}
+            {entry.status === "Vaulted" && onTransfer ? (
+              <Button size="sm" variant="outline" onClick={onTransfer}>
+                <Send size={13} />
+                Transfer
+              </Button>
+            ) : null}
+            {onReportMissing ? <Button size="sm" variant="outline" onClick={onReportMissing}>Report lost</Button> : null}
+          </div>
+        )}
       </div>
     </div>
   );
