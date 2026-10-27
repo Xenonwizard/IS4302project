@@ -23,7 +23,7 @@ import { useMarketChain, useMarketFeeBps } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { chain, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
 import { zeroAddress } from "viem";
-import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { usePublicClient } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ActivityEvent, Listing } from "@/lib/types";
 import { CopyText } from "../chain/ChainConsole";
@@ -85,8 +85,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const { data: onChainMarketListing } = useQuery({
     queryKey: ["token-market-listing", resolvedTokenId],
     enabled: enabledOnChain,
-    refetchInterval: 2000,
-    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
     queryFn: async () => {
@@ -114,8 +112,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
   const { data: onChainOwner } = useQuery({
     queryKey: ["token-owner", resolvedTokenId],
     enabled: enabledOnChain,
-    refetchInterval: 2000,
-    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     queryFn: async () => {
       if (!client || tokenIdBigInt === null) return null;
@@ -192,47 +188,9 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     }
   };
 
-  useWatchContractEvent({
-    ...contracts.slabMarket,
-    eventName: "CardPurchased",
-    enabled: enabledOnChain,
-    poll: true,
-    pollingInterval: 1000,
-    onLogs: refreshActivity,
-  });
-
-  useWatchContractEvent({
-    ...contracts.slabMarket,
-    eventName: "CardListed",
-    enabled: enabledOnChain,
-    poll: true,
-    pollingInterval: 1000,
-    onLogs: refreshActivity,
-  });
-
-  useWatchContractEvent({
-    ...contracts.slabVault,
-    eventName: "Transfer",
-    enabled: enabledOnChain,
-    poll: true,
-    pollingInterval: 1000,
-    onLogs: refreshActivity,
-  });
-
-  useWatchContractEvent({
-    ...contracts.slabVault,
-    eventName: "SlabVaulted",
-    enabled: enabledOnChain,
-    poll: true,
-    pollingInterval: 1000,
-    onLogs: refreshActivity,
-  });
-
   const { data: onChainEvents = [] } = useQuery({
     queryKey: ["token-activity", listing.tokenId],
     enabled: enabledOnChain,
-    refetchInterval: 3000,
-    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     queryFn: async (): Promise<ActivityEvent[]> => {
       if (!client || tokenIdBigInt === null) return [];

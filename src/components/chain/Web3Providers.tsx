@@ -5,6 +5,7 @@ import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { WagmiProvider } from "wagmi";
+import { ChainBlockSync } from "@/components/chain/ChainBlockSync";
 import { ChainLogProvider } from "@/lib/chain/log";
 import { wagmiConfig } from "@/lib/chain/wagmi";
 
@@ -18,6 +19,7 @@ export function Web3Providers({ children }: { children: React.ReactNode }) {
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider theme={darkTheme({ accentColor: "#2f5bf9", borderRadius: "medium" })} modalSize="compact">
+          <ChainBlockSync />
           <ChainLogProvider>{children}</ChainLogProvider>
         </RainbowKitProvider>
       </QueryClientProvider>

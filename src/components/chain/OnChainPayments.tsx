@@ -34,7 +34,6 @@ export function OnChainPayments({ address }: { address: Address }) {
   const { data = [], isLoading } = useQuery({
     queryKey: ["onchain-payments", address],
     enabled: Boolean(client),
-    refetchInterval: 4_000,
     queryFn: async (): Promise<Payment[]> => {
       const from = { fromBlock: DEPLOY_BLOCK };
       const [deposits, withdrawals, out, into, paid, refunded, set] = await Promise.all([

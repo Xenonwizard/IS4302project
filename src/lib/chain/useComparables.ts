@@ -36,7 +36,6 @@ export function useComparables() {
   return useQuery({
     queryKey: ["pokechain-comparables", chain.id, contracts.slabVault.address, contracts.slabMarket.address, contracts.tradeEscrow.address],
     enabled: Boolean(client && IS_DEPLOYED),
-    refetchInterval: 10_000,
     queryFn: async () => {
       const blockNumber = await client!.getBlockNumber({ cacheTime: 0 });
       const tradeCode = await client!.getBytecode({ address: contracts.tradeEscrow.address, blockNumber });

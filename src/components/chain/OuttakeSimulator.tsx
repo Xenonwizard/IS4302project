@@ -40,7 +40,6 @@ export function OuttakeSimulator() {
     queryKey: ["outtake-cert", certNumber],
     enabled: Boolean(client && valid),
     retry: false,
-    refetchInterval: 1_500,
     queryFn: async (): Promise<OuttakeRecord> => {
       const submission = await client!.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [BigInt(certNumber)] });
       if (submission.certNumber !== certNumber || submission.tokenId === BigInt(0)) {

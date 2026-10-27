@@ -73,6 +73,13 @@ export const SUBMISSION_STAGE: Record<number, string> = {
 
 const TIMELINE_STEPS = ["Sent", "At Pokechain", "At Vault", "Vaulted"];
 
+/** recovery: reported lost, being searched for. insurance: written off for insurance, NFT burned. */
+type RecoveryState = "recovery" | "insurance";
+const RECOVERY_LABEL: Record<RecoveryState, string> = {
+  recovery: "In recovery & insurance",
+  insurance: "Insurance claimed · NFT burned",
+};
+
 interface EvidenceResponse {
   found?: boolean;
   error?: string;
@@ -89,7 +96,7 @@ export function SubmissionsView() {
   const { user, ready, vault, resolve, vaultLosses, pendingLossDecisions, setVaultBounty, resolveLossDecision, pushToast } = useStore();
   const lost = useLostReport();
   const publicLostSlabs = useLostSlabs();
-  const { data: requests = [], isPending, isError, refetch } = useSubmissions();
+  const { data: submissionRequests = [], isPending, isError, refetch } = useSubmissions();
   const params = useSearchParams();
   const [category, setCategory] = useState<Category>(() => {
     const tab = params.get("tab");
@@ -120,6 +127,12 @@ export function SubmissionsView() {
       }),
     [resolve, vault],
   );
+  // A submission that never reached the vault but is now a withdrawal (a found slab delivered to its
+  // owner) has left the vaulting pipeline: it shows under Slab withdrawals only.
+  const requests = useMemo(() => {
+    const withdrawnTokens = new Set(withdrawals.map(({ entry }) => entry.token?.tokenId));
+    return submissionRequests.filter((request) => request.status === 4 || !withdrawnTokens.has(request.tokenId));
+  }, [submissionRequests, withdrawals]);
 
   // A found-slab case belongs to different workflows depending on this collector's role.
   const { data: allCases = [] } = useFoundCases();
@@ -150,10 +163,20 @@ export function SubmissionsView() {
   const trackedRecoveryReports = recoveryReports.filter(({ entry, listing }) =>
     !ownerCases.some((c) => c.tokenId === entry.token?.tokenId || c.tokenId === listing.tokenId),
   );
+  // A submission that was reported lost now lives under Recovery & insurance, not the vaulting pipeline.
+  const recoveryByToken = useMemo(() => {
+    const map = new Map<string, RecoveryState>();
+    for (const { entry, listing, loss } of recoveryReports) {
+      const tokenId = entry.token?.tokenId ?? listing.tokenId;
+      if (tokenId) map.set(tokenId, loss.resolution === "insurance" ? "insurance" : "recovery");
+    }
+    return map;
+  }, [recoveryReports]);
+  const inPipeline = (request: SubmissionRequest) => !recoveryByToken.has(request.tokenId);
 
   const visible = category === "submissions" ? requests.filter((request) => {
-    if (filter === "progress") return OPEN_SUBMISSION.has(request.status);
-    if (filter === "awaiting") return request.status === 2 || request.status === 3;
+    if (filter === "progress") return OPEN_SUBMISSION.has(request.status) && inPipeline(request);
+    if (filter === "awaiting") return (request.status === 2 || request.status === 3) && inPipeline(request);
     if (filter === "vaulted") return request.status === 4;
     return true;
   }) : [];
@@ -180,8 +203,8 @@ export function SubmissionsView() {
     return true;
   }) : [];
   const total = requests.length + localRequests.length + withdrawals.length + bountyClaimCases.length + ownerCases.length + trackedRecoveryReports.length;
-  const inProgress = requests.filter((request) => OPEN_SUBMISSION.has(request.status)).length;
-  const awaitingVault = requests.filter((request) => request.status === 2 || request.status === 3).length;
+  const inProgress = requests.filter((request) => OPEN_SUBMISSION.has(request.status) && inPipeline(request)).length;
+  const awaitingVault = requests.filter((request) => (request.status === 2 || request.status === 3) && inPipeline(request)).length;
   const vaulted = requests.filter((request) => request.status === 4).length + localRequests.length;
   const categoryCounts: Record<Category, number> = {
     submissions: requests.length + localRequests.length,
@@ -202,6 +225,15 @@ export function SubmissionsView() {
   const submitLossDecision = async () => {
     if (!decisionTarget || !decisionChoice) return;
     const { entry, listing, decisionId } = decisionTarget;
+    if (decisionChoice === "insurance") {
+      // Insurance pays out instead of vaulting, so the slab's NFT is burned on-chain (writeOff toasts).
+      try {
+        await lost.writeOff(listing.id, entry.token?.tokenId, vaultLosses[decisionId]?.details);
+      } catch (err) {
+        pushToast({ title: "Could not claim insurance", body: (err as Error).message, tone: "error" });
+        return;
+      }
+    }
     if (decisionChoice === "bounty") {
       const amount = Number(decisionBounty);
       const tokenId = entry.token?.tokenId;
@@ -220,11 +252,9 @@ export function SubmissionsView() {
     setDecisionTarget(null);
     setDecisionChoice(null);
     setDecisionBounty("");
-    pushToast({
-      title: decisionChoice === "insurance" ? "Insurance claim submitted" : "Lost-card bounty published",
-      body: decisionChoice === "insurance" ? "The vault service provider will review your claim." : "Your card is now visible on the Lost page.",
-      tone: "success",
-    });
+    if (decisionChoice === "bounty") {
+      pushToast({ title: "Lost-card bounty published", body: "Your card is now visible on the Lost page.", tone: "success" });
+    }
   };
 
   if (!ready) return <SubmissionsSkeleton />;
@@ -327,7 +357,8 @@ export function SubmissionsView() {
                 <RequestAccordion
                   key={request.submissionId}
                   request={request}
-                  isLost={request.tokenId !== "0" && publicLostSlabs.some((item) => item.listing.tokenId === request.tokenId)}
+                  recovery={request.tokenId !== "0" ? recoveryByToken.get(request.tokenId) : undefined}
+                  onOpenRecovery={() => { setCategory("recovery"); setFilter("all"); }}
                   open={openId === request.submissionId}
                   onToggle={() => setOpenId((current) => current === request.submissionId ? null : request.submissionId)}
                 />
@@ -452,7 +483,7 @@ function RecoveryRow({
   const state = actionNeeded
     ? "Pokechain has completed its review — choose insurance or publish a lost-card bounty."
     : loss.resolution === "insurance"
-      ? "Your vault-service insurance claim has been submitted for off-chain review."
+      ? "Insurance claim sent to the vault-service provider for off-chain review. The slab's NFT was burned, so it won't be vaulted."
     : loss.published
       ? loss.bounty
         ? "Public lost-card bounty is active. You can edit the bounty or withdraw it from Vault."
@@ -471,7 +502,7 @@ function RecoveryRow({
           <div className="flex flex-wrap items-center gap-2">
             <Link href={`/asset/${listing.id}`} className="line-clamp-1 text-[13px] font-semibold hover:underline">{listing.title}</Link>
             <span className={clsx("rounded-md px-2 py-1 text-[11px] font-semibold", actionNeeded ? "bg-warn/15 text-warn" : loss.resolution === "insurance" ? "bg-good-bg text-good" : loss.published ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted")}>
-              {actionNeeded ? "Action needed" : loss.resolution === "insurance" ? "Insurance submitted" : loss.published ? "Lost-card report active" : "Under review"}
+              {actionNeeded ? "Action needed" : loss.resolution === "insurance" ? "Insurance claimed · NFT burned" : loss.published ? "Lost-card report active" : "Under review"}
             </span>
           </div>
           <p className="mt-1 text-[12px] text-muted">{state}</p>
@@ -492,12 +523,14 @@ function RecoveryRow({
 
 function RequestAccordion({
   request,
-  isLost,
+  recovery,
+  onOpenRecovery,
   open,
   onToggle,
 }: {
   request: SubmissionRequest;
-  isLost: boolean;
+  recovery?: RecoveryState;
+  onOpenRecovery: () => void;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -515,7 +548,7 @@ function RequestAccordion({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        aria-label={`${request.grader} cert ${request.certNumber}, ${SUBMISSION_STAGE[request.status]}`}
+        aria-label={`${request.grader} cert ${request.certNumber}, ${recovery ? RECOVERY_LABEL[recovery] : SUBMISSION_STAGE[request.status]}`}
         className="grid w-full grid-cols-1 gap-3 px-4 py-4 text-left transition hover:bg-white/[0.035] md:grid-cols-[minmax(240px,1.25fr)_minmax(210px,1fr)_150px_28px] md:items-center md:gap-4"
       >
         <div className="flex min-w-0 items-center gap-3">
@@ -525,7 +558,7 @@ function RequestAccordion({
             <span className="mt-1 block text-[11.5px] text-dim">
               Request #{request.submissionId}{request.tokenId !== "0" ? ` · NFT #${request.tokenId}` : ""}
             </span>
-            <span className="mt-2 block"><StatusBadge status={request.status} /></span>
+            <span className="mt-2 block"><StatusBadge status={request.status} recovery={recovery} /></span>
           </span>
         </div>
 
@@ -533,7 +566,7 @@ function RequestAccordion({
         <span className="hidden text-[11.5px] text-muted md:block"><TimeAgo value={request.requestedAt * 1000} /></span>
         <ChevronDown size={17} className={clsx("justify-self-end text-dim transition", open && "rotate-180 text-white")} />
       </button>
-      {open ? <SubmissionFormDetails request={request} isLost={isLost} /> : null}
+      {open ? <SubmissionFormDetails request={request} recovery={recovery} onOpenRecovery={onOpenRecovery} /> : null}
     </li>
   );
 }
@@ -625,7 +658,15 @@ function ProgressTimeline({ status }: { status: number }) {
   );
 }
 
-function SubmissionFormDetails({ request, isLost }: { request: SubmissionRequest; isLost: boolean }) {
+function SubmissionFormDetails({
+  request,
+  recovery,
+  onOpenRecovery,
+}: {
+  request: SubmissionRequest;
+  recovery?: RecoveryState;
+  onOpenRecovery: () => void;
+}) {
   const evidence = useQuery({
     queryKey: ["submission-evidence", request.evidenceHash],
     queryFn: async (): Promise<EvidenceResponse> => {
@@ -685,21 +726,34 @@ function SubmissionFormDetails({ request, isLost }: { request: SubmissionRequest
           </div>
         </FormGrid>
       )}
-      {request.tokenId !== "0" && request.status !== 5 ? (
+      {recovery ? (
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <span className="mr-auto text-[11.5px] text-muted">
-            {isLost
-              ? `NFT #${request.tokenId} has an active lost-card report and is managed in your Vault's Lost section.`
-              : request.status === 4
+            {recovery === "insurance"
+              ? `You claimed insurance for this slab, so NFT #${request.tokenId} was burned (SlabVault.writeOffLost) and it will not be vaulted.`
+              : `This slab was reported lost. NFT #${request.tokenId} is tracked under Recovery & insurance until it is found or you claim insurance.`}
+          </span>
+          <button
+            type="button"
+            onClick={onOpenRecovery}
+            className="inline-flex h-9 items-center rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-white transition hover:bg-accent-hover"
+          >
+            View in Recovery & insurance
+          </button>
+        </div>
+      ) : request.tokenId !== "0" && request.status !== 5 ? (
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          <span className="mr-auto text-[11.5px] text-muted">
+            {request.status === 4
               ? `NFT #${request.tokenId} is vaulted and unlocked in your Vault.`
               : `NFT #${request.tokenId} was minted when Pokechain received the slab. It waits in your Vault, locked, until Collector Crypt vaults it.`}
           </span>
           {/* Route to the Vault section that reflects the slab's current custody state. */}
           <Link
-            href={isLost ? "/vault?tab=lost" : request.status === 4 ? "/vault" : "/vault?tab=awaiting"}
+            href={request.status === 4 ? "/vault" : "/vault?tab=awaiting"}
             className="inline-flex h-9 items-center rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-white transition hover:bg-accent-hover"
           >
-            {isLost ? "View lost slab" : request.status === 4 ? "View Vaulted NFT" : "View Pending NFT"}
+            {request.status === 4 ? "View Vaulted NFT" : "View Pending NFT"}
           </Link>
         </div>
       ) : null}
@@ -707,16 +761,20 @@ function SubmissionFormDetails({ request, isLost }: { request: SubmissionRequest
   );
 }
 
-function StatusBadge({ status }: { status: number }) {
+function StatusBadge({ status, recovery }: { status: number; recovery?: RecoveryState }) {
   return (
     <span
       data-testid="request-stage"
       className={clsx(
         "inline-flex rounded-md px-2 py-1 text-[10.5px] font-bold",
-        status === 5 ? "bg-bad/15 text-bad" : status === 4 ? "bg-good-bg text-good" : "bg-warn/15 text-warn",
+        recovery === "recovery"
+          ? "bg-bad/15 text-bad"
+          : recovery === "insurance"
+            ? "bg-surface-3 text-muted"
+            : status === 5 ? "bg-bad/15 text-bad" : status === 4 ? "bg-good-bg text-good" : "bg-warn/15 text-warn",
       )}
     >
-      {SUBMISSION_STAGE[status]}
+      {recovery ? RECOVERY_LABEL[recovery] : SUBMISSION_STAGE[status]}
     </span>
   );
 }

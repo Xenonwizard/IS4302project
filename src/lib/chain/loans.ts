@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { parseEventLogs, zeroAddress, type Address, type TransactionReceipt } from "viem";
-import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { usePublicClient } from "wagmi";
 import { contracts, fromUsdcUnits, LOAN_STATUS, toUsdcUnits, type LoanStatusName } from "./config";
 import { useChainTx } from "./useChainTx";
 
@@ -39,23 +39,11 @@ export function useLoanRefresh() {
   }, [queryClient]);
 }
 
-export function useLoanEvents(enabled: boolean) {
-  const refresh = useLoanRefresh();
-  const watch = { ...contracts.loanEscrow, enabled, onLogs: refresh, poll: true, pollingInterval: 1000 } as const;
-  useWatchContractEvent({ ...watch, eventName: "LoanOffered" });
-  useWatchContractEvent({ ...watch, eventName: "LoanAccepted" });
-  useWatchContractEvent({ ...watch, eventName: "LoanRepaid" });
-  useWatchContractEvent({ ...watch, eventName: "LoanDefaulted" });
-  useWatchContractEvent({ ...watch, eventName: "LoanDeclined" });
-  useWatchContractEvent({ ...watch, eventName: "LoanWithdrawn" });
-}
-
 export function useLoanListing(tokenId?: string) {
   const client = usePublicClient();
   return useQuery({
     queryKey: ["loan-listing", tokenId],
     enabled: Boolean(client && tokenId),
-    refetchInterval: 5000,
     queryFn: async () => {
       const listing = await client!.readContract({
         ...contracts.slabMarket,
@@ -78,7 +66,6 @@ export function useLoanOffers(me?: Address, other?: Address, tokenId?: string) {
   return useQuery({
     queryKey: ["loan-offers", me, other, tokenId],
     enabled: Boolean(client && me),
-    refetchInterval: 5000,
     queryFn: async (): Promise<LoanOffer[]> => {
       const ids = await client!.readContract({ ...contracts.loanEscrow, functionName: "offerIdsOf", args: [me!] });
       const unique = [...new Set(ids)];

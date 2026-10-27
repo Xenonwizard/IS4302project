@@ -1,9 +1,9 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { zeroAddress } from "viem";
-import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { usePublicClient } from "wagmi";
 import { contracts, DEPLOY_BLOCK, fromUsdcUnits, IS_DEPLOYED, shortHash } from "@/lib/chain/config";
 import { buildOnChainListing } from "@/lib/catalog";
 import { useStore } from "@/lib/store";
@@ -18,42 +18,10 @@ export function ChainMarketSync() {
   const { ready, syncMarketListings } = useStore();
   const client = usePublicClient();
   const enabled = Boolean(ready && client && IS_DEPLOYED);
-  const queryClient = useQueryClient();
-
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
-  };
-
-  useWatchContractEvent({
-    ...contracts.slabMarket,
-    eventName: "CardListed",
-    enabled,
-    poll: true,
-    pollingInterval: 1000,
-    onLogs: refresh,
-  });
-  useWatchContractEvent({
-    ...contracts.slabMarket,
-    eventName: "ListingCancelled",
-    enabled,
-    poll: true,
-    pollingInterval: 1000,
-    onLogs: refresh,
-  });
-  useWatchContractEvent({
-    ...contracts.slabMarket,
-    eventName: "CardPurchased",
-    enabled,
-    poll: true,
-    pollingInterval: 1000,
-    onLogs: refresh,
-  });
 
   const { data } = useQuery({
     queryKey: ["market-active-listings"],
     enabled,
-    refetchInterval: 2000,
-    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
     queryFn: async () => {

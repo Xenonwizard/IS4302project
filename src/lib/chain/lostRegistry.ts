@@ -33,7 +33,6 @@ export function useChainLostSlabs() {
   return useQuery({
     queryKey: ["lost-registry"],
     enabled: Boolean(client && IS_DEPLOYED),
-    refetchInterval: 2_000,
     placeholderData: (prev) => prev,
     queryFn: async (): Promise<ChainLostSlab[]> => {
       const reports = await client!.getContractEvents({ ...contracts.slabVault, eventName: "SlabReportedLost", fromBlock: DEPLOY_BLOCK });

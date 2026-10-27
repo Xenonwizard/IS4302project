@@ -2103,15 +2103,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => {
       const item = prev.vault.find((vaultItem) => vaultItem.listingId === listingId);
       const tokenId = item?.token?.tokenId ?? prev.slabs.find((slab) => slab.id === listingId)?.tokenId;
-      const vaultLosses = { ...prev.vaultLosses };
+      const report = prev.vaultLosses[listingId];
       const pendingLossDecisions = { ...prev.pendingLossDecisions };
-      delete vaultLosses[listingId];
       delete pendingLossDecisions[listingId];
+      // The vault entry stays as the record Status Center shows under Recovery & insurance;
+      // Vault hides it because the burned NFT will never be vaulted.
       return {
         ...prev,
-        vault: prev.vault.filter((vaultItem) => vaultItem.listingId !== listingId),
-        slabs: prev.slabs.filter((slab) => slab.id !== listingId),
-        vaultLosses,
+        overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
+        vaultLosses: {
+          ...prev.vaultLosses,
+          [listingId]: {
+            reportedAt: report?.reportedAt ?? new Date().toISOString(),
+            details: report?.details ?? "Lost slab withdrawn for an insurance claim",
+            certNumber: report?.certNumber,
+            inTransit: report?.inTransit,
+            published: false,
+            resolution: "insurance",
+          },
+        },
         pendingLossDecisions,
         insuranceBurnedTokenIds: tokenId && !prev.insuranceBurnedTokenIds.includes(tokenId)
           ? [...prev.insuranceBurnedTokenIds, tokenId]
@@ -2119,8 +2129,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
     });
     pushToast({
-      title: "Lost-card listing withdrawn",
-      body: "The public bounty was removed and your insurance claim was handed to the vault provider off-chain.",
+      title: "Insurance claim submitted",
+      body: "Any bounty was refunded and the slab's NFT was burned, so it won't be vaulted. Track the claim in Status Center.",
       tone: "success",
     });
   }, [pushToast]);

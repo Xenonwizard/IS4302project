@@ -1,10 +1,10 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import Link from "next/link";
 import { Check, Loader2, PackageSearch, XCircle } from "lucide-react";
-import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { usePublicClient } from "wagmi";
 import { DEPLOY_BLOCK, OPEN_SUBMISSION, contracts } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { Button } from "../ui/primitives";
@@ -40,22 +40,12 @@ interface Tracked {
 export function PendingSubmissions() {
   const { address } = useOnchainAccount();
   const client = usePublicClient();
-  const queryClient = useQueryClient();
   const enabled = Boolean(address && client);
 
-  // Any step recorded on-chain refreshes the tracker straight away.
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["pending-submissions"] });
-  const watch = { ...contracts.slabVault, enabled, poll: true as const, pollingInterval: 1_000, onLogs: refresh };
-  useWatchContractEvent({ ...watch, eventName: "SubmissionRequested", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SubmissionReceived", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SubmissionForwarded", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SubmissionRejected", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SlabVaulted", args: { owner: address } });
 
   const { data: tracked = [] } = useQuery({
     queryKey: ["pending-submissions", address],
     enabled,
-    refetchInterval: 3_000,
     queryFn: async (): Promise<Tracked[]> => {
       const [requested, rejected, block] = await Promise.all([
         client!.getContractEvents({ ...contracts.slabVault, eventName: "SubmissionRequested", args: { owner: address }, fromBlock: DEPLOY_BLOCK }),

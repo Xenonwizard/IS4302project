@@ -40,7 +40,6 @@ export function TraceView({ tokenId }: { tokenId: string }) {
   const [search, setSearch] = useState(tokenId);
   const { data, error, isLoading } = useQuery({
     queryKey: ["trace", tokenId],
-    refetchInterval: 8000,
     queryFn: async (): Promise<SlabTrace> => {
       const res = await fetch(`/api/trace/${tokenId}`, { cache: "no-store" });
       const body = await res.json();

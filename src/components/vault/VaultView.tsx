@@ -118,7 +118,10 @@ export function VaultView() {
       ?? slabs.find((slab) => slab.tokenId === loan.tokenId);
     return listing ? [{ loan, listing }] : [];
   });
-  const items = allItems.filter((i) => i.entry.status !== "Withdrawn" && !loanTokenIds.has(i.listing.tokenId ?? ""));
+  // Insurance-claimed slabs had their NFT burned: they're tracked in Status Center, not the Vault.
+  const items = allItems.filter(
+    (i) => i.entry.status !== "Withdrawn" && !loanTokenIds.has(i.listing.tokenId ?? "") && lossFor(i.entry, i.listing)?.resolution !== "insurance",
+  );
   const lostItems = items.filter((i) => lossFor(i.entry, i.listing)?.published);
   const awaiting = items.filter((i) => {
     if (i.entry.status !== "Awaiting vaulting") return false;
@@ -295,17 +298,7 @@ export function VaultView() {
                       onReportLost={entry.token?.tokenId ? () => setMissingTarget({ entry, listing }) : undefined}
                       investigationComplete={hasPendingDecision(listing)}
                       loss={lossFor(entry, listing)}
-                      onCancelMissing={() =>
-                        void lost.cancel(listing.id, lostTokenId(entry)).catch((err: Error) =>
-                          pushToast({ title: "Could not cancel the report", body: err.message, tone: "error" }),
-                        )
-                      }
                       onAddBounty={() => setBountyTarget({ entry, listing })}
-                      onCancelBounty={() =>
-                        void lost.setBounty(listing.id, 0, lostTokenId(entry)).catch((err: Error) =>
-                          pushToast({ title: "Could not cancel bounty", body: err.message, tone: "error" }),
-                        )
-                      }
                       onWithdrawInsurance={() => setInsuranceWithdrawTarget({ entry, listing })}
                     />
                   </div>
@@ -372,17 +365,7 @@ export function VaultView() {
                     onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
                     onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                     loss={lossFor(entry, listing)}
-                    onCancelMissing={() =>
-                      void lost.cancel(listing.id, lostTokenId(entry)).catch((err: Error) =>
-                        pushToast({ title: "Could not cancel the report", body: err.message, tone: "error" }),
-                      )
-                    }
                     onAddBounty={() => setBountyTarget({ entry, listing })}
-                    onCancelBounty={() =>
-                      void lost.setBounty(listing.id, 0, lostTokenId(entry)).catch((err: Error) =>
-                        pushToast({ title: "Could not cancel bounty", body: err.message, tone: "error" }),
-                      )
-                    }
                     onWithdrawInsurance={() => setInsuranceWithdrawTarget({ entry, listing })}
                   />
                 </div>
@@ -508,7 +491,7 @@ export function VaultView() {
               Are you sure you want to withdraw <span className="font-semibold text-white">{insuranceWithdrawTarget.listing.title}</span> from the Lost registry and your active Vault?
             </p>
             <div className="rounded-xl border border-warn/25 bg-warn/10 p-3 text-[12px] leading-relaxed text-muted">
-              Its public bounty will be removed, your insurance claim will be handed to the vault provider off-chain, and the minted NFT will be retired from the active app.
+              Any bounty is refunded to your balance and the slab&apos;s NFT is burned on-chain (SlabVault.writeOffLost), so it will never be vaulted. Your insurance claim then goes to the vault provider off-chain.
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={() => setInsuranceWithdrawTarget(null)}>Keep card</Button>
@@ -518,8 +501,8 @@ export function VaultView() {
                 onClick={() => {
                   const { entry, listing } = insuranceWithdrawTarget;
                   setInsuranceWithdrawTarget(null);
-                  void lost.writeOff(listing.id, lostTokenId(entry)).catch((err: Error) =>
-                    pushToast({ title: "Could not withdraw the report", body: err.message, tone: "error" }),
+                  void lost.writeOff(listing.id, entry.token?.tokenId, lossFor(entry, listing)?.details).catch((err: Error) =>
+                    pushToast({ title: "Could not claim insurance", body: err.message, tone: "error" }),
                   );
                 }}
               >
@@ -660,7 +643,8 @@ function BountyModal({
 }) {
   const [amount, setAmount] = useState(existing ? String(existing) : "");
   const value = Number(amount);
-  const valid = Number.isFinite(value) && value > 0;
+  // An existing bounty can go to $0, which refunds it (there's no separate cancel button).
+  const valid = amount !== "" && Number.isFinite(value) && (existing ? value >= 0 : value > 0);
 
   return (
     <Modal open={Boolean(target)} onClose={onClose} title={existing ? "Edit bounty" : "Attach a bounty"} width="max-w-sm">
@@ -675,7 +659,7 @@ function BountyModal({
           <p className="text-[13px] leading-relaxed text-muted">
             Offer a reward to help locate <span className="font-semibold text-white">{target.listing.title}</span>.
           </p>
-          <Field label="Bounty amount (USDC)" hint="You can cancel this bounty while the missing-card report is open.">
+          <Field label="Bounty amount (USDC)" hint={existing ? "Set it to 0 to remove the bounty and get it refunded." : "Held in escrow until someone returns the slab."}>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">$</span>
               <input
@@ -688,7 +672,7 @@ function BountyModal({
               />
             </div>
           </Field>
-          {!valid && amount ? <p className="text-[12px] font-medium text-bad">Enter a bounty above $0.</p> : null}
+          {!valid && amount ? <p className="text-[12px] font-medium text-bad">{existing ? "Enter $0 or more." : "Enter a bounty above $0."}</p> : null}
           <div className="flex gap-2">
             <Button type="button" variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
             <Button type="submit" className="flex-1" disabled={!valid}>{existing ? "Update bounty" : "Attach bounty"}</Button>
@@ -728,9 +712,7 @@ function SlabCard({
   onReportLost,
   investigationComplete,
   loss,
-  onCancelMissing,
   onAddBounty,
-  onCancelBounty,
   onWithdrawInsurance,
 }: {
   entry: VaultItem;
@@ -743,15 +725,14 @@ function SlabCard({
   inOffer?: { offerId: string; taker: string; room: string };
   /** A reversible report that this card cannot be located in the physical vault. */
   loss?: VaultLossReport;
-  onCancelMissing: () => void;
   onAddBounty: () => void;
-  onCancelBounty: () => void;
   onWithdrawInsurance: () => void;
   onReportLost?: () => void;
   investigationComplete?: boolean;
 }) {
   const small = size === "small";
-  if (entry.status === "Awaiting vaulting") {
+  // Every lost card looks and acts the same, however it was lost: edit the bounty or claim insurance.
+  if (entry.status === "Awaiting vaulting" || loss?.published) {
     return <AwaitingSlabCard entry={entry} listing={listing} loss={loss} investigationComplete={investigationComplete} onReportLost={onReportLost} onManageBounty={onAddBounty} onWithdrawInsurance={onWithdrawInsurance} />;
   }
   if (inOffer) {
@@ -810,18 +791,7 @@ function SlabCard({
             <Blocks size={11} /> Token #{entry.token.tokenId} · <Route size={11} /> Trace
           </Link>
         ) : null}
-        {loss ? (
-          <div className={clsx("mt-3 rounded-xl border border-warn/25 bg-warn/10", small ? "space-y-1.5 p-2" : "space-y-2 p-3")}>
-            <p className={clsx("font-semibold text-warn", small ? "text-[10px]" : "text-[12px]")}>Lost-card report open</p>
-            {loss.bounty ? <p className={clsx("text-muted", small ? "text-[9.5px]" : "text-[11px]")}>Bounty: <span className="font-semibold text-white">{usd(loss.bounty.amount, { cents: true })}</span></p> : null}
-            <div className={clsx("grid", small ? "gap-1" : "gap-1.5")}>
-              <Button size="sm" variant="secondary" onClick={onAddBounty}>{loss.bounty ? "Edit bounty" : "Attach bounty"}</Button>
-              {loss.bounty ? <Button size="sm" variant="outline" onClick={onCancelBounty}>Cancel bounty</Button> : null}
-              {loss.published ? <Button size="sm" variant="outline" onClick={onWithdrawInsurance}>Withdraw & claim insurance</Button> : null}
-              <Button size="sm" variant="outline" onClick={onCancelMissing}>Cancel lost status</Button>
-            </div>
-          </div>
-        ) : (
+        {loss ? null : (
           <div className={clsx("mt-3 grid", small ? "gap-1.5" : "gap-2")}>
             {entry.status === "Listed" ? (
               <Button size="sm" variant="secondary" onClick={onManage}>
@@ -882,11 +852,16 @@ function AwaitingSlabCard({
                   : "Awaiting Vaulting"}
         </Badge>
         <p className="text-[11px] text-muted">
-          Submitted <TimeAgo value={entry.acquiredAt} />
+          {loss?.published ? <>Reported <TimeAgo value={loss.reportedAt} /></> : <>Submitted <TimeAgo value={entry.acquiredAt} /></>}
         </p>
+        {loss?.published ? (
+          <p className="text-[11px] text-muted">
+            Bounty: <span className="font-semibold text-white">{loss.bounty ? usd(loss.bounty.amount, { cents: true }) : "None"}</span>
+          </p>
+        ) : null}
         <p className="text-[11px] leading-relaxed text-dim">
           {loss?.published
-            ? "This card is listed in Lost Cards and is no longer awaiting vaulting."
+            ? "Listed on the Lost Cards page so anyone who finds it can return it."
             : loss?.resolution === "insurance"
               ? "Your claim has been sent to the vault-service provider for off-chain review."
               : investigationComplete
