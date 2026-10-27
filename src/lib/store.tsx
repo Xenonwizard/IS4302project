@@ -177,6 +177,32 @@ export function isActiveRecovery(recovery?: FoundSlabRecovery): boolean {
   return recovery?.status === "Submitted" || recovery?.status === "Returning to owner";
 }
 
+/** Every persisted id that can refer to the same tokenised slab. */
+function relatedListingKeys(slabs: Listing[], id: string): string[] {
+  const direct = slabs.find(
+    (slab) => slab.id === id || slab.tokenId === id || (slab.tokenId && `token-${slab.tokenId}` === id),
+  );
+  const tokenId = direct?.tokenId ?? (id.startsWith("token-") ? id.slice(6) : undefined);
+  const keys = new Set<string>([id]);
+  if (tokenId) {
+    keys.add(tokenId);
+    keys.add(`token-${tokenId}`);
+    for (const slab of slabs) {
+      if (slab.tokenId === tokenId) keys.add(slab.id);
+    }
+  }
+  return [...keys];
+}
+
+function setDelisted(
+  overrides: Record<string, ListingOverride>,
+  keys: string[],
+): Record<string, ListingOverride> {
+  const next = { ...overrides };
+  for (const key of keys) next[key] = { ...next[key], delisted: true };
+  return next;
+}
+
 /** All in-progress inbound custody states belong in the Awaiting vaulting tab. */
 function isAwaitingVaulting(custody: string): boolean {
   return PENDING_CUSTODY.has(custody as CustodyName);
@@ -861,33 +887,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         (s) => s.id === id || s.tokenId === id || (s.tokenId && `token-${s.tokenId}` === id),
       );
 
-      // 2. If any matching slab is explicitly listed on-chain (isListed: true from SlabMarket), it is listed!
-      if (matchingSlabs.some((s) => s.isListed === true)) {
-        return true;
-      }
-
-      // 3. Check for positive overrides: if explicitly listed via override, it is listed
       const o = state.overrides[id];
-      if (o?.delisted === false) return true;
-
-      // 4. Check tokenId-based positive overrides
       const tokenSlab = matchingSlabs.find((s) => s.tokenId);
       const tokenId = tokenSlab?.tokenId || (id.startsWith("token-") ? id.slice(6) : undefined);
-      if (tokenId) {
-        if (
-          state.overrides[`token-${tokenId}`]?.delisted === false ||
-          state.overrides[tokenId]?.delisted === false
-        ) {
-          return true;
-        }
-      }
 
-      // 5. If any matching slab is explicitly unlisted on-chain (isListed: false), it is unlisted
-      if (matchingSlabs.length > 0 && matchingSlabs.every((s) => s.isListed === false)) {
-        return false;
-      }
-
-      // 6. Check negative overrides
+      // A user action must hide the listing immediately, even before the next chain poll clears a
+      // stale `isListed: true` snapshot. Delisting updates every alias for the token below.
       if (o?.delisted === true) return false;
       if (tokenId) {
         if (
@@ -898,9 +903,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 7. Fallback to slab.isListed if specified
-      const anyListedFlag = matchingSlabs.find((s) => s.isListed !== undefined)?.isListed;
-      if (anyListedFlag !== undefined) return anyListedFlag;
+      // Positive overrides are refreshed from SlabMarket whenever the token is actively listed.
+      if (o?.delisted === false) return true;
+      if (tokenId) {
+        if (
+          state.overrides[`token-${tokenId}`]?.delisted === false ||
+          state.overrides[tokenId]?.delisted === false
+        ) {
+          return true;
+        }
+      }
+
+      if (matchingSlabs.some((s) => s.isListed === true)) return true;
+      if (matchingSlabs.length > 0 && matchingSlabs.every((s) => s.isListed === false)) {
+        return false;
+      }
 
       // When deployed on-chain, catalog demo cards should NOT be listed
       if (IS_DEPLOYED) return false;
@@ -980,6 +997,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const delist = useCallback(
     (id: string) => {
       setState((prev) => {
+        const relatedKeys = relatedListingKeys(prev.slabs, id);
+        const relatedIds = new Set(relatedKeys);
         const me = prev.user?.username;
         const negotiations = { ...prev.negotiations };
         for (const n of Object.values(prev.negotiations)) {
@@ -998,7 +1017,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return {
           ...prev,
           negotiations,
-          overrides: { ...prev.overrides, [id]: { ...prev.overrides[id], delisted: true } },
+          slabs: prev.slabs.map((slab) =>
+            relatedIds.has(slab.id) || (slab.tokenId ? relatedIds.has(slab.tokenId) : false)
+              ? { ...slab, isListed: false }
+              : slab,
+          ),
+          overrides: setDelisted(prev.overrides, relatedKeys),
           vault: prev.vault.map((v) =>
             v.listingId === id ? { ...v, status: "Vaulted", listedPrice: undefined } : v,
           ),
@@ -1367,19 +1391,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // Delist any on-chain tokens that were previously listed but are no longer active
-        if (activeListings.length > 0) {
-          for (const s of prev.slabs) {
-            if (s.tokenId && !activeTokenIds.has(s.tokenId) && !activeIds.has(s.id)) {
-              newOverrides[s.id] = {
-                ...newOverrides[s.id],
-                delisted: true,
-              };
-              newOverrides[`token-${s.tokenId}`] = {
-                ...newOverrides[`token-${s.tokenId}`],
-                delisted: true,
-              };
-            }
+        // An empty result is authoritative too: it commonly means the user cancelled the final
+        // marketplace listing. Always clear tokens absent from SlabMarket's active set.
+        for (const s of prev.slabs) {
+          if (s.tokenId && !activeTokenIds.has(s.tokenId) && !activeIds.has(s.id)) {
+            newOverrides[s.id] = {
+              ...newOverrides[s.id],
+              delisted: true,
+            };
+            newOverrides[`token-${s.tokenId}`] = {
+              ...newOverrides[`token-${s.tokenId}`],
+              delisted: true,
+            };
+            newOverrides[s.tokenId] = {
+              ...newOverrides[s.tokenId],
+              delisted: true,
+            };
           }
         }
 
@@ -1447,12 +1474,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const withdrawSlab = useCallback(
     (listingId: string, withdrawal: Withdrawal) => {
       setState((prev) => {
+        const relatedKeys = relatedListingKeys(prev.slabs, listingId);
+        const relatedIds = new Set(relatedKeys);
         // Same as delisting: every open chat about the slab closes and pending offers are declined.
         const negotiations = closeSellerChats(prev, listingId, "The seller withdrew this slab from the vault.");
         return {
           ...prev,
           negotiations,
-          overrides: { ...prev.overrides, [listingId]: { ...prev.overrides[listingId], delisted: true } },
+          slabs: prev.slabs.map((slab) =>
+            relatedIds.has(slab.id) || (slab.tokenId ? relatedIds.has(slab.tokenId) : false)
+              ? { ...slab, isListed: false }
+              : slab,
+          ),
+          overrides: setDelisted(prev.overrides, relatedKeys),
           vault: prev.vault.map((v) =>
             v.listingId === listingId ? { ...v, status: "Withdrawn", listedPrice: undefined, withdrawal } : v,
           ),

@@ -342,6 +342,10 @@ test("two collectors: an offer on a listed slab starts a chat; accepting delists
   expect(await isListed(70000136)).toBe(false);
   expect(await ownerOf(70000038)).toBe(MISTY);
   expect(await ownerOf(70000136)).toBe(ASH);
+
+  // Cancelling the final active listing must also clear the browser's cached marketplace copy.
+  await page.goto("/marketplace");
+  await expect(page.locator('a[href="/asset/token-70000136"]')).toHaveCount(0);
 });
 
 test("seeded demo: an offer on a listed slab, a counter that includes your own listed slab, then Sold", async ({ page, browser, request }) => {

@@ -153,8 +153,8 @@ export function ChainMarketSync() {
                 });
               }
             }
-          } catch {
-            return [];
+          } catch (fallbackError) {
+            throw fallbackError;
           }
         }
 
@@ -188,7 +188,10 @@ export function ChainMarketSync() {
         return results;
       } catch (err) {
         console.error("Failed to query active listings from SlabMarket:", err);
-        return [];
+        // Keep React Query's last successful snapshot. Treating an RPC failure as an empty market
+        // would incorrectly hide every active listing now that an empty successful result is
+        // intentionally used to clear the final cancelled listing.
+        throw err;
       }
     },
   });
