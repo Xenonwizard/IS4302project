@@ -426,7 +426,7 @@ export function VaultView() {
 
         {tab === "withdrawn" ? (
           withdrawn.length ? (
-            <WithdrawnList items={withdrawn} />
+            <WithdrawnList items={withdrawn} showNftAction />
           ) : (
             <Empty
               icon={<PackageOpen size={24} />}
