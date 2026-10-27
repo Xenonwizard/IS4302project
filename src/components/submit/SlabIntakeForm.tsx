@@ -1,7 +1,6 @@
 "use client";
 
 import clsx from "clsx";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { BadgeCheck, Camera, Dices, ImagePlus, Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -177,9 +176,11 @@ export function SlabIntakeForm() {
         </div>
         {preview ? (
           <div className="flex items-center gap-3 rounded-card border border-good/30 bg-good-bg/40 p-3">
-            <span className="relative block aspect-[63/88] w-12 shrink-0 overflow-hidden rounded">
-              <Image src={preview.thumb} alt="" fill sizes="48px" className="object-cover" />
-            </span>
+            <span
+              aria-hidden
+              className="block aspect-[63/88] w-12 shrink-0 rounded bg-surface-2 bg-cover bg-center"
+              style={{ backgroundImage: `url(${preview.thumb})` }}
+            />
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-good">
                 <BadgeCheck size={13} /> Found in the {grader} registry

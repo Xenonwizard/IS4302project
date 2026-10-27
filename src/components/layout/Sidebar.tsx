@@ -20,10 +20,10 @@ import {
 const NAV = [
   { href: "/", label: "Home", short: "Home", icon: House },
   { href: "/marketplace", label: "Marketplace", short: "Market", icon: Store },
-  { href: "/lost", label: "Lost cards", short: "Lost", icon: ShieldAlert },
   { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
-  { href: "/submissions", label: "Status Center", short: "Status", icon: ClipboardList },
+  { href: "/lost", label: "Lost cards", short: "Lost", icon: ShieldAlert },
   { href: "/vault", label: "Vault", short: "Vault", icon: ShieldCheck },
+  { href: "/submissions", label: "Status Center", short: "Status", icon: ClipboardList },
   { href: "/wallet", label: "Wallet", short: "Wallet", icon: Wallet },
   { href: "/account", label: "Account", short: "Account", icon: UserRound, desktopOnly: true },
 ];

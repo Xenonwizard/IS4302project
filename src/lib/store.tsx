@@ -263,7 +263,7 @@ interface StoreValue extends PersistShape {
   /** A slab reported lost on-chain: take it off sale here and close buyers' chats. The report itself is on SlabVault. */
   delistLostSlab: (listingId: string) => void;
   completeLossInvestigation: (listingId: string) => void;
-  resolveLossDecision: (listingId: string) => void;
+  resolveLossDecision: (listingId: string, outcome?: "insurance") => void;
   cancelVaultLost: (listingId: string) => void;
   withdrawLostForInsurance: (listingId: string) => void;
   setVaultBounty: (listingId: string, amount: number) => void;
@@ -2031,11 +2031,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     pushToast({ title: "Investigation complete", body: "A decision is waiting in your Vault.", tone: "success" });
   }, [pushToast]);
 
-  const resolveLossDecision = useCallback((listingId: string) => {
+  const resolveLossDecision = useCallback((listingId: string, outcome?: "insurance") => {
     setState((prev) => {
       const pending = { ...prev.pendingLossDecisions };
       delete pending[listingId];
-      return { ...prev, pendingLossDecisions: pending };
+      const report = prev.vaultLosses[listingId];
+      return {
+        ...prev,
+        pendingLossDecisions: pending,
+        vaultLosses: outcome === "insurance" && report
+          ? { ...prev.vaultLosses, [listingId]: { ...report, resolution: "insurance" } }
+          : prev.vaultLosses,
+      };
     });
   }, []);
 
