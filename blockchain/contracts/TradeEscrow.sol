@@ -15,6 +15,7 @@ interface ITradeVault {
     function ownerOf(uint256 tokenId) external view returns (address);
     function custodyOf(uint256 tokenId) external view returns (uint8);
     function transferFrom(address from, address to, uint256 tokenId) external;
+    function vaultedCount(address owner) external view returns (uint256);
 }
 
 /**
@@ -106,6 +107,9 @@ contract TradeEscrow is ReentrancyGuard {
     error OfferNotOpen(uint256 offerId);
     error NotTaker(uint256 offerId);
     error NotMaker(uint256 offerId);
+    error TooManyOpenOffers(address account, uint256 openCount);
+
+    uint256 public constant UNVAULTED_MAX_OPEN_OFFERS = 2;
 
     constructor(ITradeAccounts accounts_, ITradeVault vault_) {
         accounts = accounts_;
@@ -240,6 +244,14 @@ contract TradeEscrow is ReentrancyGuard {
         _checkSide(o.maker, makerSlabs, o.makerCash);
         // The taker's side is checked now too, so an offer for slabs they can't trade fails early.
         _checkSide(o.taker, takerSlabs, 0);
+
+        // Sybil resistance: unvaulted accounts (zero vaulted slabs in custody and offering no slabs)
+        // are capped on concurrent open offers to prevent spamming sellers.
+        if (vault.vaultedCount(o.maker) == 0 && makerSlabs.length == 0) {
+            if (openOffers[o.maker] >= UNVAULTED_MAX_OPEN_OFFERS) {
+                revert TooManyOpenOffers(o.maker, openOffers[o.maker]);
+            }
+        }
 
         openOffers[o.maker] += 1;
         _offerIdsOf[o.maker].push(offerId);

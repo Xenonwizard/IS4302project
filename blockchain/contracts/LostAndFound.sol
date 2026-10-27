@@ -82,8 +82,16 @@ contract LostAndFound is AccessControl, ReentrancyGuard {
     /// @dev Claims each address is part of, as finder or owner.
     mapping(address => uint256[]) private _claimIds;
 
+    /// @notice Security deposit in USDC required from a finder when filing a claim.
+    uint256 public claimBond;
+    /// @notice claimId => bond locked for this claim
+    mapping(uint256 => uint256) public bondOf;
+
     event BountySet(uint256 indexed tokenId, address indexed owner, uint256 amount);
     event BountyRefunded(uint256 indexed tokenId, address indexed owner, uint256 amount);
+    event ClaimBondSet(uint256 amount);
+    event ClaimBondRefunded(uint256 indexed claimId, address indexed finder, uint256 amount);
+    event ClaimBondSlashed(uint256 indexed claimId, address indexed finder, address indexed owner, uint256 amount);
     event ClaimFiled(
         uint256 indexed claimId,
         uint256 indexed tokenId,
@@ -174,6 +182,12 @@ contract LostAndFound is AccessControl, ReentrancyGuard {
         activeClaimOf[tokenId] = claimId;
         _claimIds[msg.sender].push(claimId);
         _claimIds[owner].push(claimId);
+
+        if (claimBond > 0) {
+            accounts.moveBalance(msg.sender, address(this), claimBond);
+            bondOf[claimId] = claimBond;
+        }
+
         emit ClaimFiled(claimId, tokenId, msg.sender, owner, evidenceHash, inboundCarrier, inboundTracking);
     }
 
@@ -190,20 +204,36 @@ contract LostAndFound is AccessControl, ReentrancyGuard {
         if (custody != needed) revert NotReturnedYet(c.tokenId);
 
         uint256 amount = bountyOf[c.tokenId];
+        uint256 bond = bondOf[claimId];
+        bondOf[claimId] = 0;
         c.status = Status.Paid;
         c.paid = amount;
         c.updatedAt = uint64(block.timestamp);
         bountyOf[c.tokenId] = 0;
         activeClaimOf[c.tokenId] = 0;
-        if (amount > 0) accounts.moveBalance(address(this), msg.sender, amount);
+        if (amount + bond > 0) accounts.moveBalance(address(this), msg.sender, amount + bond);
+        if (bond > 0) emit ClaimBondRefunded(claimId, msg.sender, bond);
         emit BountyPaid(claimId, c.tokenId, msg.sender, amount);
     }
 
     /* ------------------------------ Pokechain ------------------------------ */
 
+    /// @notice Sets the required claim bond for finders filing a claim.
+    function setClaimBond(uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        claimBond = amount;
+        emit ClaimBondSet(amount);
+    }
+
     /// @notice Step 3: Pokechain's intake received the finder's parcel and authenticated the slab.
+    ///         Once authenticated, the finder's anti-griefing stake is returned immediately to prevent deadlock.
     function markReceived(uint256 claimId) external onlyRole(OPERATOR_ROLE) {
         Claim storage c = _move(claimId, Status.Filed, Status.AtPokechain);
+        uint256 bond = bondOf[claimId];
+        if (bond > 0) {
+            bondOf[claimId] = 0;
+            accounts.moveBalance(address(this), c.finder, bond);
+            emit ClaimBondRefunded(claimId, c.finder, bond);
+        }
         emit ClaimReceived(claimId, c.tokenId);
     }
 
@@ -235,6 +265,14 @@ contract LostAndFound is AccessControl, ReentrancyGuard {
         c.status = Status.Rejected;
         c.updatedAt = uint64(block.timestamp);
         activeClaimOf[c.tokenId] = 0;
+
+        uint256 bond = bondOf[claimId];
+        bondOf[claimId] = 0;
+        if (bond > 0) {
+            accounts.moveBalance(address(this), c.owner, bond);
+            emit ClaimBondSlashed(claimId, c.finder, c.owner, bond);
+        }
+
         emit ClaimRejected(claimId, c.tokenId, reason);
     }
 

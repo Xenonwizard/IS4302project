@@ -284,4 +284,64 @@ contract TradeEscrowTest is Test {
             assertEq(accounts.balanceOf(ash), 1_000 * USD);
         }
     }
+
+    function test_UnvaultedAccountOfferLimit() public {
+        // misty has slabs; ash starts with 0 vaulted slabs
+        uint256[] memory mistySlabs = _slabs(misty, 3);
+        uint256[] memory none = _none();
+
+        uint256[] memory s1 = new uint256[](1);
+        s1[0] = mistySlabs[0];
+        uint256[] memory s2 = new uint256[](1);
+        s2[0] = mistySlabs[1];
+        uint256[] memory s3 = new uint256[](1);
+        s3[0] = mistySlabs[2];
+
+        assertEq(vault.vaultedCount(ash), 0);
+
+        // Ash creates 1st cash-only offer
+        vm.prank(ash);
+        uint256 id1 = escrow.createOffer(misty, none, 10 * USD, s1, 0, "room-1");
+        assertEq(escrow.openOffers(ash), 1);
+
+        // Ash creates 2nd cash-only offer
+        vm.prank(ash);
+        escrow.createOffer(misty, none, 20 * USD, s2, 0, "room-2");
+        assertEq(escrow.openOffers(ash), 2);
+
+        // 3rd offer from unvaulted account must revert
+        vm.prank(ash);
+        vm.expectRevert(abi.encodeWithSelector(TradeEscrow.TooManyOpenOffers.selector, ash, 2));
+        escrow.createOffer(misty, none, 30 * USD, s3, 0, "room-3");
+
+        // Cancelling one offer frees up a slot
+        vm.prank(ash);
+        escrow.withdraw(id1);
+        assertEq(escrow.openOffers(ash), 1);
+
+        // Now ash can create another offer
+        vm.prank(ash);
+        escrow.createOffer(misty, none, 30 * USD, s3, 0, "room-3");
+        assertEq(escrow.openOffers(ash), 2);
+    }
+
+    function test_VerifiedCollectorNotSubjectToOfferLimit() public {
+        // Brock vaults a slab -> becomes a verified collector
+        _account(brock, "brock", 1_000 * USD);
+        _slabs(brock, 1);
+        assertEq(vault.vaultedCount(brock), 1);
+
+        uint256[] memory mistySlabs = _slabs(misty, 4);
+        uint256[] memory none = _none();
+
+        // Brock can open 3 cash offers even without pledging his vaulted slab in the offer
+        for (uint256 i = 0; i < 3; i++) {
+            uint256[] memory target = new uint256[](1);
+            target[0] = mistySlabs[i];
+            vm.prank(brock);
+            escrow.createOffer(misty, none, 10 * USD, target, 0, "room");
+        }
+
+        assertEq(escrow.openOffers(brock), 3);
+    }
 }

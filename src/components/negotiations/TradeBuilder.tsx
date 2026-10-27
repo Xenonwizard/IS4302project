@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeftRight, Check, CircleDollarSign, PackagePlus, Save, X } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, Check, CircleDollarSign, PackagePlus, Save, X } from "lucide-react";
 import type { Address } from "viem";
 import { newOfferId, useTradeActions, useTradeSlabs, type TradeSlab } from "@/lib/chain/trades";
 import { anchorListing, valuedSlab } from "@/lib/chain/slabValue";
@@ -270,7 +270,12 @@ function Form({
 
       <BalancePanel give={giveSide} get={getSide} />
 
-      {error ? <p role="alert" className="rounded-lg bg-bad/10 px-3 py-2 text-[12.5px] text-bad">{error}</p> : null}
+      {error ? (
+        <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-bad/20 bg-bad/10 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-bad">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : null}
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline p-3">
