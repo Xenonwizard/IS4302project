@@ -22,7 +22,7 @@ const NAV = [
   { href: "/marketplace", label: "Marketplace", short: "Market", icon: Store },
   { href: "/lost", label: "Lost cards", short: "Lost", icon: ShieldAlert },
   { href: "/trades", label: "Negotiation rooms", short: "Rooms", icon: MessagesSquare },
-  { href: "/submissions", label: "Submissions", short: "Submit", icon: ClipboardList },
+  { href: "/submissions", label: "Status Center", short: "Status", icon: ClipboardList },
   { href: "/vault", label: "Vault", short: "Vault", icon: ShieldCheck },
   { href: "/wallet", label: "Wallet", short: "Wallet", icon: Wallet },
   { href: "/account", label: "Account", short: "Account", icon: UserRound, desktopOnly: true },

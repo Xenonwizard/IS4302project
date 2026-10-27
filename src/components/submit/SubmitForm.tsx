@@ -34,7 +34,7 @@ export function SubmitForm() {
     <div className="mx-auto max-w-2xl">
       <h1 className="text-[24px] font-bold">Add a slab</h1>
       <p className="mt-1.5 text-[14px] text-muted">
-        Create one request for each graded slab. After you submit, you will return to Submissions where you can track it
+        Create one request for each graded slab. After you submit, you will return to Status Center where you can track it
         and immediately add another. Wallet requests keep their status and evidence fingerprint on {BRAND.chain}.
       </p>
 

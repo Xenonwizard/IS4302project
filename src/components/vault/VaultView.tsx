@@ -87,7 +87,6 @@ export function VaultView() {
   const [missingTarget, setMissingTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [bountyTarget, setBountyTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [missingDetails, setMissingDetails] = useState("");
-  const [missingBounty, setMissingBounty] = useState("");
   const [awaitingReportTarget, setAwaitingReportTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   const [awaitingReportDetails, setAwaitingReportDetails] = useState("");
   const [reportingAwaiting, setReportingAwaiting] = useState(false);
@@ -164,11 +163,11 @@ export function VaultView() {
     withdrawn: withdrawn.length,
   };
 
-  const handleReportLost = async (listingId: string, details: string) => {
+  const handleReportLost = async (listingId: string, certNumber: string, details: string) => {
     setReportingAwaiting(true);
     try {
       const reportDetails = details.trim() || "Card has been awaiting vaulting longer than expected";
-      reportVaultLost(listingId, reportDetails);
+      reportVaultLost(listingId, reportDetails, false, certNumber);
       pushToast({ title: "Vaulting delay reported", body: "The NFT remains visible while the vault team investigates.", tone: "success" });
       setAwaitingReportTarget(null);
       setAwaitingReportDetails("");
@@ -192,11 +191,10 @@ export function VaultView() {
         listing.id,
         entry.token?.tokenId,
         missingDetails.trim() || (inTransit ? "Reported lost while in transit to the vault" : "Reported missing from the vault"),
-        { inTransit, bounty: Number(missingBounty) },
+        { inTransit },
       );
       setMissingTarget(null);
       setMissingDetails("");
-      setMissingBounty("");
     } catch (err) {
       pushToast({ title: "Could not report card missing", body: (err as Error).message, tone: "error" });
     } finally {
@@ -232,7 +230,7 @@ export function VaultView() {
           ? "Stored by Collector Crypt. Each slab's token is yours on Polygon, and its Collector Crypt NFT is held in Pokechain's escrow."
           : `Held in the ${BRAND.vaultCity} vault, insured.`}
         {" "}
-        <Link href="/submissions" className="font-semibold text-accent hover:underline">Track inbound requests in Submissions.</Link>
+        <Link href="/submissions" className="font-semibold text-accent hover:underline">Track inbound requests in Status Center.</Link>
       </p>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -342,7 +340,7 @@ export function VaultView() {
             <Empty
               icon={<Package size={24} />}
               title="No slabs yet"
-              body="Add a graded slab, or win one with an offer in a negotiation room. Vaulted slabs land here; inbound requests stay in Submissions."
+              body="Add a graded slab, or win one with an offer in a negotiation room. Vaulted slabs land here; inbound requests stay in Status Center."
               cta={{ href: "/submit", label: "Add a slab" }}
             />
           ) : (
@@ -556,7 +554,7 @@ export function VaultView() {
               Tell us what happened with <span className="font-semibold text-white">{awaitingReportTarget.listing.title}</span>. Use this when the card has been awaiting vaulting longer than expected.
             </p>
             <p className="text-[12px] text-dim">Submitted <TimeAgo value={awaitingReportTarget.entry.acquiredAt} /></p>
-            <Field label="What happened?" hint="Optional">
+            <Field label="What happened?">
               <textarea
                 className={`${inputClass} h-24 resize-none py-2.5`}
                 value={awaitingReportDetails}
@@ -570,7 +568,7 @@ export function VaultView() {
               <Button
                 variant="danger"
                 className="flex-1"
-                onClick={() => void handleReportLost(awaitingReportTarget.listing.id, awaitingReportDetails)}
+                onClick={() => void handleReportLost(awaitingReportTarget.listing.id, awaitingReportTarget.listing.certNumber, awaitingReportDetails)}
                 disabled={reportingAwaiting}
               >
                 {reportingAwaiting ? "Reporting..." : "Submit report"}
@@ -595,22 +593,12 @@ export function VaultView() {
             <p className="text-[13px] leading-relaxed text-muted">
               Mark <span className="font-semibold text-white">{missingTarget.listing.title}</span> as lost {missingTarget.entry.status === "Awaiting vaulting" ? "while travelling to Pokechain or Collector Crypt" : "in the vault"}. It will be removed from sale until you cancel this report.
             </p>
-            <Field label="What happened?" hint="Optional">
+            <Field label="What happened?">
               <textarea
                 className={`${inputClass} h-24 resize-none py-2.5`}
                 value={missingDetails}
                 onChange={(event) => setMissingDetails(event.target.value)}
                 placeholder="Last seen during inventory check…"
-                disabled={reportingMissing}
-              />
-            </Field>
-            <Field label="Recovery bounty (USDC)" hint="Optional">
-              <input
-                className={inputClass}
-                inputMode="decimal"
-                value={missingBounty}
-                onChange={(event) => setMissingBounty(event.target.value.replace(/[^\d.]/g, ""))}
-                placeholder="e.g. 150"
                 disabled={reportingMissing}
               />
             </Field>

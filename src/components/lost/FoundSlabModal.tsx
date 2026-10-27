@@ -30,7 +30,7 @@ export function FoundSlabModal({ listing, open, onClose, onChain = false }: { li
       setBusy(true);
       try {
         const claimId = await fileClaim({ tokenId: listing.tokenId, details, evidence, files, carrier, tracking });
-        pushToast({ title: `Claim #${claimId} filed on-chain`, body: "Ship the slab to Pokechain. Follow the case in Submissions.", tone: "success" });
+        pushToast({ title: `Claim #${claimId} filed on-chain`, body: "Ship the slab to Pokechain. Follow the case in Status Center.", tone: "success" });
         onClose();
         router.push("/submissions?tab=found");
       } catch (error) {

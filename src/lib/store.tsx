@@ -259,7 +259,7 @@ interface StoreValue extends PersistShape {
   withdrawOffer: (negotiationId: string, offerId: string) => void;
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
   /* vault missing reports and their optional bounties */
-  reportVaultLost: (listingId: string, details: string, inTransit?: boolean) => void;
+  reportVaultLost: (listingId: string, details: string, inTransit?: boolean, certNumber?: string) => void;
   /** A slab reported lost on-chain: take it off sale here and close buyers' chats. The report itself is on SlabVault. */
   delistLostSlab: (listingId: string) => void;
   completeLossInvestigation: (listingId: string) => void;
@@ -1964,7 +1964,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const reportVaultLost = useCallback(
-    (listingId: string, details: string, inTransit = false) => {
+    (listingId: string, details: string, inTransit = false, certNumber?: string) => {
       setState((prev) => {
         if (!prev.vault.some((item) => item.listingId === listingId)) return prev;
         const negotiations = closeSellerChats(
@@ -1986,7 +1986,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
           vaultLosses: {
             ...prev.vaultLosses,
-            [listingId]: { reportedAt: new Date().toISOString(), details, published: false, inTransit },
+            [listingId]: {
+              reportedAt: new Date().toISOString(),
+              details,
+              certNumber: certNumber ?? getListing(listingId)?.certNumber,
+              published: false,
+              inTransit,
+            },
           },
         };
       });
