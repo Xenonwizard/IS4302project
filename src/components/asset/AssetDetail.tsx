@@ -475,9 +475,12 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
       </div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* ---------------- left ---------------- */}
-        <div className="min-w-0 xl:h-full">
+        <div className={clsx("min-w-0", !lostView && "xl:h-full")}>
           <div
-            className="relative mx-auto flex aspect-square w-full flex-col overflow-hidden rounded-card border border-hairline bg-[#0c0c10] xl:h-full xl:aspect-auto"
+            className={clsx(
+              "relative mx-auto flex aspect-square w-full flex-col overflow-hidden rounded-card border border-hairline bg-[#0c0c10]",
+              !lostView && "xl:h-full xl:aspect-auto",
+            )}
             style={{ maxWidth: "min(100%, 80vh)" }}
           >
             <div className="relative min-h-0 w-full flex-1">

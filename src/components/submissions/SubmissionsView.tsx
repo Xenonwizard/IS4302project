@@ -121,10 +121,11 @@ export function SubmissionsView() {
     [resolve, vault],
   );
 
-  // Found-slab claims are recovery requests: the finder and the owner both follow them here.
+  // A found-slab case belongs to different workflows depending on this collector's role.
   const { data: allCases = [] } = useFoundCases();
   const me = user?.address?.toLowerCase();
-  const myCases = allCases.filter((c) => me && (c.finder.toLowerCase() === me || c.owner.toLowerCase() === me));
+  const ownerCases = allCases.filter((c) => me && c.owner.toLowerCase() === me);
+  const bountyClaimCases = allCases.filter((c) => me && c.finder.toLowerCase() === me && c.owner.toLowerCase() !== me);
   const recoveryReports = useMemo(() =>
     vault.flatMap((entry) => {
       const listing = getListing(entry.listingId);
@@ -135,6 +136,20 @@ export function SubmissionsView() {
       return listing && loss ? [{ entry, listing: resolve(listing), loss }] : [];
     }),
   [publicLostSlabs, resolve, user?.address, vault, vaultLosses]);
+  const caseListingsByToken = useMemo(() => {
+    const listings: Record<string, Listing> = {};
+    publicLostSlabs.forEach((item) => { listings[item.listing.tokenId] = item.listing; });
+    vault.forEach((entry) => {
+      if (!entry.token) return;
+      const listing = getListing(entry.listingId);
+      if (listing) listings[entry.token.tokenId] = resolve(listing);
+    });
+    return listings;
+  }, [publicLostSlabs, resolve, vault]);
+  // Once someone files a found-card claim, that live recovery case replaces the owner's generic lost report row.
+  const trackedRecoveryReports = recoveryReports.filter(({ entry, listing }) =>
+    !ownerCases.some((c) => c.tokenId === entry.token?.tokenId || c.tokenId === listing.tokenId),
+  );
 
   const visible = category === "submissions" ? requests.filter((request) => {
     if (filter === "progress") return OPEN_SUBMISSION.has(request.status);
@@ -144,39 +159,44 @@ export function SubmissionsView() {
   }) : [];
   const visibleLocal = category === "submissions" && (filter === "all" || filter === "vaulted") ? localRequests : [];
   const visibleWithdrawals = category === "withdrawals" ? withdrawals : [];
-  const visibleCases = category === "bounties" ? myCases.filter((c) => {
-    const role = c.owner.toLowerCase() === me ? "owner" : "finder";
-    const actionNeeded = (role === "owner" && c.status === 2) || (role === "owner" && c.status === 4 && c.returnTo === 2 && c.custody === "Shipped") || (role === "finder" && c.status === 4);
+  const visibleBountyClaims = category === "bounties" ? bountyClaimCases.filter((c) => {
     if (filter === "progress") return c.status >= 1 && c.status <= 4;
-    if (filter === "action") return actionNeeded;
+    if (filter === "action") return c.status === 4;
     if (filter === "completed") return c.status === 5 || c.status === 6;
     return true;
   }) : [];
-  const visibleRecovery = category === "recovery" ? recoveryReports.filter(({ listing, loss }) => {
+  const visibleOwnerRecoveries = category === "recovery" ? ownerCases.filter((c) => {
+    const actionNeeded = c.status === 2 || (c.status === 4 && c.returnTo === 2 && c.custody === "Shipped");
+    if (filter === "progress") return c.status >= 1 && c.status <= 4;
+    if (filter === "action") return actionNeeded;
+    if (filter === "bounty") return c.bounty > 0 && c.status < 5;
+    return true;
+  }) : [];
+  const visibleRecovery = category === "recovery" ? trackedRecoveryReports.filter(({ listing, loss }) => {
     const needsDecision = Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`]);
     if (filter === "progress") return !needsDecision && !loss.published && !loss.resolution;
     if (filter === "action") return needsDecision;
     if (filter === "bounty") return Boolean(loss.bounty);
     return true;
   }) : [];
-  const total = requests.length + localRequests.length + withdrawals.length + myCases.length + recoveryReports.length;
+  const total = requests.length + localRequests.length + withdrawals.length + bountyClaimCases.length + ownerCases.length + trackedRecoveryReports.length;
   const inProgress = requests.filter((request) => OPEN_SUBMISSION.has(request.status)).length;
   const awaitingVault = requests.filter((request) => request.status === 2 || request.status === 3).length;
   const vaulted = requests.filter((request) => request.status === 4).length + localRequests.length;
   const categoryCounts: Record<Category, number> = {
     submissions: requests.length + localRequests.length,
     withdrawals: withdrawals.length,
-    bounties: myCases.length,
-    recovery: recoveryReports.length,
+    bounties: bountyClaimCases.length,
+    recovery: ownerCases.length + trackedRecoveryReports.length,
   };
   const filterCounts: Record<StatusFilter, number> = {
     all: categoryCounts[category],
-    progress: category === "submissions" ? inProgress : category === "withdrawals" ? withdrawals.length : category === "bounties" ? myCases.filter((c) => c.status >= 1 && c.status <= 4).length : recoveryReports.filter(({ listing, loss }) => !loss.published && !loss.resolution && !pendingLossDecisions[listing.id] && !pendingLossDecisions[listing.tokenId] && !pendingLossDecisions[`token-${listing.tokenId}`]).length,
+    progress: category === "submissions" ? inProgress : category === "withdrawals" ? withdrawals.length : category === "bounties" ? bountyClaimCases.filter((c) => c.status >= 1 && c.status <= 4).length : ownerCases.filter((c) => c.status >= 1 && c.status <= 4).length + trackedRecoveryReports.filter(({ listing, loss }) => !loss.published && !loss.resolution && !pendingLossDecisions[listing.id] && !pendingLossDecisions[listing.tokenId] && !pendingLossDecisions[`token-${listing.tokenId}`]).length,
     awaiting: awaitingVault,
     vaulted,
-    action: category === "bounties" ? myCases.filter((c) => (c.owner.toLowerCase() === me && c.status === 2) || (c.owner.toLowerCase() === me && c.status === 4 && c.returnTo === 2 && c.custody === "Shipped") || (c.finder.toLowerCase() === me && c.status === 4)).length : recoveryReports.filter(({ listing }) => Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`])).length,
-    completed: myCases.filter((c) => c.status === 5 || c.status === 6).length,
-    bounty: recoveryReports.filter(({ loss }) => Boolean(loss.bounty)).length,
+    action: category === "bounties" ? bountyClaimCases.filter((c) => c.status === 4).length : ownerCases.filter((c) => c.status === 2 || (c.status === 4 && c.returnTo === 2 && c.custody === "Shipped")).length + trackedRecoveryReports.filter(({ listing }) => Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`])).length,
+    completed: bountyClaimCases.filter((c) => c.status === 5 || c.status === 6).length,
+    bounty: ownerCases.filter((c) => c.bounty > 0 && c.status < 5).length + trackedRecoveryReports.filter(({ loss }) => Boolean(loss.bounty)).length,
   };
 
   const submitLossDecision = async () => {
@@ -283,15 +303,15 @@ export function SubmissionsView() {
               Try again
             </button>
           </div>
-        ) : visible.length || visibleLocal.length || visibleWithdrawals.length || visibleCases.length || visibleRecovery.length ? (
+        ) : visible.length || visibleLocal.length || visibleWithdrawals.length || visibleBountyClaims.length || visibleOwnerRecoveries.length || visibleRecovery.length ? (
           <div className="space-y-6">
-          {visibleCases.length ? (
-            <section data-testid="found-cases">
-              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><PackageSearch size={15} /> Found-slab cases</h2>
+          {visibleBountyClaims.length ? (
+            <section data-testid="bounty-claims">
+              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><PackageSearch size={15} /> Bounty claims</h2>
               <p className="mb-3 text-[12px] text-muted">
-                A slab reported lost that another collector found and sent to Pokechain. The bounty sits in the LostAndFound contract until the slab is back.
+                Lost slabs you found and submitted to Pokechain. Follow verification, return, and bounty payment here.
               </p>
-              <FoundCaseList cases={visibleCases} me={me ?? ""} />
+              <FoundCaseList cases={visibleBountyClaims} me={me ?? ""} listingsByToken={caseListingsByToken} />
             </section>
           ) : null}
           {visible.length || visibleLocal.length ? (
@@ -333,27 +353,32 @@ export function SubmissionsView() {
               <WithdrawnList items={visibleWithdrawals} />
             </section>
           ) : null}
-          {visibleRecovery.length ? (
+          {visibleOwnerRecoveries.length || visibleRecovery.length ? (
             <section data-testid="recovery-statuses">
-              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><TriangleAlert size={15} /> Recovery & insurance</h2>
-              <p className="mb-3 text-[12px] text-muted">Updates for vaulting-delay reports, insurance decisions, and any public lost-card bounty.</p>
-              <ul className="space-y-3">
-                {visibleRecovery.map(({ entry, listing, loss }) => (
-                  <RecoveryRow
-                    key={listing.id}
-                    entry={entry}
-                    listing={listing}
-                    loss={loss}
-                    actionNeeded={Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`])}
-                    onReview={() => {
-                      const decisionId = Object.keys(pendingLossDecisions).find(
-                        (id) => id === listing.id || id === listing.tokenId || id === `token-${listing.tokenId}`,
-                      ) ?? listing.id;
-                      setDecisionTarget({ entry, listing, decisionId });
-                    }}
-                  />
-                ))}
-              </ul>
+              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><PackageSearch size={15} /> Recovery & insurance</h2>
+              <p className="mb-3 text-[12px] text-muted">Track every lost-card report from investigation and bounty publication through recovery, return, or insurance.</p>
+              <div className="space-y-3">
+                {visibleOwnerRecoveries.length ? <FoundCaseList cases={visibleOwnerRecoveries} me={me ?? ""} listingsByToken={caseListingsByToken} /> : null}
+                {visibleRecovery.length ? (
+                  <ul className="space-y-3">
+                    {visibleRecovery.map(({ entry, listing, loss }) => (
+                      <RecoveryRow
+                        key={listing.id}
+                        entry={entry}
+                        listing={listing}
+                        loss={loss}
+                        actionNeeded={Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`])}
+                        onReview={() => {
+                          const decisionId = Object.keys(pendingLossDecisions).find(
+                            (id) => id === listing.id || id === listing.tokenId || id === `token-${listing.tokenId}`,
+                          ) ?? listing.id;
+                          setDecisionTarget({ entry, listing, decisionId });
+                        }}
+                      />
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             </section>
           ) : null}
           </div>
