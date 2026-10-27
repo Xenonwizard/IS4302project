@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @dev The slice of AccountRegistry TradeEscrow uses.
 interface ITradeAccounts {
@@ -15,6 +16,7 @@ interface ITradeVault {
     function ownerOf(uint256 tokenId) external view returns (address);
     function custodyOf(uint256 tokenId) external view returns (uint8);
     function transferFrom(address from, address to, uint256 tokenId) external;
+    function vaultedCount(address owner) external view returns (uint256);
 }
 
 /**
@@ -38,7 +40,7 @@ interface ITradeVault {
  *  Every slab must be Vaulted at Collector Crypt, so only the token changes hands and the
  *  physical slabs never move. Cash is USDC already in Pokechain custody (AccountRegistry).
  */
-contract TradeEscrow is ReentrancyGuard {
+contract TradeEscrow is Ownable, ReentrancyGuard {
     enum Status {
         None,
         Open,
@@ -67,9 +69,15 @@ contract TradeEscrow is ReentrancyGuard {
     /// @dev SlabVault.Custody.Vaulted
     uint8 private constant VAULTED = 1;
     uint256 public constant MAX_SLABS_PER_SIDE = 10;
+    uint256 public constant MAX_FEE_BPS = 1000; // Max 10%
 
     ITradeAccounts public immutable accounts;
     ITradeVault public immutable vault;
+
+    /// @notice Protocol fee in basis points applied to cash legs (100 = 1.00%). Deters wash trading via cash swaps.
+    uint256 public feeBps;
+    /// @notice Recipient of the platform fee in AccountRegistry custody.
+    address public feeRecipient;
 
     uint256 public nextOfferId = 1;
     mapping(uint256 => Offer) private _offers;
@@ -94,6 +102,7 @@ contract TradeEscrow is ReentrancyGuard {
     event OfferDeclined(uint256 indexed offerId, address indexed maker, address indexed taker);
     event OfferWithdrawn(uint256 indexed offerId, address indexed maker, address indexed taker);
     event OfferCountered(uint256 indexed offerId, uint256 indexed counterOfferId);
+    event FeeConfigUpdated(uint256 feeBps, address indexed feeRecipient);
 
     error AccountNotActive(address account);
     error SelfTrade();
@@ -106,10 +115,16 @@ contract TradeEscrow is ReentrancyGuard {
     error OfferNotOpen(uint256 offerId);
     error NotTaker(uint256 offerId);
     error NotMaker(uint256 offerId);
+    error TooManyOpenOffers(address account, uint256 openCount);
+    error FeeTooHigh(uint256 feeBps, uint256 maxBps);
+    error InvalidFeeRecipient();
 
-    constructor(ITradeAccounts accounts_, ITradeVault vault_) {
+    uint256 public constant UNVAULTED_MAX_OPEN_OFFERS = 2;
+
+    constructor(ITradeAccounts accounts_, ITradeVault vault_) Ownable(msg.sender) {
         accounts = accounts_;
         vault = vault_;
+        feeRecipient = msg.sender;
     }
 
     /* -------------------------------- trading -------------------------------- */
@@ -135,6 +150,15 @@ contract TradeEscrow is ReentrancyGuard {
         _lock(offerId);
     }
 
+    /// @notice Sets the cash trade fee and recipient. Max fee is capped at MAX_FEE_BPS (10%).
+    function setFeeConfig(uint256 newFeeBps, address newRecipient) external onlyOwner {
+        if (newFeeBps > MAX_FEE_BPS) revert FeeTooHigh(newFeeBps, MAX_FEE_BPS);
+        if (newFeeBps > 0 && newRecipient == address(0)) revert InvalidFeeRecipient();
+        feeBps = newFeeBps;
+        feeRecipient = newRecipient;
+        emit FeeConfigUpdated(newFeeBps, newRecipient);
+    }
+
     /// @notice The taker agrees: both sides swap in this one transaction, or nothing does.
     function accept(uint256 offerId) external nonReentrant {
         Offer storage o = _open(offerId);
@@ -148,13 +172,27 @@ contract TradeEscrow is ReentrancyGuard {
         for (uint256 i; i < o.takerSlabs.length; ++i) {
             vault.transferFrom(o.taker, o.maker, o.takerSlabs[i]);
         }
-        if (o.takerCash > 0) accounts.moveBalance(o.taker, o.maker, o.takerCash);
+        if (o.takerCash > 0) {
+            uint256 fee = (o.takerCash * feeBps) / 10000;
+            uint256 proceeds = o.takerCash - fee;
+            accounts.moveBalance(o.taker, o.maker, proceeds);
+            if (fee > 0 && feeRecipient != address(0)) {
+                accounts.moveBalance(o.taker, feeRecipient, fee);
+            }
+        }
         // The maker's escrowed side, to the taker.
         for (uint256 i; i < o.makerSlabs.length; ++i) {
             delete offerHolding[o.makerSlabs[i]];
             vault.transferFrom(address(this), o.taker, o.makerSlabs[i]);
         }
-        if (o.makerCash > 0) accounts.moveBalance(address(this), o.taker, o.makerCash);
+        if (o.makerCash > 0) {
+            uint256 fee = (o.makerCash * feeBps) / 10000;
+            uint256 proceeds = o.makerCash - fee;
+            accounts.moveBalance(address(this), o.taker, proceeds);
+            if (fee > 0 && feeRecipient != address(0)) {
+                accounts.moveBalance(address(this), feeRecipient, fee);
+            }
+        }
         emit OfferAccepted(offerId, o.maker, o.taker);
     }
 
@@ -240,6 +278,14 @@ contract TradeEscrow is ReentrancyGuard {
         _checkSide(o.maker, makerSlabs, o.makerCash);
         // The taker's side is checked now too, so an offer for slabs they can't trade fails early.
         _checkSide(o.taker, takerSlabs, 0);
+
+        // Sybil resistance: unvaulted accounts (zero vaulted slabs in custody and offering no slabs)
+        // are capped on concurrent open offers to prevent spamming sellers.
+        if (vault.vaultedCount(o.maker) == 0 && makerSlabs.length == 0) {
+            if (openOffers[o.maker] >= UNVAULTED_MAX_OPEN_OFFERS) {
+                revert TooManyOpenOffers(o.maker, openOffers[o.maker]);
+            }
+        }
 
         openOffers[o.maker] += 1;
         _offerIdsOf[o.maker].push(offerId);

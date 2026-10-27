@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { truncMiddle, usd } from "@/lib/format";
 import { useLostSlabs, useStore } from "@/lib/store";
-import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useMarketChain, useMarketFeeBps } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { chain, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
 import { zeroAddress } from "viem";
@@ -70,6 +70,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     (listing.contract?.toLowerCase() === contracts.slabVault.address.toLowerCase() ? listing.tokenId : null);
 
   const { buyCard, cancelListing } = useMarketChain();
+  const { data: marketFeeBps = 0 } = useMarketFeeBps();
   const acct = useOnchainAccount();
   const client = usePublicClient();
   const queryClient = useQueryClient();
@@ -663,7 +664,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
             {listed ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-4 py-3 text-[11px] text-muted sm:px-5">
-                <span className="flex items-center gap-1.5"><ShieldCheck size={13} className="text-good" />0% platform fee · Atomic on-chain settlement</span>
+                <span className="flex items-center gap-1.5"><ShieldCheck size={13} className="text-good" />{marketFeeBps === 0 ? "0% platform fee" : `${marketFeeBps / 100}% protocol fee`} · Atomic on-chain settlement</span>
               </div>
             ) : null}
           </div>
@@ -750,9 +751,17 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <dd className="font-semibold">{usd(displayPrice, { cents: true })}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-muted">Pokéchain fee (Rule 2)</dt>
-              <dd className="font-semibold text-good">0% ($0.00)</dd>
+              <dt className="text-muted">Pokéchain protocol fee {marketFeeBps > 0 ? `(${marketFeeBps / 100}%)` : "(Rule 2)"}</dt>
+              <dd className={clsx("font-semibold", marketFeeBps > 0 ? "text-accent" : "text-good")}>
+                {marketFeeBps > 0 ? `${marketFeeBps / 100}% (${usd((displayPrice * marketFeeBps) / 10000, { cents: true })})` : "0% ($0.00)"}
+              </dd>
             </div>
+            {marketFeeBps > 0 ? (
+              <div className="flex justify-between text-[12px] text-dim">
+                <dt>Seller net proceeds</dt>
+                <dd>{usd(displayPrice - (displayPrice * marketFeeBps) / 10000, { cents: true })} USDC</dd>
+              </div>
+            ) : null}
             <div className="h-px bg-hairline" />
             <div className="flex justify-between">
               <dt className="text-muted">Total payment from your Pokechain account</dt>

@@ -61,6 +61,12 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     AccountRegistry public immutable accounts;
     address public loanEscrow;
 
+    uint256 public constant MAX_FEE_BPS = 1000; // Max 10%
+    /// @notice Protocol marketplace fee in basis points (100 = 1.00%). Deter wash trading.
+    uint256 public feeBps;
+    /// @notice Recipient of the platform fee in AccountRegistry custody.
+    address public feeRecipient;
+
     /// @notice tokenId => active listing
     mapping(uint256 => Listing) public listings;
     uint256[] private _activeTokenIds;
@@ -73,6 +79,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     event CardListed(uint256 indexed tokenId, address indexed seller, uint256 price, uint64 listedAt);
     event LoanTermsSet(uint256 indexed tokenId, bool acceptsLoan, uint256 loanAsk);
     event LoanEscrowSet(address indexed loanEscrow);
+    event FeeConfigUpdated(uint256 feeBps, address indexed feeRecipient);
     event ListingCancelled(uint256 indexed tokenId, address indexed seller, uint64 cancelledAt);
     event CardPurchased(
         uint256 indexed tokenId,
@@ -95,11 +102,14 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     error InvalidLoanAsk();
     error LoanEscrowAlreadySet();
     error OnlyLoanEscrow();
+    error FeeTooHigh(uint256 feeBps, uint256 maxBps);
+    error InvalidFeeRecipient();
 
     constructor(SlabVault vault_, IERC20 usdc_, AccountRegistry accounts_) Ownable(msg.sender) {
         vault = vault_;
         usdc = usdc_;
         accounts = accounts_;
+        feeRecipient = msg.sender;
     }
 
     /* ----------------------------- listing actions ---------------------------- */
@@ -151,6 +161,15 @@ contract SlabMarket is Ownable, ReentrancyGuard {
 
         emit CardListed(tokenId, msg.sender, price, uint64(block.timestamp));
         emit LoanTermsSet(tokenId, acceptsLoan, loanAsk);
+    }
+
+    /// @notice Sets the marketplace fee and recipient. Max fee is capped at MAX_FEE_BPS (10%).
+    function setFeeConfig(uint256 newFeeBps, address newRecipient) external onlyOwner {
+        if (newFeeBps > MAX_FEE_BPS) revert FeeTooHigh(newFeeBps, MAX_FEE_BPS);
+        if (newFeeBps > 0 && newRecipient == address(0)) revert InvalidFeeRecipient();
+        feeBps = newFeeBps;
+        feeRecipient = newRecipient;
+        emit FeeConfigUpdated(newFeeBps, newRecipient);
     }
 
     /// @notice One-time wiring to the collateral escrow.
@@ -214,6 +233,9 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         _removeActive(tokenId);
         vault.setListingRestriction(tokenId, false);
 
+        uint256 fee = (l.price * feeBps) / 10000;
+        uint256 sellerProceeds = l.price - fee;
+
         // Record completed sale for auditable comparable sales history (Rule 6)
         uint256 saleIdx = sales.length;
         sales.push(
@@ -222,20 +244,23 @@ contract SlabMarket is Ownable, ReentrancyGuard {
                 seller: l.seller,
                 buyer: msg.sender,
                 price: l.price,
-                fee: 0,
+                fee: fee,
                 settledAt: uint64(block.timestamp)
             })
         );
         _tokenSaleIndices[tokenId].push(saleIdx);
 
         // 2. Interactions: Atomic custody payment & token transfer.
-        // Buyer pays seller from their Pokechain account; wallet USDC is never touched.
-        accounts.moveBalance(msg.sender, l.seller, l.price);
+        // Buyer pays seller proceeds; protocol fee moves to feeRecipient in custody.
+        accounts.moveBalance(msg.sender, l.seller, sellerProceeds);
+        if (fee > 0 && feeRecipient != address(0)) {
+            accounts.moveBalance(msg.sender, feeRecipient, fee);
+        }
 
         // SlabVault executes transfer from seller to buyer
         vault.settleMarketTransfer(l.seller, msg.sender, tokenId);
 
-        emit CardPurchased(tokenId, l.seller, msg.sender, l.price, 0, uint64(block.timestamp));
+        emit CardPurchased(tokenId, l.seller, msg.sender, l.price, fee, uint64(block.timestamp));
     }
 
     /* --------------------------------- views --------------------------------- */

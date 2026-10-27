@@ -10,7 +10,7 @@ import { usePublicClient } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
 import { contracts } from "@/lib/chain/config";
-import { useHandleAddress, useTradeEvents, useTradeOffers } from "@/lib/chain/trades";
+import { useHandleAddress, useTradeEvents, useTradeFeeBps, useTradeOffers } from "@/lib/chain/trades";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useLoanEvents, useLoanListing, useLoanOffers } from "@/lib/chain/loans";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
@@ -108,6 +108,7 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
   // Between two wallet accounts the offers are on-chain trades; with anyone else they stay the simple kind.
   const wallet = useOnchainAccount();
   const { data: otherAddress } = useHandleAddress(other);
+  const { data: tradeFeeBps = 0 } = useTradeFeeBps();
   const chainMode = Boolean(user?.address && wallet.address && otherAddress && otherAddress.toLowerCase() !== wallet.address.toLowerCase());
   useTradeEvents(chainMode);
   const { data: chainOffers = [] } = useTradeOffers(wallet.address, otherAddress ?? undefined);
@@ -437,6 +438,7 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
                 {acceptsLoan ? <li>Loan principal is funded with the offer. If accepted, the slab stays in LoanEscrow until repayment.</li> : null}
                 {acceptsLoan ? <li>The borrower repays principal plus interest by the deadline; after it passes, the lender can claim the slab.</li> : null}
                 <li>Nothing ships: only the tokens change hands, the slabs stay vaulted.</li>
+                <li>Slab transfers are 0% fee. A {tradeFeeBps > 0 ? `${tradeFeeBps / 100}%` : "0%"} protocol fee applies to cash legs to prevent wash trading.</li>
               </ul>
             ) : (
               <ul className="list-disc space-y-1 pl-4">

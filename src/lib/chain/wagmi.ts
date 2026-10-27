@@ -17,10 +17,11 @@ import { createConfig, createConnector, http, injected, mock } from "wagmi";
 import { BRAND } from "../brand";
 import { IS_LOCAL, chain } from "./config";
 
-/** Hardhat test accounts #1 and #2. #0 is the deployer and vault operator. */
+/** Hardhat test accounts: #1 (test1), #2 (test2), #6 (test3, unvaulted). #0 is deployer/operator. */
 const TEST_COLLECTORS: { index: number; address: Address; hue: number }[] = [
   { index: 1, address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", hue: 200 },
   { index: 2, address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", hue: 320 },
+  { index: 3, address: "0x976EA74026E726554dB657fA54763abd0C3a0aa9", hue: 90 },
 ];
 
 function testCollectorWallet({ index, address, hue }: (typeof TEST_COLLECTORS)[number]) {

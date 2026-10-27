@@ -55,6 +55,11 @@ export function AccountView() {
           <p className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-muted">
             <CopyText text={acct.address} /> · {chain.name}
             <Badge tone={acct.status === "Active" ? "good" : "warn"}>{acct.status}</Badge>
+            {acct.vaultedCount > 0 ? (
+              <Badge tone="good">Verified Collector ({acct.vaultedCount} Vaulted)</Badge>
+            ) : (
+              <Badge tone="neutral">Standard Collector</Badge>
+            )}
           </p>
         </div>
         <Link href="/wallet">

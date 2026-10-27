@@ -2,9 +2,9 @@
 
 import clsx from "clsx";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeftRight, Check, CircleDollarSign, PackagePlus, Save, X } from "lucide-react";
+import { AlertCircle, ArrowLeftRight, Check, CircleDollarSign, PackagePlus, Save, X } from "lucide-react";
 import type { Address } from "viem";
-import { newOfferId, useTradeActions, useTradeSlabs, type TradeSlab } from "@/lib/chain/trades";
+import { newOfferId, useTradeActions, useTradeFeeBps, useTradeSlabs, type TradeSlab } from "@/lib/chain/trades";
 import { anchorListing, valuedSlab } from "@/lib/chain/slabValue";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { usd } from "@/lib/format";
@@ -81,6 +81,7 @@ function Form({
   const { cancelListing } = useMarketChain();
   const { data: mine = [] } = useTradeSlabs(me.address);
   const { data: theirs = [] } = useTradeSlabs(them.address);
+  const { data: feeBps = 0 } = useTradeFeeBps();
 
   const [give, setGive] = useState<string[]>(counterOf?.mySide.slabs.map((s) => s.tokenId) ?? []);
   const requestedTokenId = counterOf ? undefined : initialRequestedTokenId;
@@ -254,6 +255,7 @@ function Form({
           owner={me}
           selected={give}
           cash={giveCash}
+          feeBps={feeBps}
           empty="No slabs added. Use Add items above to choose from your vault."
           onRemove={(id) => { setGive((current) => current.filter((tokenId) => tokenId !== id)); setDraftDirty(true); }}
         />
@@ -263,14 +265,20 @@ function Form({
           owner={them}
           selected={get}
           cash={getCash}
+          feeBps={feeBps}
           empty={`No slabs requested. Use Request items above to choose from @${them.handle}'s vault.`}
           onRemove={(id) => { setGet((current) => current.filter((tokenId) => tokenId !== id)); setDraftDirty(true); }}
         />
       </div>
 
-      <BalancePanel give={giveSide} get={getSide} />
+      <BalancePanel give={giveSide} get={getSide} feeBps={feeBps} />
 
-      {error ? <p role="alert" className="rounded-lg bg-bad/10 px-3 py-2 text-[12.5px] text-bad">{error}</p> : null}
+      {error ? (
+        <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-bad/20 bg-bad/10 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-bad">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : null}
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline p-3">
@@ -375,6 +383,20 @@ function Form({
             <span className="text-muted">{cashDialog?.side === "get" ? "Requested amount" : "Available USDC"}</span>
             <strong>{cashDialog?.side === "get" ? exact(Number(cashDialog.value || 0)) : exact(cash)} USDC</strong>
           </div>
+          {cashDialog && Number(cashDialog.value || 0) > 0 ? (
+            <div className="space-y-1.5 rounded-xl border border-hairline bg-surface/50 p-3 text-[12px]">
+              <div className="flex justify-between text-muted">
+                <span>Protocol fee ({feeBps / 100}%)</span>
+                <span className="font-medium text-white">
+                  {feeBps > 0 ? `-${exact((Number(cashDialog.value) * feeBps) / 10000)} USDC` : "0% ($0.00)"}
+                </span>
+              </div>
+              <div className="flex justify-between font-semibold">
+                <span className="text-muted">{cashDialog.side === "get" ? "You receive net" : "Recipient receives net"}</span>
+                <span className="text-accent">{exact(Number(cashDialog.value) - (Number(cashDialog.value) * feeBps) / 10000)} USDC</span>
+              </div>
+            </div>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setCashDialog(null)}>Cancel</Button>
             <Button onClick={confirmCash}>{cashDialog?.side === "get" ? "Request cash" : "Add cash"}</Button>
@@ -441,6 +463,7 @@ function Column({
   owner,
   selected,
   cash,
+  feeBps = 0,
   empty,
   onRemove,
 }: {
@@ -449,17 +472,33 @@ function Column({
   owner: { address: Address; handle: string };
   selected: string[];
   cash: string;
+  feeBps?: number;
   empty: string;
   onRemove: (id: string) => void;
 }) {
   const selectedSlabs = slabs.filter((slab) => selected.includes(slab.tokenId));
+  const cashNum = Number(cash || 0);
+  const feeAmount = (cashNum * feeBps) / 10000;
   return (
     <div className="rounded-xl bg-[#101014] p-3">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-[11.5px] font-bold uppercase tracking-wide text-muted">{title}</p>
         <span className="text-[10px] font-medium text-muted">{selectedSlabs.length} selected</span>
       </div>
-      {cash ? <p className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-[12px] text-muted">{title === "You give" ? "Adding" : "Requesting"} <strong className="text-white">{exact(Number(cash))} USDC</strong></p> : null}
+      {cashNum > 0 ? (
+        <div className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-[12px]">
+          <div className="flex items-center justify-between">
+            <span className="text-muted">{title === "You give" ? "Adding" : "Requesting"}</span>
+            <strong className="text-white">{exact(cashNum)} USDC</strong>
+          </div>
+          {feeBps > 0 ? (
+            <div className="mt-1 flex items-center justify-between border-t border-hairline/40 pt-1 text-[11px] text-dim">
+              <span>Protocol fee ({feeBps / 100}%)</span>
+              <span className="text-white/80">-{exact(feeAmount)} USDC</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {selectedSlabs.length ? (
         <div className="mb-3 grid grid-cols-2 gap-2 2xl:grid-cols-3">
