@@ -2,16 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import Image from "next/image";
 import Link from "next/link";
 import {
   Check,
-  CheckCircle2,
   ChevronDown,
   Clock3,
   Copy,
   FileText,
-  PackageCheck,
   PackageSearch,
   Plus,
   TriangleAlert,
@@ -19,27 +16,52 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
-import { certPreview, getListing } from "@/lib/catalog";
-import { OPEN_SUBMISSION } from "@/lib/chain/config";
-import { useFoundCases } from "@/lib/chain/useLostAndFound";
+import { certPreview, getListing, makeSubmittedListing } from "@/lib/catalog";
+import { IS_DEPLOYED, OPEN_SUBMISSION } from "@/lib/chain/config";
+import { useFoundCases, useLostReport } from "@/lib/chain/useLostAndFound";
 import { type SubmissionRequest, useSubmissions } from "@/lib/chain/useSubmissions";
-import { useStore } from "@/lib/store";
-import type { Listing, VaultItem } from "@/lib/types";
+import { useLostSlabs, useStore } from "@/lib/store";
+import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { WithdrawnList } from "../chain/WithdrawnList";
 import { FoundCaseList } from "../lost/FoundCaseList";
-import { TimeAgo } from "../ui/primitives";
+import { Slab } from "../slab/Slab";
+import { Button, Field, Modal, TimeAgo, inputClass } from "../ui/primitives";
 import { Empty, LoginPrompt } from "../vault/shared";
 
-type Filter = "all" | "progress" | "vaulted" | "withdrawals" | "found" | "attention";
+type Category = "submissions" | "withdrawals" | "bounties" | "recovery";
+type StatusFilter = "all" | "progress" | "awaiting" | "vaulted" | "action" | "completed" | "bounty";
 
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "progress", label: "In progress" },
-  { value: "vaulted", label: "Vaulted" },
-  { value: "withdrawals", label: "Withdrawals" },
-  { value: "found", label: "Found slabs" },
-  { value: "attention", label: "Needs attention" },
+const CATEGORIES: { value: Category; label: string }[] = [
+  { value: "submissions", label: "Slab submissions" },
+  { value: "withdrawals", label: "Slab withdrawals" },
+  { value: "bounties", label: "Bounty claims" },
+  { value: "recovery", label: "Recovery & insurance" },
 ];
+
+const CATEGORY_FILTERS: Record<Category, { value: StatusFilter; label: string }[]> = {
+  submissions: [
+    { value: "all", label: "All" },
+    { value: "progress", label: "In progress" },
+    { value: "awaiting", label: "Awaiting vault" },
+    { value: "vaulted", label: "Vaulted" },
+  ],
+  withdrawals: [
+    { value: "all", label: "All" },
+    { value: "progress", label: "In progress" },
+  ],
+  bounties: [
+    { value: "all", label: "All" },
+    { value: "progress", label: "In progress" },
+    { value: "action", label: "Action needed" },
+    { value: "completed", label: "Completed" },
+  ],
+  recovery: [
+    { value: "all", label: "All" },
+    { value: "progress", label: "Under review" },
+    { value: "action", label: "Action needed" },
+    { value: "bounty", label: "Bounty active" },
+  ],
+};
 
 export const SUBMISSION_STAGE: Record<number, string> = {
   1: "Awaiting receipt at Pokechain",
@@ -64,11 +86,20 @@ interface EvidenceResponse {
 }
 
 export function SubmissionsView() {
-  const { user, ready, vault, resolve } = useStore();
+  const { user, ready, vault, resolve, vaultLosses, pendingLossDecisions, setVaultBounty, resolveLossDecision, pushToast } = useStore();
+  const lost = useLostReport();
+  const publicLostSlabs = useLostSlabs();
   const { data: requests = [], isPending, isError, refetch } = useSubmissions();
   const params = useSearchParams();
-  const [filter, setFilter] = useState<Filter>(() => FILTERS.find((f) => f.value === params.get("tab"))?.value ?? "all");
+  const [category, setCategory] = useState<Category>(() => {
+    const tab = params.get("tab");
+    return tab === "withdrawals" ? "withdrawals" : tab === "found" ? "bounties" : "submissions";
+  });
+  const [filter, setFilter] = useState<StatusFilter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [decisionTarget, setDecisionTarget] = useState<{ entry: VaultItem; listing: Listing; decisionId: string } | null>(null);
+  const [decisionChoice, setDecisionChoice] = useState<"insurance" | "bounty" | null>(null);
+  const [decisionBounty, setDecisionBounty] = useState("");
 
   const localRequests = useMemo(
     () =>
@@ -94,27 +125,86 @@ export function SubmissionsView() {
   const { data: allCases = [] } = useFoundCases();
   const me = user?.address?.toLowerCase();
   const myCases = allCases.filter((c) => me && (c.finder.toLowerCase() === me || c.owner.toLowerCase() === me));
-  const visibleCases = filter === "all" || filter === "found" ? myCases : [];
+  const recoveryReports = useMemo(() =>
+    vault.flatMap((entry) => {
+      const listing = getListing(entry.listingId);
+      const publicLoss = entry.token
+        ? publicLostSlabs.find((item) => item.listing.tokenId === entry.token?.tokenId && (!item.owner || item.owner.toLowerCase() === user?.address?.toLowerCase()))
+        : undefined;
+      const loss = publicLoss?.loss ?? vaultLosses[entry.listingId] ?? (listing ? vaultLosses[listing.tokenId] ?? vaultLosses[`token-${listing.tokenId}`] : undefined);
+      return listing && loss ? [{ entry, listing: resolve(listing), loss }] : [];
+    }),
+  [publicLostSlabs, resolve, user?.address, vault, vaultLosses]);
 
-  const visible = filter === "withdrawals" || filter === "found" ? [] : requests.filter((request) => {
+  const visible = category === "submissions" ? requests.filter((request) => {
     if (filter === "progress") return OPEN_SUBMISSION.has(request.status);
+    if (filter === "awaiting") return request.status === 2 || request.status === 3;
     if (filter === "vaulted") return request.status === 4;
-    if (filter === "attention") return request.status === 5;
     return true;
-  });
-  const visibleLocal = filter === "all" || filter === "vaulted" ? localRequests : [];
-  const visibleWithdrawals = filter === "all" || filter === "withdrawals" ? withdrawals : [];
-  const total = requests.length + localRequests.length + withdrawals.length + myCases.length;
+  }) : [];
+  const visibleLocal = category === "submissions" && (filter === "all" || filter === "vaulted") ? localRequests : [];
+  const visibleWithdrawals = category === "withdrawals" ? withdrawals : [];
+  const visibleCases = category === "bounties" ? myCases.filter((c) => {
+    const role = c.owner.toLowerCase() === me ? "owner" : "finder";
+    const actionNeeded = (role === "owner" && c.status === 2) || (role === "owner" && c.status === 4 && c.returnTo === 2 && c.custody === "Shipped") || (role === "finder" && c.status === 4);
+    if (filter === "progress") return c.status >= 1 && c.status <= 4;
+    if (filter === "action") return actionNeeded;
+    if (filter === "completed") return c.status === 5 || c.status === 6;
+    return true;
+  }) : [];
+  const visibleRecovery = category === "recovery" ? recoveryReports.filter(({ listing, loss }) => {
+    const needsDecision = Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`]);
+    if (filter === "progress") return !needsDecision && !loss.published && !loss.resolution;
+    if (filter === "action") return needsDecision;
+    if (filter === "bounty") return Boolean(loss.bounty);
+    return true;
+  }) : [];
+  const total = requests.length + localRequests.length + withdrawals.length + myCases.length + recoveryReports.length;
   const inProgress = requests.filter((request) => OPEN_SUBMISSION.has(request.status)).length;
   const awaitingVault = requests.filter((request) => request.status === 2 || request.status === 3).length;
   const vaulted = requests.filter((request) => request.status === 4).length + localRequests.length;
-  const counts: Record<Filter, number> = {
-    all: total,
-    progress: inProgress,
-    vaulted,
+  const categoryCounts: Record<Category, number> = {
+    submissions: requests.length + localRequests.length,
     withdrawals: withdrawals.length,
-    found: myCases.length,
-    attention: requests.filter((request) => request.status === 5).length,
+    bounties: myCases.length,
+    recovery: recoveryReports.length,
+  };
+  const filterCounts: Record<StatusFilter, number> = {
+    all: categoryCounts[category],
+    progress: category === "submissions" ? inProgress : category === "withdrawals" ? withdrawals.length : category === "bounties" ? myCases.filter((c) => c.status >= 1 && c.status <= 4).length : recoveryReports.filter(({ listing, loss }) => !loss.published && !loss.resolution && !pendingLossDecisions[listing.id] && !pendingLossDecisions[listing.tokenId] && !pendingLossDecisions[`token-${listing.tokenId}`]).length,
+    awaiting: awaitingVault,
+    vaulted,
+    action: category === "bounties" ? myCases.filter((c) => (c.owner.toLowerCase() === me && c.status === 2) || (c.owner.toLowerCase() === me && c.status === 4 && c.returnTo === 2 && c.custody === "Shipped") || (c.finder.toLowerCase() === me && c.status === 4)).length : recoveryReports.filter(({ listing }) => Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`])).length,
+    completed: myCases.filter((c) => c.status === 5 || c.status === 6).length,
+    bounty: recoveryReports.filter(({ loss }) => Boolean(loss.bounty)).length,
+  };
+
+  const submitLossDecision = async () => {
+    if (!decisionTarget || !decisionChoice) return;
+    const { entry, listing, decisionId } = decisionTarget;
+    if (decisionChoice === "bounty") {
+      const amount = Number(decisionBounty);
+      const tokenId = entry.token?.tokenId;
+      if (IS_DEPLOYED && tokenId) {
+        try {
+          await lost.report(listing.id, tokenId, vaultLosses[decisionId]?.details ?? "Lost on its way to the vault", { inTransit: true, bounty: amount });
+        } catch (err) {
+          pushToast({ title: "Could not publish the lost report", body: (err as Error).message, tone: "error" });
+          return;
+        }
+      } else if (Number.isFinite(amount) && amount > 0) {
+        setVaultBounty(decisionId, amount);
+      }
+    }
+    resolveLossDecision(decisionId, decisionChoice === "insurance" ? "insurance" : undefined);
+    setDecisionTarget(null);
+    setDecisionChoice(null);
+    setDecisionBounty("");
+    pushToast({
+      title: decisionChoice === "insurance" ? "Insurance claim submitted" : "Lost-card bounty published",
+      body: decisionChoice === "insurance" ? "The vault service provider will review your claim." : "Your card is now visible on the Lost page.",
+      tone: "success",
+    });
   };
 
   if (!ready) return <SubmissionsSkeleton />;
@@ -122,7 +212,7 @@ export function SubmissionsView() {
     return (
       <LoginPrompt
         icon={<PackageSearch size={26} />}
-        title="Submissions"
+        title="Status Center"
         body="Log in to add slabs and follow every request from submission to vaulting."
       />
     );
@@ -132,43 +222,60 @@ export function SubmissionsView() {
     <div className="px-4 py-5 lg:px-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-[24px] font-bold">Submissions</h1>
+          <h1 className="text-[24px] font-bold">Status Center</h1>
           <p className="mt-1 max-w-2xl text-[13px] text-muted">
             Add slabs and track every request here. Select a request to review the form you submitted.
           </p>
         </div>
-        <AddSlabLink label="Add a slab" />
+        {category === "submissions" ? <AddSlabLink label="Add a slab" /> : null}
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat icon={<FileText size={15} />} label="All requests" value={total} />
+        <Stat icon={<FileText size={15} />} label="Slab submissions" value={categoryCounts.submissions} />
         <Stat icon={<Clock3 size={15} />} label="In progress" value={inProgress} />
-        <Stat icon={<PackageSearch size={15} />} label="Awaiting vault" value={awaitingVault} />
-        <Stat icon={<PackageCheck size={15} />} label="Vaulted" value={vaulted} />
+        <Stat icon={<Truck size={15} />} label="Withdrawals" value={categoryCounts.withdrawals} />
+        <Stat icon={<PackageSearch size={15} />} label="Bounty & recovery" value={categoryCounts.bounties + categoryCounts.recovery} />
       </div>
 
       <div className="no-scrollbar mt-6 flex gap-1 overflow-x-auto border-b border-hairline">
-        {FILTERS.map((item) => (
+        {CATEGORIES.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => { setCategory(item.value); setFilter("all"); }}
+            className={clsx(
+              "relative shrink-0 px-4 py-3 text-[13px] font-bold transition",
+              category === item.value ? "text-white" : "text-muted hover:text-white",
+            )}
+          >
+            {item.label}
+            <span className="ml-1.5 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px]">{categoryCounts[item.value]}</span>
+            {category === item.value ? <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-accent" /> : null}
+          </button>
+        ))}
+      </div>
+
+      <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto">
+        {CATEGORY_FILTERS[category].map((item) => (
           <button
             key={item.value}
             type="button"
             onClick={() => setFilter(item.value)}
             className={clsx(
-              "relative shrink-0 px-4 py-3 text-[13px] font-bold transition",
-              filter === item.value ? "text-white" : "text-muted hover:text-white",
+              "shrink-0 rounded-lg border px-3 py-1.5 text-[12px] font-semibold transition",
+              filter === item.value ? "border-accent bg-accent text-white" : "border-hairline bg-surface text-muted hover:border-white/25 hover:text-white",
             )}
           >
             {item.label}
-            <span className="ml-1.5 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px]">{counts[item.value]}</span>
-            {filter === item.value ? <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-accent" /> : null}
+            <span className="ml-1.5 opacity-75">{filterCounts[item.value]}</span>
           </button>
         ))}
       </div>
 
       <div className="mt-5">
-        {user.address && isPending ? (
+        {category === "submissions" && user.address && isPending ? (
           <div className="space-y-2">{[0, 1, 2].map((item) => <div key={item} className="skeleton h-24 rounded-card" />)}</div>
-        ) : user.address && isError ? (
+        ) : category === "submissions" && user.address && isError ? (
           <div className="rounded-card border border-bad/30 bg-bad/5 px-5 py-8 text-center">
             <TriangleAlert size={22} className="mx-auto text-bad" />
             <p className="mt-2 text-sm font-semibold">Your submissions could not be loaded.</p>
@@ -176,7 +283,7 @@ export function SubmissionsView() {
               Try again
             </button>
           </div>
-        ) : visible.length || visibleLocal.length || visibleWithdrawals.length || visibleCases.length ? (
+        ) : visible.length || visibleLocal.length || visibleWithdrawals.length || visibleCases.length || visibleRecovery.length ? (
           <div className="space-y-6">
           {visibleCases.length ? (
             <section data-testid="found-cases">
@@ -200,6 +307,7 @@ export function SubmissionsView() {
                 <RequestAccordion
                   key={request.submissionId}
                   request={request}
+                  isLost={request.tokenId !== "0" && publicLostSlabs.some((item) => item.listing.tokenId === request.tokenId)}
                   open={openId === request.submissionId}
                   onToggle={() => setOpenId((current) => current === request.submissionId ? null : request.submissionId)}
                 />
@@ -225,38 +333,156 @@ export function SubmissionsView() {
               <WithdrawnList items={visibleWithdrawals} />
             </section>
           ) : null}
+          {visibleRecovery.length ? (
+            <section data-testid="recovery-statuses">
+              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><TriangleAlert size={15} /> Recovery & insurance</h2>
+              <p className="mb-3 text-[12px] text-muted">Updates for vaulting-delay reports, insurance decisions, and any public lost-card bounty.</p>
+              <ul className="space-y-3">
+                {visibleRecovery.map(({ entry, listing, loss }) => (
+                  <RecoveryRow
+                    key={listing.id}
+                    entry={entry}
+                    listing={listing}
+                    loss={loss}
+                    actionNeeded={Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`])}
+                    onReview={() => {
+                      const decisionId = Object.keys(pendingLossDecisions).find(
+                        (id) => id === listing.id || id === listing.tokenId || id === `token-${listing.tokenId}`,
+                      ) ?? listing.id;
+                      setDecisionTarget({ entry, listing, decisionId });
+                    }}
+                  />
+                ))}
+              </ul>
+            </section>
+          ) : null}
           </div>
-        ) : total ? (
+        ) : categoryCounts[category] ? (
           <Empty
-            icon={filter === "attention" ? <CheckCircle2 size={24} /> : <PackageSearch size={24} />}
-            title={filter === "attention" ? "No requests need attention" : "No requests in this view"}
-            body="Choose another filter to see your slab requests."
+            icon={<PackageSearch size={24} />}
+            title="No updates in this view"
+            body="Choose another filter to see a different stage of this workflow."
           />
         ) : (
           <Empty
             icon={<PackageSearch size={24} />}
-            title="No slab submissions yet"
-            body="Start a request for each graded slab you want Pokechain and Collector Crypt to vault. You can submit as many slabs as you need."
-            cta={{ href: "/submit", label: "Add your first slab" }}
+            title={category === "submissions" ? "No slab submissions yet" : `No ${CATEGORIES.find((item) => item.value === category)?.label.toLowerCase()} yet`}
+            body={category === "submissions" ? "Start a request for each graded slab you want Pokechain and Collector Crypt to vault. You can submit as many slabs as you need." : "Updates will appear here when you start this workflow."}
+            cta={category === "submissions" ? { href: "/submit", label: "Add your first slab" } : undefined}
           />
         )}
       </div>
 
-      {total ? <div className="mt-5 flex justify-center"><AddSlabLink label="Add another slab" /></div> : null}
+      <Modal
+        open={Boolean(decisionTarget)}
+        onClose={() => { setDecisionTarget(null); setDecisionChoice(null); setDecisionBounty(""); }}
+        title="Investigation complete"
+        width="max-w-sm"
+      >
+        {decisionTarget ? (
+          <div className="space-y-4 p-5">
+            <p className="text-[13px] leading-relaxed text-muted">
+              The vault team confirmed that <span className="font-semibold text-white">{decisionTarget.listing.title}</span> was lost while being processed. How would you like to proceed?
+            </p>
+            <div className="grid gap-2">
+              <button className={clsx("rounded-xl border p-3 text-left", decisionChoice === "insurance" ? "border-accent bg-accent/10" : "border-hairline")} onClick={() => setDecisionChoice("insurance")}>
+                <p className="text-[13px] font-bold">Claim vault-service insurance</p>
+                <p className="mt-1 text-[11px] text-muted">Request settlement directly from the service provider.</p>
+              </button>
+              <button className={clsx("rounded-xl border p-3 text-left", decisionChoice === "bounty" ? "border-accent bg-accent/10" : "border-hairline")} onClick={() => setDecisionChoice("bounty")}>
+                <p className="text-[13px] font-bold">Publish a lost-card bounty</p>
+                <p className="mt-1 text-[11px] text-muted">Keep searching and offer USDC if someone returns it.</p>
+              </button>
+            </div>
+            {decisionChoice === "bounty" ? (
+              <Field label="Recovery bounty (USDC)" hint="Optional">
+                <input className={inputClass} inputMode="decimal" value={decisionBounty} onChange={(event) => setDecisionBounty(event.target.value.replace(/[^\d.]/g, ""))} placeholder="e.g. 150" />
+              </Field>
+            ) : null}
+            <Button className="w-full" onClick={() => void submitLossDecision()} disabled={!decisionChoice}>
+              {decisionChoice === "insurance" ? "Submit insurance claim" : decisionChoice === "bounty" ? "Publish lost card" : "Choose an outcome"}
+            </Button>
+          </div>
+        ) : null}
+      </Modal>
+
+      {category === "submissions" && total ? <div className="mt-5 flex justify-center"><AddSlabLink label="Add another slab" /></div> : null}
     </div>
+  );
+}
+
+function RecoveryRow({
+  entry,
+  listing,
+  loss,
+  actionNeeded,
+  onReview,
+}: {
+  entry: VaultItem;
+  listing: Listing;
+  loss: VaultLossReport;
+  actionNeeded: boolean;
+  onReview: () => void;
+}) {
+  const state = actionNeeded
+    ? "Pokechain has completed its review — choose insurance or publish a lost-card bounty."
+    : loss.resolution === "insurance"
+      ? "Your vault-service insurance claim has been submitted for off-chain review."
+    : loss.published
+      ? loss.bounty
+        ? "Public lost-card bounty is active. You can edit the bounty or withdraw it from Vault."
+        : "Public lost-card report is active. You can add a bounty or withdraw it from Vault."
+      : "Your vaulting-delay report is under review by Pokechain.";
+
+  return (
+    <li className="rounded-card border border-hairline bg-surface p-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <Link href={`/asset/${listing.id}`} className="w-10 shrink-0">
+          <span className="block h-14 w-10 overflow-hidden rounded-md bg-surface-2">
+            <Slab listing={listing} flat />
+          </span>
+        </Link>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href={`/asset/${listing.id}`} className="line-clamp-1 text-[13px] font-semibold hover:underline">{listing.title}</Link>
+            <span className={clsx("rounded-md px-2 py-1 text-[11px] font-semibold", actionNeeded ? "bg-warn/15 text-warn" : loss.resolution === "insurance" ? "bg-good-bg text-good" : loss.published ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted")}>
+              {actionNeeded ? "Action needed" : loss.resolution === "insurance" ? "Insurance submitted" : loss.published ? "Lost-card report active" : "Under review"}
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] text-muted">{state}</p>
+          <p className="mt-2 text-[11px] text-dim">Reported <TimeAgo value={loss.reportedAt} /> · Token #{entry.token?.tokenId ?? listing.tokenId}</p>
+          {loss.details ? <p className="mt-2 rounded-lg bg-surface-2 px-3 py-2 text-[12px] text-muted">{loss.details}</p> : null}
+        </div>
+        {actionNeeded ? (
+          <Button size="sm" onClick={onReview}>Review reply</Button>
+        ) : loss.published ? (
+          <Link href="/vault?tab=lost" className="rounded-lg border border-hairline px-3 py-2 text-[12px] font-semibold text-white transition hover:border-white/30 hover:bg-surface-2">
+            Manage in Vault
+          </Link>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
 function RequestAccordion({
   request,
+  isLost,
   open,
   onToggle,
 }: {
   request: SubmissionRequest;
+  isLost: boolean;
   open: boolean;
   onToggle: () => void;
 }) {
   const preview = certPreview(request.grader, request.certNumber);
+  const previewListing = makeSubmittedListing({
+    grader: request.grader,
+    certNumber: request.certNumber,
+    owner: request.owner,
+    nowMs: request.requestedAt * 1000,
+  });
 
   return (
     <li data-testid={`request-${request.certNumber}`}>
@@ -268,13 +494,7 @@ function RequestAccordion({
         className="grid w-full grid-cols-1 gap-3 px-4 py-4 text-left transition hover:bg-white/[0.035] md:grid-cols-[minmax(240px,1.25fr)_minmax(210px,1fr)_150px_28px] md:items-center md:gap-4"
       >
         <div className="flex min-w-0 items-center gap-3">
-          {preview ? (
-            <span className="relative block h-14 w-10 shrink-0 overflow-hidden rounded-md bg-surface-2">
-              <Image src={preview.thumb} alt="" fill sizes="40px" className="object-cover" />
-            </span>
-          ) : (
-            <span className="grid h-14 w-10 shrink-0 place-items-center rounded-md bg-surface-2 text-dim"><FileText size={17} /></span>
-          )}
+          <SubmissionThumbnail listing={previewListing} hasPreview={Boolean(preview)} />
           <span className="min-w-0">
             <span className="block truncate text-[13px] font-bold">{request.grader} cert {request.certNumber}</span>
             <span className="mt-1 block text-[11.5px] text-dim">
@@ -288,8 +508,20 @@ function RequestAccordion({
         <span className="hidden text-[11.5px] text-muted md:block"><TimeAgo value={request.requestedAt * 1000} /></span>
         <ChevronDown size={17} className={clsx("justify-self-end text-dim transition", open && "rotate-180 text-white")} />
       </button>
-      {open ? <SubmissionFormDetails request={request} /> : null}
+      {open ? <SubmissionFormDetails request={request} isLost={isLost} /> : null}
     </li>
+  );
+}
+
+/** Show the same graded slab treatment used throughout Vault, at thumbnail scale. */
+function SubmissionThumbnail({ listing, hasPreview }: { listing: Listing | null; hasPreview: boolean }) {
+  if (!listing || !hasPreview) {
+    return <span className="grid h-14 w-10 shrink-0 place-items-center rounded-md bg-surface-2 text-dim"><FileText size={17} /></span>;
+  }
+  return (
+    <span className="block h-14 w-10 shrink-0 overflow-hidden rounded-md bg-surface-2">
+      <Slab listing={listing} flat />
+    </span>
   );
 }
 
@@ -314,9 +546,11 @@ function LocalRequestAccordion({
         className="grid w-full grid-cols-1 gap-3 px-4 py-4 text-left transition hover:bg-white/[0.035] md:grid-cols-[minmax(240px,1.25fr)_minmax(210px,1fr)_150px_28px] md:items-center md:gap-4"
       >
         <div className="flex min-w-0 items-center gap-3">
-          <span className="relative block h-14 w-10 shrink-0 overflow-hidden rounded-md bg-surface-2">
-            <Image src={listing.thumb} alt="" fill sizes="40px" className="object-cover" />
-          </span>
+          <span
+            aria-hidden
+            className="block h-14 w-10 shrink-0 rounded-md bg-surface-2 bg-cover bg-center"
+            style={{ backgroundImage: `url(${listing.thumb})` }}
+          />
           <span className="min-w-0">
             <span className="block truncate text-[13px] font-bold">{listing.grader} cert {listing.certNumber}</span>
             <span className="mt-1 block text-[11.5px] text-dim">Demo submission</span>
@@ -343,17 +577,21 @@ function LocalRequestAccordion({
 function ProgressTimeline({ status }: { status: number }) {
   const completed = status === 5 ? 0 : Math.min(status, TIMELINE_STEPS.length);
   return (
-    <ol className="flex min-w-0 items-start gap-1.5 pt-1 md:pt-0">
+    <ol className="grid min-w-0 grid-cols-4 pt-1 md:pt-0">
       {TIMELINE_STEPS.map((step, index) => {
         const done = index < completed;
         return (
-          <li key={step} className={clsx("flex min-w-0 flex-col gap-1", index < TIMELINE_STEPS.length - 1 ? "flex-1" : "shrink-0")}>
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className={clsx("grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[9px] font-bold", done ? "border-good/70 bg-good/10 text-good" : "border-hairline text-dim")}>
-                {done ? <Check size={11} /> : index + 1}
-              </span>
-              {index < TIMELINE_STEPS.length - 1 ? <span className={clsx("h-px min-w-2 flex-1", index < completed - 1 ? "bg-good/60" : "bg-hairline")} /> : null}
-            </div>
+          <li key={step} className="relative flex min-w-0 flex-col items-center gap-1 text-center">
+            {index < TIMELINE_STEPS.length - 1 ? (
+              <span
+                aria-hidden
+                className={clsx("absolute top-[9.5px] h-px", index < completed - 1 ? "bg-good/60" : "bg-hairline")}
+                style={{ left: "calc(50% + 10px)", width: "calc(100% - 20px)" }}
+              />
+            ) : null}
+            <span className={clsx("relative z-10 grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[9px] font-bold", done ? "border-good/70 bg-good/10 text-good" : "border-hairline bg-surface text-dim")}>
+              {done ? <Check size={11} /> : index + 1}
+            </span>
             <span className={clsx("whitespace-nowrap text-[10px] font-semibold leading-none", done ? "text-good" : "text-dim")}>{step}</span>
           </li>
         );
@@ -362,7 +600,7 @@ function ProgressTimeline({ status }: { status: number }) {
   );
 }
 
-function SubmissionFormDetails({ request }: { request: SubmissionRequest }) {
+function SubmissionFormDetails({ request, isLost }: { request: SubmissionRequest; isLost: boolean }) {
   const evidence = useQuery({
     queryKey: ["submission-evidence", request.evidenceHash],
     queryFn: async (): Promise<EvidenceResponse> => {
@@ -425,16 +663,18 @@ function SubmissionFormDetails({ request }: { request: SubmissionRequest }) {
       {request.tokenId !== "0" && request.status !== 5 ? (
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <span className="mr-auto text-[11.5px] text-muted">
-            {request.status === 4
+            {isLost
+              ? `NFT #${request.tokenId} has an active lost-card report and is managed in your Vault's Lost section.`
+              : request.status === 4
               ? `NFT #${request.tokenId} is vaulted and unlocked in your Vault.`
               : `NFT #${request.tokenId} was minted when Pokechain received the slab. It waits in your Vault, locked, until Collector Crypt vaults it.`}
           </span>
-          {/* One way in: while it is being vaulted, the Vault's Awaiting vault tab; once vaulted, the Vault. */}
+          {/* Route to the Vault section that reflects the slab's current custody state. */}
           <Link
-            href={request.status === 4 ? "/vault" : "/vault?tab=awaiting"}
+            href={isLost ? "/vault?tab=lost" : request.status === 4 ? "/vault" : "/vault?tab=awaiting"}
             className="inline-flex h-9 items-center rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-white transition hover:bg-accent-hover"
           >
-            View Pending NFT
+            {isLost ? "View lost slab" : request.status === 4 ? "View Vaulted NFT" : "View Pending NFT"}
           </Link>
         </div>
       ) : null}

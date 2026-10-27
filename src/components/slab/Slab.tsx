@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import Image from "next/image";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { hashString } from "@/lib/rng";
 import type { Listing } from "@/lib/types";
 import { CardBack } from "./CardBack";
@@ -108,16 +108,9 @@ export function Slab({
               <div
                 className="relative h-full w-full overflow-hidden rounded-[3.4cqw] bg-cover bg-center"
                 // the small scan paints instantly while the hi-res one loads
-                style={flat ? undefined : { backgroundImage: `url(${listing.thumb})` }}
+                style={{ backgroundImage: `url(${listing.thumb})` }}
               >
-                <Image
-                  src={flat ? listing.thumb : listing.image}
-                  alt={`${listing.subject}, ${listing.set} ${listing.cardNumber}`}
-                  fill
-                  sizes={flat ? "64px" : sizes}
-                  className="object-cover"
-                  draggable={false}
-                />
+                <CardScan listing={listing} flat={flat} sizes={sizes} />
                 {!flat && listing.holo ? <div className="slab-foil" aria-hidden /> : null}
                 {!flat ? <div className="slab-card-glare" aria-hidden /> : null}
               </div>
@@ -132,6 +125,25 @@ export function Slab({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The CSS thumbnail remains visible if Next's remote image request fails, without exposing broken-image alt text. */
+function CardScan({ listing, flat, sizes }: { listing: Listing; flat: boolean; sizes: string }) {
+  const src = flat ? listing.thumb : listing.image;
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (failedSrc === src) return null;
+
+  return (
+    <Image
+      src={src}
+      alt=""
+      fill
+      sizes={flat ? "64px" : sizes}
+      className="object-cover"
+      draggable={false}
+      onError={() => setFailedSrc(src)}
+    />
   );
 }
 

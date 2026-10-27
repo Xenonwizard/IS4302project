@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { usePublicClient } from "wagmi";
+import { getListing } from "@/lib/catalog";
 import { SUBMISSION_STATUS, contracts } from "@/lib/chain/config";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { useStore } from "@/lib/store";
@@ -22,7 +23,7 @@ const STEP_COPY: Record<Step, { title: string; expectedStatus: number; path: str
 export function IntakeSimulator() {
   const client = usePublicClient();
   const queryClient = useQueryClient();
-  const { pushToast, user, slabs, vault, vaultLosses, completeLossInvestigation } = useStore();
+  const { pushToast, user, vault, vaultLosses, pendingLossDecisions, resolve, completeLossInvestigation } = useStore();
   const { submit } = useSlabChain();
   const [certNumber, setCertNumber] = useState("");
   const [busy, setBusy] = useState<Step | null>(null);
@@ -97,19 +98,18 @@ export function IntakeSimulator() {
   };
 
   const activeSubmission = submission && submission.status !== 0 ? submission : null;
-  const lossTokenId = activeSubmission?.tokenId ? String(activeSubmission.tokenId) : null;
-  const lossListing = lossTokenId ? slabs.find((slab) => slab.tokenId === lossTokenId) : undefined;
-  const lossVaultItem = lossTokenId ? vault.find((item) => item.token?.tokenId === lossTokenId) : undefined;
-  const reportedLossId = lossTokenId
-    ? Object.keys(vaultLosses).find((id) => id === lossTokenId || id === `token-${lossTokenId}` || id === lossListing?.id || id === lossVaultItem?.listingId)
-    : undefined;
-  const simulateInvestigation = () => {
-    if (!reportedLossId) {
-      pushToast({ title: "Report required", body: "Submit a vaulting-delay report from your Vault before running the investigation simulation.", tone: "error" });
-      return;
-    }
-    completeLossInvestigation(reportedLossId);
-  };
+  const reportedDelays = Object.entries(vaultLosses).flatMap(([reportId, loss]) => {
+    if (loss.published || pendingLossDecisions[reportId]) return [];
+    const entry = vault.find((item) =>
+      item.listingId === reportId ||
+      item.token?.tokenId === reportId ||
+      (item.token?.tokenId ? `token-${item.token.tokenId}` === reportId : false),
+    );
+    const listing = getListing(entry?.listingId ?? reportId);
+    const reportCertNumber = loss.certNumber ?? listing?.certNumber;
+    if (!valid || reportCertNumber !== certNumber.trim()) return [];
+    return [{ reportId, loss, listing: listing ? resolve(listing) : null }];
+  });
   const unknown = !activeSubmission;
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
@@ -174,11 +174,21 @@ export function IntakeSimulator() {
         })}
       </div>
 
-      {activeSubmission && reportedLossId ? (
+      {reportedDelays.length ? (
         <section className="mt-6 rounded-card border border-warn/25 bg-warn/5 p-4">
           <p className="text-[15px] font-bold">Investigation simulator</p>
           <p className="mt-1 text-[12px] leading-relaxed text-muted">A vaulting-delay report has been submitted. Simulate the vault team completing its investigation.</p>
-          <Button className="mt-3" variant="secondary" onClick={simulateInvestigation}>Simulate investigation</Button>
+          <ul className="mt-3 space-y-2">
+            {reportedDelays.map(({ reportId, loss, listing }) => (
+              <li key={reportId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-surface p-3">
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-semibold">{listing?.title ?? `Reported slab ${reportId}`}</p>
+                  <p className="mt-1 line-clamp-1 text-[11px] text-muted">{loss.details}</p>
+                </div>
+                <Button size="sm" variant="secondary" onClick={() => completeLossInvestigation(reportId)}>Simulate investigation</Button>
+              </li>
+            ))}
+          </ul>
         </section>
       ) : null}
 

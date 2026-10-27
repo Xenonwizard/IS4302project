@@ -124,6 +124,10 @@ export interface VaultItem {
 export interface VaultLossReport {
   reportedAt: string;
   details: string;
+  /** Certification number of the exact slab under investigation. */
+  certNumber?: string;
+  /** Collector's response after Pokechain completes the investigation. */
+  resolution?: "insurance";
   /** False while this is only a private vaulting-delay report; true once published to the Lost registry. */
   published?: boolean;
   /** Lost in the post (inbound or outbound), so SlabVault custody is Lost too. Otherwise CC lost it in the vault. */

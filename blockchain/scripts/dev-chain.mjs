@@ -11,12 +11,31 @@
  * The node keeps state in memory only, so every run starts from block 0 with the same addresses.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RPC = "http://127.0.0.1:8545";
+// Hardhat 3 loads TypeScript through tsx. In this Windows environment Node's
+// native os.userInfo() call can fail before Hardhat starts, even though the
+// username and home directory are available as environment variables. Preload
+// a narrowly-scoped fallback for the child Node processes that run Hardhat.
+const userInfoShim = join(root, "scripts", "node-user-info-shim.cjs");
+const userInfoShimOptionPath = userInfoShim.replaceAll("\\", "/");
+process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} --require "${userInfoShimOptionPath}"`.trim();
+// Keep this project's compiler cache out of the user-wide Hardhat cache. Another
+// Hardhat process can otherwise hold its compiler-download mutex and prevent a
+// local chain from deploying. Reuse any already-downloaded compiler binaries.
+const originalLocalAppData = process.env.LOCALAPPDATA ?? join(process.env.USERPROFILE ?? root, "AppData", "Local");
+const projectLocalAppData = join(root, "cache", "hardhat-appdata");
+const sharedCompilerCache = join(originalLocalAppData, "hardhat-nodejs", "Cache", "compilers-v3");
+const projectCompilerCache = join(projectLocalAppData, "hardhat-nodejs", "Cache", "compilers-v3");
+if (!existsSync(projectCompilerCache) && existsSync(sharedCompilerCache)) {
+  mkdirSync(dirname(projectCompilerCache), { recursive: true });
+  cpSync(sharedCompilerCache, projectCompilerCache, { recursive: true });
+}
+process.env.LOCALAPPDATA = projectLocalAppData;
 // On Windows, npm and npx are .cmd scripts that only start through a shell.
 const shell = process.platform === "win32";
 

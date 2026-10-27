@@ -107,7 +107,7 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
           <p className="text-[15px] font-bold">Withdrawal requested</p>
           <p className="text-[13px] text-muted">
             Your token is locked on-chain with the hash of your address. Pokechain now notifies Collector Crypt to
-            release and ship the card. Track it under Submissions → Withdrawals (or your Vault&apos;s Withdrawn tab):
+            release and ship the card. Track it under Status Center → Withdrawals (or your Vault&apos;s Withdrawn tab):
             confirm delivery there, or report it lost if it never arrives.
           </p>
           <div className="flex justify-center gap-2">

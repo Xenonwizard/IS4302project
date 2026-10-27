@@ -259,11 +259,11 @@ interface StoreValue extends PersistShape {
   withdrawOffer: (negotiationId: string, offerId: string) => void;
   fileLostReport: (negotiationId: string, item: LostItem, tracking: string, details: string) => LostReport;
   /* vault missing reports and their optional bounties */
-  reportVaultLost: (listingId: string, details: string, inTransit?: boolean) => void;
+  reportVaultLost: (listingId: string, details: string, inTransit?: boolean, certNumber?: string) => void;
   /** A slab reported lost on-chain: take it off sale here and close buyers' chats. The report itself is on SlabVault. */
   delistLostSlab: (listingId: string) => void;
   completeLossInvestigation: (listingId: string) => void;
-  resolveLossDecision: (listingId: string) => void;
+  resolveLossDecision: (listingId: string, outcome?: "insurance") => void;
   cancelVaultLost: (listingId: string) => void;
   withdrawLostForInsurance: (listingId: string) => void;
   setVaultBounty: (listingId: string, amount: number) => void;
@@ -1964,7 +1964,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const reportVaultLost = useCallback(
-    (listingId: string, details: string, inTransit = false) => {
+    (listingId: string, details: string, inTransit = false, certNumber?: string) => {
       setState((prev) => {
         if (!prev.vault.some((item) => item.listingId === listingId)) return prev;
         const negotiations = closeSellerChats(
@@ -1986,7 +1986,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           },
           vaultLosses: {
             ...prev.vaultLosses,
-            [listingId]: { reportedAt: new Date().toISOString(), details, published: false, inTransit },
+            [listingId]: {
+              reportedAt: new Date().toISOString(),
+              details,
+              certNumber: certNumber ?? getListing(listingId)?.certNumber,
+              published: false,
+              inTransit,
+            },
           },
         };
       });
@@ -2025,11 +2031,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     pushToast({ title: "Investigation complete", body: "A decision is waiting in your Vault.", tone: "success" });
   }, [pushToast]);
 
-  const resolveLossDecision = useCallback((listingId: string) => {
+  const resolveLossDecision = useCallback((listingId: string, outcome?: "insurance") => {
     setState((prev) => {
       const pending = { ...prev.pendingLossDecisions };
       delete pending[listingId];
-      return { ...prev, pendingLossDecisions: pending };
+      const report = prev.vaultLosses[listingId];
+      return {
+        ...prev,
+        pendingLossDecisions: pending,
+        vaultLosses: outcome === "insurance" && report
+          ? { ...prev.vaultLosses, [listingId]: { ...report, resolution: "insurance" } }
+          : prev.vaultLosses,
+      };
     });
   }, []);
 

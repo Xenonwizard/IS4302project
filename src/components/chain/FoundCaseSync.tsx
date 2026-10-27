@@ -9,7 +9,7 @@ import { useStore } from "@/lib/store";
 const UPDATES: Record<"owner" | "finder", Partial<Record<number, (c: FoundCase) => string>>> = {
   owner: {
     1: () => "Someone found your lost slab and is sending it to Pokechain.",
-    2: () => "Your found slab was authenticated. Choose vault or delivery in Submissions.",
+    2: () => "Your found slab was authenticated. Choose vault or delivery in Status Center.",
     4: (c) => (c.returnTo === 1 ? "Your slab is back at Pokechain and is being re-vaulted at Collector Crypt." : "Your slab is on its way. Confirm when it arrives."),
     5: (c) => `The finder collected the ${usd(c.paid, { cents: true })} bounty. Case closed.`,
   },
