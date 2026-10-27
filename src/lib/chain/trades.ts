@@ -15,7 +15,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { keccak256, parseEventLogs, toBytes, zeroAddress, type Address, type TransactionReceipt } from "viem";
-import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { usePublicClient } from "wagmi";
 import { CUSTODY, DEPLOY_BLOCK, IS_DEPLOYED, OFFER_STATUS, contracts, fromUsdcUnits, toUsdcUnits, type OfferStatusName } from "./config";
 import { useChainTx } from "./useChainTx";
 
@@ -83,22 +83,11 @@ export function useTradeRefresh() {
   }, [queryClient]);
 }
 
-/** Refreshes when anything happens in TradeEscrow, so both sides see an offer within seconds. */
-export function useTradeEvents(enabled: boolean) {
-  const refresh = useTradeRefresh();
-  const watch = { ...contracts.tradeEscrow, enabled, onLogs: refresh };
-  useWatchContractEvent({ ...watch, eventName: "OfferCreated" });
-  useWatchContractEvent({ ...watch, eventName: "OfferAccepted" });
-  useWatchContractEvent({ ...watch, eventName: "OfferDeclined" });
-  useWatchContractEvent({ ...watch, eventName: "OfferWithdrawn" });
-}
-
 export function useTradeSlabs(owner: Address | undefined) {
   const client = usePublicClient();
   return useQuery({
     queryKey: ["trade-slabs", owner],
     enabled: Boolean(client && owner),
-    refetchInterval: 10_000,
     queryFn: async (): Promise<TradeSlab[]> => {
       const incoming = await client!.getContractEvents({
         ...contracts.slabVault,
@@ -186,7 +175,6 @@ export function useTradeOffers(me: Address | undefined, other?: Address) {
   return useQuery({
     queryKey: ["trade-offers", me, other],
     enabled: Boolean(client && me),
-    refetchInterval: 8000,
     queryFn: async () => {
       const all = await readOffers(client!, me!);
       const lower = other?.toLowerCase();
@@ -203,7 +191,6 @@ export function useEscrowedByMe(me: Address | undefined) {
   return useQuery({
     queryKey: ["escrowed-by-me", me],
     enabled: Boolean(client && me),
-    refetchInterval: 8000,
     queryFn: async () => {
       const offers = await readOffers(client!, me!);
       const held: Record<string, { offerId: string; taker: Address; room: string }> = {};
@@ -221,7 +208,6 @@ export function useCollectors(me: Address | undefined) {
   return useQuery({
     queryKey: ["collectors", me],
     enabled: Boolean(client),
-    refetchInterval: 15_000,
     queryFn: async () => {
       const opened = await client!.getContractEvents({ ...contracts.accounts, eventName: "AccountOpened", fromBlock: DEPLOY_BLOCK });
       const addrs = [...new Set(opened.map((e) => e.args.account!))].filter((a) => a !== me);
@@ -262,11 +248,9 @@ export interface TradedSlab {
  */
 export function useTradedSlabs() {
   const client = usePublicClient();
-  useTradeEvents(true);
   return useQuery({
     queryKey: ["trade-offers", "traded-slabs"],
     enabled: Boolean(client),
-    refetchInterval: 10_000,
     queryFn: async (): Promise<Record<string, TradedSlab>> => {
       const logs = await client!.getContractEvents({ ...contracts.tradeEscrow, eventName: "OfferAccepted", fromBlock: DEPLOY_BLOCK });
       const offers = await Promise.all(logs.map((l) => client!.readContract({ ...contracts.tradeEscrow, functionName: "offerOf", args: [l.args.offerId!] })));

@@ -1,9 +1,9 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { zeroAddress } from "viem";
-import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { usePublicClient } from "wagmi";
 import { CUSTODY, DEPLOY_BLOCK, chain, contracts, fromUsdcUnits } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { certPreview } from "@/lib/catalog";
@@ -23,9 +23,8 @@ import type { Grader } from "@/lib/types";
  *   - a slab of yours locked in one of your open trade offers is held by TradeEscrow, but it is
  *     still yours until the other side accepts, so it stays in your Vault (marked "In offer").
  *
- * It also subscribes to SlabVault's `Transfer` events and SlabMarket's listing events for this wallet
- * (useWatchContractEvent, which polls eth_getFilterChanges), so a slab someone sends you, or a
- * listing change, shows up within seconds.
+ * ChainBlockSync re-runs this read whenever a new block is mined, so a slab someone sends you, or a
+ * listing change, shows up within a second.
  */
 export function ChainVaultSync() {
   const { user, ready, vault, syncChainSlabs } = useStore();
@@ -33,15 +32,6 @@ export function ChainVaultSync() {
   const client = usePublicClient();
   const addrLower = address?.toLowerCase();
   const enabled = Boolean(ready && client && address && user?.address?.toLowerCase() === addrLower);
-  const queryClient = useQueryClient();
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["owned-slabs", addrLower] });
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { to: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "Transfer", args: { from: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
-  // Vaulting doesn't move the token, so watch for it too: the slab unlocks in the Vault straight away.
-  useWatchContractEvent({ ...contracts.slabVault, eventName: "SlabVaulted", args: { owner: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardListed", args: { seller: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "ListingCancelled", args: { seller: address }, enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
-  useWatchContractEvent({ ...contracts.slabMarket, eventName: "CardPurchased", enabled, poll: true, pollingInterval: 1000, onLogs: refresh });
 
   // Tokens the Vault already lists: keep ref updated to avoid re-triggering queryKey
   const knownIds = vault.flatMap((v) => (v.token ? [v.token.tokenId] : [])).sort().join(",");
@@ -53,8 +43,6 @@ export function ChainVaultSync() {
   const { data } = useQuery({
     queryKey: ["owned-slabs", addrLower],
     enabled,
-    refetchInterval: 3000,
-    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     queryFn: async (): Promise<{ owned: ChainSlab[]; ownedByOthers: string[] }> => {
       const vaultCode = await client!.getBytecode({ address: contracts.slabVault.address }).catch(() => null);
@@ -90,12 +78,14 @@ export function ChainVaultSync() {
       // A token whose ownerOf call now fails was reverted out of the current chain history.
       // Treat it like a token held elsewhere so the local Vault mirror removes it. The
       // contract-code check above still prevents a temporarily offline node from clearing state.
-      // Exception: a token burned because its owner confirmed delivery. Keep it in the
-      // Withdrawn tab as the record of the slab that left the vault.
+      // Exception: a token its owner burned, by confirming delivery (kept in the Withdrawn tab) or
+      // by writing it off for insurance (kept in Status Center), as the record of that slab.
       const deliveredBurn = await Promise.all(
         ids.map((id, i) =>
           owners[i] === null
-            ? client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }).then((s) => CUSTODY[s.custody] === "Delivered").catch(() => false)
+            ? client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] })
+                .then((s) => CUSTODY[s.custody] === "Delivered" || CUSTODY[s.custody] === "Written off")
+                .catch(() => false)
             : false,
         ),
       );

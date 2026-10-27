@@ -40,11 +40,13 @@ function gradeLabel(key: string) {
 
 export async function GET(request: NextRequest) {
   const token = process.env.POKEMON_PRICE_TRACKER_API_KEY?.trim();
+  // An optional key that isn't set is a setup state, not a server error: 200, so the asset page
+  // shows the setup hint without a failed request in the console.
   if (!token) {
     return Response.json({
       error: "Add a free PokémonPriceTracker API key to .env.local to load graded-card sale prices.",
       setupRequired: true,
-    }, { status: 503 });
+    });
   }
 
   const subject = clean(request.nextUrl.searchParams.get("subject"), 100);

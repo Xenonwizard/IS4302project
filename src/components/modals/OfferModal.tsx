@@ -43,7 +43,7 @@ export function OfferModal({
             <span className="font-semibold text-white">{listing.owner}</span> is a collector on Pokechain. Offers to them are made in a private
             chat: pick slabs from both vaults and choose any cash to add. Review comparable Pokechain listings and transactions before agreeing to a trade.
           </p>
-          <dl className="grid grid-cols-2 gap-2 text-center text-[12px]">
+          <dl className={loanEnabled ? "grid grid-cols-2 gap-2 text-center text-[12px]" : "mx-auto grid w-1/2 min-w-[180px] gap-2 text-center text-[12px]"}>
             <Fact label="Seller asking price" value={listing.price > 0 ? usd(listing.price, { cents: true }) : "Not listed"} />
             {loanEnabled ? <Fact label="Minimum loan" value={usd(loanListing.loanAsk, { cents: true })} /> : null}
           </dl>
@@ -93,7 +93,7 @@ export function OfferModal({
           {editing ? " Your new offer replaces the old one." : ""}
         </p>
 
-        <dl className="mb-4 grid grid-cols-2 gap-2 text-center text-[12px]">
+        <dl className="mx-auto mb-4 grid w-1/2 min-w-[180px] gap-2 text-center text-[12px]">
           <Fact label="Asking" value={usd(listing.price, { cents: true })} />
         </dl>
 

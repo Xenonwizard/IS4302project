@@ -28,7 +28,6 @@ export function ChainHistory({ address }: { address: Address }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["chain-history", address],
     enabled: Boolean(client),
-    refetchInterval: 10_000,
     queryFn: async (): Promise<Row[]> => {
       const from = { fromBlock: DEPLOY_BLOCK };
       const [accountEvents, vaultEvents, sentOut, received] = await Promise.all([

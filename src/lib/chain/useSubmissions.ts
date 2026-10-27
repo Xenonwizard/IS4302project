@@ -1,7 +1,7 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { usePublicClient, useWatchContractEvent } from "wagmi";
+import { useQuery } from "@tanstack/react-query";
+import { usePublicClient } from "wagmi";
 import type { Grader } from "../types";
 import { DEPLOY_BLOCK, contracts } from "./config";
 import { useOnchainAccount } from "./useOnchainAccount";
@@ -27,28 +27,11 @@ export interface SubmissionRequest {
 export function useSubmissions() {
   const { address } = useOnchainAccount();
   const client = usePublicClient();
-  const queryClient = useQueryClient();
   const enabled = Boolean(address && client);
-
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["submissions", address] });
-  const watch = {
-    ...contracts.slabVault,
-    enabled,
-    poll: true as const,
-    pollingInterval: 1_000,
-    onLogs: refresh,
-  };
-  useWatchContractEvent({ ...watch, eventName: "SubmissionRequested", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SubmissionReceived", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SubmissionForwarded", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SubmissionRejected", args: { owner: address } });
-  useWatchContractEvent({ ...watch, eventName: "SlabVaulted", args: { owner: address } });
 
   return useQuery({
     queryKey: ["submissions", address],
     enabled,
-    refetchInterval: 3_000,
-    refetchIntervalInBackground: true,
     queryFn: async (): Promise<SubmissionRequest[]> => {
       const [requested, rejected] = await Promise.all([
         client!.getContractEvents({

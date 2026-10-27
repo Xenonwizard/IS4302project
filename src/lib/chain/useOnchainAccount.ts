@@ -13,8 +13,8 @@ export function useOnchainAccount() {
   const who = address ?? zeroAddress;
   const enabled = Boolean(address) && IS_DEPLOYED;
 
-  // Can we reach the chain at all? A stopped `npm run chain` fails this within one poll.
-  const { isError: unreachable } = useBlockNumber({ query: { refetchInterval: 5000, retry: false } });
+  // Can we reach the chain at all? A stopped `npm run chain` fails this within one 15s check.
+  const { isError: unreachable } = useBlockNumber({ query: { refetchInterval: 15_000, retry: false } });
 
   // Is there contract code at the registry address? A restarted local chain has none until redeploy.
   const { data: code, isFetched: codeChecked } = useBytecode({ address: contracts.accounts.address, query: { enabled: IS_DEPLOYED } });
@@ -27,7 +27,7 @@ export function useOnchainAccount() {
       { ...contracts.slabVault, functionName: "vaultedCount", args: [who] },
       { ...contracts.usdc, functionName: "allowance", args: [who, contracts.accounts.address] },
     ],
-    query: { enabled, refetchInterval: 8000 },
+    query: { enabled },
   });
   const { data: gas, refetch: refetchGas } = useBalance({ address, query: { enabled: Boolean(address) } });
 

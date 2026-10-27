@@ -34,7 +34,7 @@ export function WithdrawnList({
   const tokenIds = items.map((i) => BigInt(i.entry.token?.tokenId ?? 0));
   const { data, refetch } = useReadContracts({
     contracts: tokenIds.map((id) => ({ ...contracts.slabVault, functionName: "slabOf" as const, args: [id] as const })),
-    query: { enabled: tokenIds.length > 0, refetchInterval: 8000 },
+    query: { enabled: tokenIds.length > 0 },
   });
 
   return (

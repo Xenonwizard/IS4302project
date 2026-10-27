@@ -35,8 +35,6 @@ export function IntakeSimulator() {
     queryKey: ["intake-submission", certNumber],
     enabled: Boolean(client && valid),
     retry: false,
-    // Live: a step run with curl from a terminal, or a request made on /submit, shows up here by itself.
-    refetchInterval: 1_500,
     queryFn: async () => client!.readContract({ ...contracts.slabVault, functionName: "submissionOf", args: [BigInt(certNumber)] }),
   });
 
@@ -99,7 +97,7 @@ export function IntakeSimulator() {
 
   const activeSubmission = submission && submission.status !== 0 ? submission : null;
   const reportedDelays = Object.entries(vaultLosses).flatMap(([reportId, loss]) => {
-    if (loss.published || pendingLossDecisions[reportId]) return [];
+    if (loss.published || loss.resolution || pendingLossDecisions[reportId]) return [];
     const entry = vault.find((item) =>
       item.listingId === reportId ||
       item.token?.tokenId === reportId ||

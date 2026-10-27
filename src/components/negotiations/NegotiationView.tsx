@@ -10,9 +10,9 @@ import { usePublicClient } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
 import { contracts } from "@/lib/chain/config";
-import { useHandleAddress, useTradeEvents, useTradeFeeBps, useTradeOffers } from "@/lib/chain/trades";
+import { useHandleAddress, useTradeFeeBps, useTradeOffers } from "@/lib/chain/trades";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
-import { useLoanEvents, useLoanListing, useLoanOffers } from "@/lib/chain/loans";
+import { useLoanListing, useLoanOffers } from "@/lib/chain/loans";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { usd } from "@/lib/format";
@@ -110,7 +110,6 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
   const { data: otherAddress } = useHandleAddress(other);
   const { data: tradeFeeBps = 0 } = useTradeFeeBps();
   const chainMode = Boolean(user?.address && wallet.address && otherAddress && otherAddress.toLowerCase() !== wallet.address.toLowerCase());
-  useTradeEvents(chainMode);
   const { data: chainOffers = [] } = useTradeOffers(wallet.address, otherAddress ?? undefined);
   // "Make an offer" on the asset page lands here with the builder already open.
   const [builder, setBuilder] = useState<{ counter?: CounterOf } | null>(openTrade ? {} : null);
@@ -118,7 +117,6 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
   const { data: loanListing } = useLoanListing(listing.tokenId);
   // The live listing is the only eligibility source. Cached card data must not expose loan actions.
   const acceptsLoan = loanListing?.acceptsLoan === true;
-  useLoanEvents(chainMode);
   const { data: chainLoans = [] } = useLoanOffers(wallet.address, otherAddress ?? undefined, listing.tokenId);
   const openTrades = chainOffers.filter((o) => o.status === "Open");
 

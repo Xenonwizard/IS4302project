@@ -14,7 +14,9 @@ import { useCallback } from "react";
 import { keccak256, parseEventLogs, toBytes, type Address } from "viem";
 import { useAccount, usePublicClient } from "wagmi";
 import { CUSTODY, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, toUsdcUnits, type CustodyName } from "./config";
+import { certPreview } from "../catalog";
 import { usd } from "../format";
+import type { Grader } from "../types";
 import { useChainLog } from "./log";
 import type { FoundStep, OperatorTx } from "./operator";
 import { useStore } from "../store";
@@ -25,6 +27,7 @@ export interface FoundCase {
   claimId: string;
   tokenId: string;
   title: string;
+  grader: string;
   certNumber: string;
   image: string;
   finder: Address;
@@ -56,7 +59,6 @@ export function useFoundCases() {
   return useQuery({
     queryKey: ["found-cases"],
     enabled: Boolean(client && IS_DEPLOYED),
-    refetchInterval: 2_000,
     queryFn: async (): Promise<FoundCase[]> => {
       const filed = await client!.getContractEvents({ ...contracts.lostAndFound, eventName: "ClaimFiled", fromBlock: DEPLOY_BLOCK });
       const ids = [...new Set(filed.map((e) => e.args.claimId!))].reverse();
@@ -68,12 +70,15 @@ export function useFoundCases() {
             // slabOf still answers after the token burns on confirmed delivery.
             client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [c.tokenId] }),
           ]);
+          // A slab lost before vaulting has no on-chain title or image yet: fall back to the cert lookup.
+          const preview = certPreview(slab.grader as Grader, slab.certNumber);
           return {
             claimId: id.toString(),
             tokenId: c.tokenId.toString(),
-            title: slab.title || `${slab.grader} ${slab.certNumber}`,
+            title: slab.title || preview?.title || `${slab.grader} ${slab.certNumber}`,
+            grader: slab.grader,
             certNumber: slab.certNumber,
-            image: slab.image,
+            image: slab.image || preview?.image || "",
             finder: c.finder,
             owner: c.owner,
             evidenceHash: c.evidenceHash,
@@ -286,16 +291,30 @@ export function useLostReport() {
     [cancelLost, refresh, cancelVaultLost],
   );
 
-  /** Gives up on the slab for an off-chain insurance claim: the bounty is refunded and the token burned. */
+  /**
+   * Gives up on the slab for an off-chain insurance claim: the bounty is refunded and the token
+   * burned, so it can never be vaulted or traded. A slab whose loss was only reported privately
+   * (a vaulting delay) is reported lost on-chain first, since writeOffLost only takes Lost slabs.
+   */
   const writeOff = useCallback(
-    async (listingId: string, tokenId?: string) => {
-      if (onChain(tokenId)) {
-        await writeOffLost(tokenId);
-        await refresh();
+    async (listingId: string, tokenId?: string, details?: string) => {
+      if (onChain(tokenId) && client) {
+        const id = BigInt(tokenId);
+        const custody = CUSTODY[await client.readContract({ ...contracts.slabVault, functionName: "custodyOf", args: [id] })];
+        // None: not on this chain. Delivered / Written off: already burned.
+        if (custody !== "None" && custody !== "Delivered" && custody !== "Written off") {
+          const claimId = await client.readContract({ ...contracts.lostAndFound, functionName: "activeClaimOf", args: [id] });
+          if (claimId !== BigInt(0)) {
+            throw new Error(`A finder has filed claim #${claimId} for this slab. Wait for Pokechain to check it before claiming insurance.`);
+          }
+          if (custody !== "Lost") await reportLost(tokenId, details || "Lost before vaulting: owner claimed insurance");
+          await writeOffLost(tokenId);
+          await refresh();
+        }
       }
       withdrawLostForInsurance(listingId);
     },
-    [writeOffLost, refresh, withdrawLostForInsurance],
+    [client, reportLost, writeOffLost, refresh, withdrawLostForInsurance],
   );
 
   return { report, cancel, writeOff, setBounty: setLostBounty };
