@@ -16,7 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { keccak256, parseEventLogs, toBytes, zeroAddress, type Address, type TransactionReceipt } from "viem";
 import { usePublicClient, useWatchContractEvent } from "wagmi";
-import { CUSTODY, DEPLOY_BLOCK, OFFER_STATUS, contracts, fromUsdcUnits, toUsdcUnits, type OfferStatusName } from "./config";
+import { CUSTODY, DEPLOY_BLOCK, IS_DEPLOYED, OFFER_STATUS, contracts, fromUsdcUnits, toUsdcUnits, type OfferStatusName } from "./config";
 import { useChainTx } from "./useChainTx";
 
 export interface TradeSlab {
@@ -48,6 +48,27 @@ export interface TradeOffer {
 
 /** One room per pair of collectors, whoever opens it: the two addresses, sorted. */
 export const roomIdFor = (a: Address, b: Address) => [a.toLowerCase(), b.toLowerCase()].sort().join("-");
+
+/** Protocol fee on cash trade legs in basis points (e.g. 250 = 2.5%). */
+export function useTradeFeeBps() {
+  const client = usePublicClient();
+  return useQuery({
+    queryKey: ["trade-fee-bps", client?.chain?.id],
+    enabled: Boolean(client && IS_DEPLOYED),
+    queryFn: async (): Promise<number> => {
+      try {
+        const bps = await client!.readContract({
+          ...contracts.tradeEscrow,
+          functionName: "feeBps",
+        });
+        return Number(bps);
+      } catch {
+        return 0;
+      }
+    },
+    staleTime: 30_000,
+  });
+}
 
 /** Re-reads every trade-related query (offers, slabs, vault, balances). */
 export function useTradeRefresh() {

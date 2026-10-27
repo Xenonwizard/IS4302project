@@ -26,6 +26,7 @@ const mockUSDCAddress = addresses["PokechainModule#MockUSDC"];
 const accountRegistryAddress = addresses["PokechainModule#AccountRegistry"];
 const slabVaultAddress = addresses["PokechainModule#SlabVault"];
 const slabMarketAddress = addresses["PokechainModule#SlabMarket"];
+const tradeEscrowAddress = addresses["PokechainModule#TradeEscrow"];
 const lostAndFoundAddress = addresses["PokechainModule#LostAndFound"];
 
 const publicClient = createPublicClient({
@@ -535,6 +536,44 @@ async function seed() {
     });
     await publicClient.waitForTransactionReceipt({ hash: bondHash });
     console.log(`  ✓ Configured $10 USDC anti-griefing claim bond on LostAndFound`);
+  }
+
+  // 3b. Configure Sybil anti-wash-trading protocol fees (2.5%) on SlabMarket & TradeEscrow
+  const feeAbi = parseAbi([
+    "function feeBps() external view returns (uint256)",
+    "function setFeeConfig(uint256 feeBps, address feeRecipient) external",
+  ]);
+
+  const currentMarketFee = await publicClient.readContract({
+    address: slabMarketAddress,
+    abi: feeAbi,
+    functionName: "feeBps",
+  });
+  if (currentMarketFee === 0n) {
+    const marketFeeHash = await operatorWallet.writeContract({
+      address: slabMarketAddress,
+      abi: feeAbi,
+      functionName: "setFeeConfig",
+      args: [250n, OPERATOR],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: marketFeeHash });
+    console.log(`  ✓ Configured 2.5% protocol fee on SlabMarket`);
+  }
+
+  const currentTradeFee = await publicClient.readContract({
+    address: tradeEscrowAddress,
+    abi: feeAbi,
+    functionName: "feeBps",
+  });
+  if (currentTradeFee === 0n) {
+    const tradeFeeHash = await operatorWallet.writeContract({
+      address: tradeEscrowAddress,
+      abi: feeAbi,
+      functionName: "setFeeConfig",
+      args: [250n, OPERATOR],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: tradeFeeHash });
+    console.log(`  ✓ Configured 2.5% protocol fee on TradeEscrow cash legs`);
   }
 
   for (const lost of LOST_SLABS) {

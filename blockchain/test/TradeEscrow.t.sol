@@ -344,4 +344,98 @@ contract TradeEscrowTest is Test {
 
         assertEq(escrow.openOffers(brock), 3);
     }
+
+    /* ----------------------------- fee tests ----------------------------- */
+
+    function test_SetFeeConfig() public {
+        address treasury = makeAddr("treasury");
+        escrow.setFeeConfig(250, treasury); // 2.5%
+        assertEq(escrow.feeBps(), 250);
+        assertEq(escrow.feeRecipient(), treasury);
+
+        // Non-owner reverts
+        vm.prank(ash);
+        vm.expectRevert();
+        escrow.setFeeConfig(100, treasury);
+
+        // Fee over max reverts
+        vm.expectRevert(abi.encodeWithSelector(TradeEscrow.FeeTooHigh.selector, 1001, 1000));
+        escrow.setFeeConfig(1001, treasury);
+
+        // Fee > 0 with zero address recipient reverts
+        vm.expectRevert(TradeEscrow.InvalidFeeRecipient.selector);
+        escrow.setFeeConfig(100, address(0));
+    }
+
+    function test_TradeCashFeeDeduction_MakerCash() public {
+        address treasury = makeAddr("treasury");
+        escrow.setFeeConfig(200, treasury); // 2% fee
+
+        uint256[] memory mistySlabs = _slabs(misty, 1);
+        uint256[] memory none = _none();
+
+        // Ash offers $100 cash for Misty's slab (100% cash trade offer)
+        vm.prank(ash);
+        uint256 id = escrow.createOffer(misty, none, 100 * USD, mistySlabs, 0, "room-cash");
+
+        // Misty accepts
+        vm.prank(misty);
+        escrow.accept(id);
+
+        // Ash paid $100
+        assertEq(accounts.balanceOf(ash), 900 * USD);
+        // Fee is 2% of $100 = $2.00
+        assertEq(accounts.balanceOf(treasury), 2 * USD);
+        // Misty receives proceeds $100 - $2 = $98.00 + starting $1,000 = $1,098.00
+        assertEq(accounts.balanceOf(misty), 1_000 * USD + 98 * USD);
+        // Misty's slab transferred to Ash
+        _assertOwned(mistySlabs, ash);
+    }
+
+    function test_TradeCashFeeDeduction_TakerCash() public {
+        address treasury = makeAddr("treasury");
+        escrow.setFeeConfig(500, treasury); // 5% fee
+
+        uint256[] memory ashSlabs = _slabs(ash, 1);
+        uint256[] memory none = _none();
+
+        // Ash offers 1 slab and requests $200 cash from Misty
+        vm.prank(ash);
+        uint256 id = escrow.createOffer(misty, ashSlabs, 0, none, 200 * USD, "room-cash-taker");
+
+        // Misty accepts
+        vm.prank(misty);
+        escrow.accept(id);
+
+        // Misty paid $200
+        assertEq(accounts.balanceOf(misty), 800 * USD);
+        // Fee is 5% of $200 = $10.00
+        assertEq(accounts.balanceOf(treasury), 10 * USD);
+        // Ash receives proceeds $200 - $10 = $190.00 + starting $1,000 = $1,190.00
+        assertEq(accounts.balanceOf(ash), 1_000 * USD + 190 * USD);
+        // Ash's slab transferred to Misty
+        _assertOwned(ashSlabs, misty);
+    }
+
+    function test_TradeZeroCashNoFeeEvenWithFeeBps() public {
+        address treasury = makeAddr("treasury");
+        escrow.setFeeConfig(500, treasury); // 5% fee
+
+        uint256[] memory ashSlabs = _slabs(ash, 1);
+        uint256[] memory mistySlabs = _slabs(misty, 1);
+
+        // Pure card-for-card trade: 1 slab for 1 slab, 0 cash
+        vm.prank(ash);
+        uint256 id = escrow.createOffer(misty, ashSlabs, 0, mistySlabs, 0, "room-pure-cards");
+
+        vm.prank(misty);
+        escrow.accept(id);
+
+        // Neither user paid cash, treasury receives 0
+        assertEq(accounts.balanceOf(treasury), 0);
+        assertEq(accounts.balanceOf(ash), 1_000 * USD);
+        assertEq(accounts.balanceOf(misty), 1_000 * USD);
+        _assertOwned(ashSlabs, misty);
+        _assertOwned(mistySlabs, ash);
+    }
 }
