@@ -98,6 +98,9 @@ const ERROR_TEXT: Record<string, string> = {
   NotReturnedYet: "The slab isn't back yet: the bounty pays out once it's in the vault or the owner confirms delivery.",
   WrongClaimStatus: "That step doesn't match the case's current stage.",
   EmptyField: "A required field is empty.",
+  TooManyOpenOffers: "You have reached the limit of 2 active trade offers for accounts without vaulted cards. Withdraw an open offer or vault a slab to make more offers.",
+  FeeTooHigh: "The marketplace platform fee exceeds the maximum allowed limit.",
+  InvalidFeeRecipient: "Invalid marketplace fee recipient address.",
 };
 
 function errorNameFromAnyAbi(raw: `0x${string}` | undefined): string | undefined {
@@ -120,7 +123,11 @@ export function describeError(e: unknown): string {
       // A contract that calls another (TradeEscrow → SlabVault) bubbles up an error the called ABI doesn't
       // list, so look its selector up in every contract's ABI.
       const name = revert.data?.errorName ?? errorNameFromAnyAbi(revert.raw);
-      if (name) return ERROR_TEXT[name] ?? `Reverted with ${name}`;
+      if (name) {
+        if (ERROR_TEXT[name]) return ERROR_TEXT[name];
+        const readable = name.replace(/([A-Z])/g, " $1").trim().toLowerCase();
+        return `Action failed: ${readable.charAt(0).toUpperCase() + readable.slice(1)}.`;
+      }
       return revert.reason ?? revert.shortMessage;
     }
     return e.shortMessage;

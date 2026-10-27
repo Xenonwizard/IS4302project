@@ -247,4 +247,111 @@ contract LostAndFoundTest is Test {
         vm.expectRevert(abi.encodeWithSelector(LostAndFound.SlabNotLost.selector, tokenId));
         lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR1");
     }
+
+    function test_ClaimBondLockedAndRefundedOnPayout() public {
+        uint256 bondAmount = 10 * USD;
+        lf.setClaimBond(bondAmount);
+        assertEq(lf.claimBond(), bondAmount);
+
+        // Fund finder with custody balance for the bond
+        vm.startPrank(finder);
+        usdc.faucet(100 * USD);
+        usdc.approve(address(accounts), 100 * USD);
+        accounts.deposit(100 * USD);
+        vm.stopPrank();
+
+        uint256 tokenId = _lostWithBounty();
+
+        // Filing claim moves bond from finder to LostAndFound contract
+        vm.prank(finder);
+        uint256 claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
+        assertEq(accounts.balanceOf(finder), 90 * USD);
+        assertEq(lf.bondOf(claimId), bondAmount);
+
+        // Intake: markReceived authenticates the slab and refunds the bond immediately
+        vm.prank(operator);
+        lf.markReceived(claimId);
+        // Finder got their 10 USD bond back immediately upon intake verification (before owner acts)
+        assertEq(accounts.balanceOf(finder), 100 * USD);
+        assertEq(lf.bondOf(claimId), 0);
+
+        vm.prank(owner);
+        lf.chooseReturn(claimId, true, bytes32(0));
+        vm.prank(operator);
+        lf.completeReturn(claimId, "", "");
+        _revault(tokenId, "CCsol2222-bond");
+
+        // Claiming bounty pays the owner's BOUNTY (50 USD)
+        vm.prank(finder);
+        lf.claimBounty(claimId);
+        assertEq(accounts.balanceOf(finder), 100 * USD + BOUNTY);
+    }
+
+    function test_BondRefundedOnIntakeEvenIfOwnerNeverResponds() public {
+        uint256 bondAmount = 10 * USD;
+        lf.setClaimBond(bondAmount);
+
+        // Fund finder with 100 USD
+        vm.startPrank(finder);
+        usdc.faucet(100 * USD);
+        usdc.approve(address(accounts), 100 * USD);
+        accounts.deposit(100 * USD);
+        vm.stopPrank();
+
+        uint256 tokenId = _lostWithBounty();
+
+        // Filing claim moves 10 USD bond into escrow
+        vm.prank(finder);
+        uint256 claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
+        assertEq(accounts.balanceOf(finder), 90 * USD);
+
+        // Pokéchain receives and authenticates the parcel
+        vm.prank(operator);
+        lf.markReceived(claimId);
+
+        // Finder gets their 10 USD bond back immediately!
+        // No deadlock: Even if owner ghosts or never selects vault/delivery, the finder's stake is safe.
+        assertEq(accounts.balanceOf(finder), 100 * USD);
+        assertEq(lf.bondOf(claimId), 0);
+    }
+
+    function test_ClaimBondSlashedToOwnerOnRejection() public {
+        uint256 bondAmount = 10 * USD;
+        lf.setClaimBond(bondAmount);
+
+        // Fund finder
+        vm.startPrank(finder);
+        usdc.faucet(100 * USD);
+        usdc.approve(address(accounts), 100 * USD);
+        accounts.deposit(100 * USD);
+        vm.stopPrank();
+
+        uint256 tokenId = _lostWithBounty();
+        uint256 ownerBalanceBefore = accounts.balanceOf(owner); // 950 * USD
+
+        vm.prank(finder);
+        uint256 claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
+        assertEq(accounts.balanceOf(finder), 90 * USD);
+
+        // Operator rejects fake/spam claim -> bond is awarded to owner
+        vm.prank(operator);
+        lf.rejectClaim(claimId, "Fraudulent tracking / empty parcel");
+
+        assertEq(accounts.balanceOf(finder), 90 * USD);
+        assertEq(accounts.balanceOf(owner), ownerBalanceBefore + bondAmount);
+        assertEq(lf.bondOf(claimId), 0);
+        assertEq(lf.activeClaimOf(tokenId), 0);
+    }
+
+    function test_CannotFileClaimWithoutBond() public {
+        uint256 bondAmount = 10 * USD;
+        lf.setClaimBond(bondAmount);
+
+        uint256 tokenId = _lostWithBounty();
+
+        // Finder has 0 balance, should revert InsufficientBalance
+        vm.prank(finder);
+        vm.expectRevert(abi.encodeWithSelector(AccountRegistry.InsufficientBalance.selector, bondAmount, 0));
+        lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
+    }
 }

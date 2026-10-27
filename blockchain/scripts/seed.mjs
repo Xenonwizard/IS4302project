@@ -26,6 +26,7 @@ const mockUSDCAddress = addresses["PokechainModule#MockUSDC"];
 const accountRegistryAddress = addresses["PokechainModule#AccountRegistry"];
 const slabVaultAddress = addresses["PokechainModule#SlabVault"];
 const slabMarketAddress = addresses["PokechainModule#SlabMarket"];
+const tradeEscrowAddress = addresses["PokechainModule#TradeEscrow"];
 const lostAndFoundAddress = addresses["PokechainModule#LostAndFound"];
 
 const publicClient = createPublicClient({
@@ -44,6 +45,7 @@ function getWallet(accountAddress) {
 const OPERATOR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const TEST1 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const TEST2 = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+const TEST3 = "0x976EA74026E726554dB657fA54763abd0C3a0aa9";
 const ASH = "0x90F79bf6EB2c4f870365E785982E1f101E93b906";
 const MISTY = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
 const BROCK = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
@@ -51,6 +53,7 @@ const BROCK = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
 const ACCOUNTS = [
   { address: TEST1, handle: "test1" },
   { address: TEST2, handle: "test2" },
+  { address: TEST3, handle: "test3" },
   { address: ASH, handle: "ash" },
   { address: MISTY, handle: "misty" },
   { address: BROCK, handle: "brock" },
@@ -354,6 +357,32 @@ async function seed() {
     }
   }
 
+  // Ensure unvaulted tester @test3 has USDC deposited into Pokechain custody for trade offers
+  const test3Custody = await publicClient.readContract({
+    address: accountRegistryAddress,
+    abi: registryAbi,
+    functionName: "balanceOf",
+    args: [TEST3],
+  });
+  if (test3Custody === 0n) {
+    const wallet = getWallet(TEST3);
+    const approveHash = await wallet.writeContract({
+      address: mockUSDCAddress,
+      abi: usdcAbi,
+      functionName: "approve",
+      args: [accountRegistryAddress, parseUnits("5000", 6)],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    const depHash = await wallet.writeContract({
+      address: accountRegistryAddress,
+      abi: registryAbi,
+      functionName: "deposit",
+      args: [parseUnits("5000", 6)],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: depHash });
+    console.log(`  ✓ Deposited 5,000 USDC into custody for unvaulted tester @test3`);
+  }
+
   // 2. Seed Slabs into SlabVault
   const operatorWallet = getWallet(OPERATOR);
   const tokenMap = new Map(); // certNumber -> tokenId
@@ -489,7 +518,64 @@ async function seed() {
     "function reportLost(uint256 tokenId, string details) external",
     "function custodyOf(uint256 tokenId) external view returns (uint8)",
     "function setBounty(uint256 tokenId, uint256 amount) external",
+    "function claimBond() external view returns (uint256)",
+    "function setClaimBond(uint256 amount) external",
   ]);
+
+  const currentBond = await publicClient.readContract({
+    address: lostAndFoundAddress,
+    abi: lostAbi,
+    functionName: "claimBond",
+  });
+  if (currentBond === 0n) {
+    const bondHash = await operatorWallet.writeContract({
+      address: lostAndFoundAddress,
+      abi: lostAbi,
+      functionName: "setClaimBond",
+      args: [parseUnits("10", 6)],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: bondHash });
+    console.log(`  ✓ Configured $10 USDC anti-griefing claim bond on LostAndFound`);
+  }
+
+  // 3b. Configure Sybil anti-wash-trading protocol fees (2.5%) on SlabMarket & TradeEscrow
+  const feeAbi = parseAbi([
+    "function feeBps() external view returns (uint256)",
+    "function setFeeConfig(uint256 feeBps, address feeRecipient) external",
+  ]);
+
+  const currentMarketFee = await publicClient.readContract({
+    address: slabMarketAddress,
+    abi: feeAbi,
+    functionName: "feeBps",
+  });
+  if (currentMarketFee === 0n) {
+    const marketFeeHash = await operatorWallet.writeContract({
+      address: slabMarketAddress,
+      abi: feeAbi,
+      functionName: "setFeeConfig",
+      args: [250n, OPERATOR],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: marketFeeHash });
+    console.log(`  ✓ Configured 2.5% protocol fee on SlabMarket`);
+  }
+
+  const currentTradeFee = await publicClient.readContract({
+    address: tradeEscrowAddress,
+    abi: feeAbi,
+    functionName: "feeBps",
+  });
+  if (currentTradeFee === 0n) {
+    const tradeFeeHash = await operatorWallet.writeContract({
+      address: tradeEscrowAddress,
+      abi: feeAbi,
+      functionName: "setFeeConfig",
+      args: [250n, OPERATOR],
+    });
+    await publicClient.waitForTransactionReceipt({ hash: tradeFeeHash });
+    console.log(`  ✓ Configured 2.5% protocol fee on TradeEscrow cash legs`);
+  }
+
   for (const lost of LOST_SLABS) {
     const tokenId = tokenMap.get(lost.certNumber);
     const owner = SEED_SLABS.find((slab) => slab.certNumber === lost.certNumber).recipient;

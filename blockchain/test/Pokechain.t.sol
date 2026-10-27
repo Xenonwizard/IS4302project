@@ -858,6 +858,40 @@ contract PokechainTest is Test {
         assertEq(tokenSales[0].fee, 0);
     }
 
+    function test_MarketplaceFeeDeduction() public {
+        _register(alice, "alice");
+        _register(bob, "bob");
+        address treasury = makeAddr("treasury");
+
+        // Set 1% fee (100 bps)
+        market.setFeeConfig(100, treasury);
+        assertEq(market.feeBps(), 100);
+        assertEq(market.feeRecipient(), treasury);
+
+        uint256 tokenId = _mint(alice, "88889999");
+
+        vm.prank(alice);
+        market.list(tokenId, 200 * USD);
+
+        vm.prank(bob);
+        usdc.faucet(500 * USD);
+        _deposit(bob, 500 * USD);
+
+        vm.prank(bob);
+        market.buy(tokenId);
+
+        // Alice receives 200 - 2 = 198 USD
+        assertEq(accounts.balanceOf(alice), 198 * USD);
+        // Treasury receives 2 USD fee
+        assertEq(accounts.balanceOf(treasury), 2 * USD);
+        // Bob pays full 200 USD
+        assertEq(accounts.balanceOf(bob), 300 * USD);
+
+        // Sales history reflects fee
+        SlabMarket.SaleRecord[] memory tokenSales = market.getSalesForToken(tokenId);
+        assertEq(tokenSales[0].fee, 2 * USD);
+    }
+
     function test_CannotBuyIfNotActiveAccount() public {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");

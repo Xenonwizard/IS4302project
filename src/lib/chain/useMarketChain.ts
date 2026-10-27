@@ -1,9 +1,9 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { usePublicClient } from "wagmi";
-import { contracts, fromUsdcUnits, toUsdcUnits } from "./config";
+import { contracts, fromUsdcUnits, toUsdcUnits, IS_DEPLOYED } from "./config";
 import { useChainTx } from "./useChainTx";
 
 export interface OnChainListing {
@@ -132,5 +132,26 @@ export function useMarketChain() {
   );
 
   return { listCard, cancelListing, buyCard, getListing, getSales };
+}
+
+/** Protocol marketplace fee in basis points (e.g. 250 = 2.5%). */
+export function useMarketFeeBps() {
+  const client = usePublicClient();
+  return useQuery({
+    queryKey: ["slab-market-fee-bps", client?.chain?.id],
+    enabled: Boolean(client && IS_DEPLOYED),
+    queryFn: async (): Promise<number> => {
+      try {
+        const bps = await client!.readContract({
+          ...contracts.slabMarket,
+          functionName: "feeBps",
+        });
+        return Number(bps);
+      } catch {
+        return 0;
+      }
+    },
+    staleTime: 30_000,
+  });
 }
 

@@ -105,7 +105,7 @@ function CaseRow({ c, role, listing }: { c: FoundCase; role: "owner" | "finder";
 
         <div className="min-w-0 rounded-xl border border-hairline bg-black/10 p-3">
           <RecoveryTimeline c={c} />
-          {c.status === 6 ? <p className="mt-2 text-[11px] font-semibold text-bad">Rejected by Pokechain</p> : null}
+          {c.status === 6 ? <p className="mt-2 text-[11px] font-semibold text-bad">Rejected by Pokechain (claim bond slashed to owner)</p> : null}
           <div className="mt-3 flex flex-wrap justify-end gap-2">
           {action === "choose" ? (
             <>
@@ -196,7 +196,7 @@ function caseUpdate(c: FoundCase, role: "owner" | "finder", payable: boolean) {
     case 2:
       return role === "owner"
         ? "Your slab was found and authenticated. Put it back in your vault, or have it delivered to you."
-        : "Case update: Pokechain authenticated the slab you found. Waiting for the owner to choose vault or delivery.";
+        : "Case update: Pokechain authenticated the slab you found and refunded your security bond. Waiting for the owner to choose vault or delivery.";
     case 3:
       return `The owner chose ${vault ? "the vault" : "delivery"}. Waiting for Pokechain to send it.`;
     case 4:

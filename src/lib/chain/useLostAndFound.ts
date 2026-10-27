@@ -102,6 +102,7 @@ const STEP_LABEL: Record<FoundStep, string> = {
 
 export function useLostAndFound() {
   const { send, operator } = useChainTx();
+  const client = usePublicClient();
   const log = useChainLog();
   const queryClient = useQueryClient();
   const refresh = useCallback(
@@ -183,7 +184,24 @@ export function useLostAndFound() {
     [operator, refresh],
   );
 
-  return { setBounty, fileClaim, chooseReturn, claimBounty, step };
+  const { data: claimBondUnits } = useQuery({
+    queryKey: ["lost-and-found-claim-bond", client?.chain?.id],
+    enabled: Boolean(client && IS_DEPLOYED),
+    queryFn: async () => {
+      try {
+        const bond = await client!.readContract({
+          ...contracts.lostAndFound,
+          functionName: "claimBond",
+        });
+        return fromUsdcUnits(bond as bigint);
+      } catch {
+        return 0;
+      }
+    },
+  });
+  const claimBond = claimBondUnits ?? 0;
+
+  return { setBounty, fileClaim, chooseReturn, claimBounty, step, claimBond };
 }
 
 /**

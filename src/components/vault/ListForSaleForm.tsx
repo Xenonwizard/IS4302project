@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import clsx from "clsx";
 import { Lock } from "lucide-react";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
-import { useMarketChain } from "@/lib/chain/useMarketChain";
+import { useMarketChain, useMarketFeeBps } from "@/lib/chain/useMarketChain";
 import type { Listing } from "@/lib/types";
 import { Button, Field, inputClass } from "../ui/primitives";
 
@@ -18,6 +19,7 @@ export function ListForSaleForm({
 }) {
   const { user, listFromVault, pushToast } = useStore();
   const { listCard } = useMarketChain();
+  const { data: marketFeeBps = 0 } = useMarketFeeBps();
   const [price, setPrice] = useState("");
   const [acceptsLoan, setAcceptsLoan] = useState(false);
   const [loanAsk, setLoanAsk] = useState("");
@@ -25,6 +27,8 @@ export function ListForSaleForm({
   const value = Math.max(0, Number(price) || 0);
   const loanValue = Math.max(0, Number(loanAsk) || 0);
   const loanTermsValid = !acceptsLoan || (loanValue > 0 && loanValue < value);
+  const feeAmount = (value * marketFeeBps) / 10000;
+  const netProceeds = value - feeAmount;
 
   const handleSubmit = async () => {
     if (value <= 0 || !loanTermsValid) return;
@@ -103,13 +107,15 @@ export function ListForSaleForm({
 
       <dl className="mt-4 space-y-2.5 rounded-2xl bg-surface p-4 text-[13px]">
         <div className="flex justify-between">
-          <dt className="text-muted">Pokéchain platform fee (Rule 2)</dt>
-          <dd className="font-semibold text-good">0% ($0.00)</dd>
+          <dt className="text-muted">Pokéchain platform fee {marketFeeBps > 0 ? `(${marketFeeBps / 100}%)` : "(Rule 2)"}</dt>
+          <dd className={clsx("font-semibold", marketFeeBps > 0 ? "text-accent" : "text-good")}>
+            {marketFeeBps > 0 ? `${marketFeeBps / 100}% (${usd(feeAmount, { cents: true })})` : "0% ($0.00)"}
+          </dd>
         </div>
         <div className="h-px bg-hairline" />
         <div className="flex justify-between">
           <dt className="text-muted">You receive upon settlement</dt>
-          <dd className="font-bold text-accent">{usd(value, { cents: true })} USDC</dd>
+          <dd className="font-bold text-accent">{usd(netProceeds, { cents: true })} USDC</dd>
         </div>
       </dl>
 
