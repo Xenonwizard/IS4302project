@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Route, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Flame, Route, Sparkles, XCircle } from "lucide-react";
 import { useState } from "react";
 import { shortHash } from "@/lib/chain/config";
 import type { SlabTrace } from "@/lib/chain/trace";
@@ -29,6 +29,13 @@ const SOURCE_STYLE: Record<Source, string> = {
   Solana: "bg-[#14f195]/15 text-[#14f195]",
   "Collector Crypt": "bg-warn/15 text-warn",
 };
+
+/** Mints and burns are the moments a title appears or disappears, so they get a loud label. */
+function mintBurnKind(r: Row): "MINT" | "BURN" | null {
+  if (r.source === "Solana") return r.title === "MINT" ? "MINT" : r.title === "BURN" ? "BURN" : null;
+  if (r.source === "Polygon" && r.title.endsWith(".Transfer") && r.detail.startsWith("Burned")) return "BURN";
+  return null;
+}
 
 /**
  * One slab's full journey, cross-referenced across Polygon (SlabVault events), Solana (Collector
@@ -72,7 +79,10 @@ export function TraceView({ tokenId }: { tokenId: string }) {
           title: `Carrier: ${e.status.replace("_", " ")}`,
           detail: e.note,
         })),
-      ].sort((a, b) => a.at.localeCompare(b.at))
+      ]
+        // Latest first. Reverse the chronological order so same-second events keep their real sequence, flipped.
+        .sort((a, b) => a.at.localeCompare(b.at))
+        .reverse()
     : [];
 
   return (
@@ -202,7 +212,20 @@ export function TraceView({ tokenId }: { tokenId: string }) {
                 <li key={i} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3 text-[12.5px]">
                   <span className={clsx("mt-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold", SOURCE_STYLE[r.source])}>{r.source}</span>
                   <div className="min-w-0">
-                    <p className="font-semibold">{r.title}</p>
+                    <p className="flex items-center gap-2 font-semibold">
+                      {r.title}
+                      {mintBurnKind(r) ? (
+                        <span
+                          className={clsx(
+                            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide",
+                            mintBurnKind(r) === "MINT" ? "bg-good/20 text-good" : "bg-bad/20 text-bad",
+                          )}
+                        >
+                          {mintBurnKind(r) === "MINT" ? <Sparkles size={11} /> : <Flame size={11} />}
+                          {mintBurnKind(r)}
+                        </span>
+                      ) : null}
+                    </p>
                     <p className="mt-0.5 text-muted">{r.detail}</p>
                   </div>
                   <div className="text-right text-[11px] text-dim">
