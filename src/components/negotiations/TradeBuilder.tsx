@@ -338,7 +338,6 @@ function Form({
                         <p className="line-clamp-2 text-[12px] font-semibold">{slab.title}</p>
                         <p className="mt-1 text-[11px] text-muted">{slab.grader} · token #{slab.tokenId}</p>
                         {slab.listed && slab.listedPrice !== undefined ? <p className="mt-1 text-[11px] text-muted">Seller ask {exact(slab.listedPrice)}</p> : null}
-                        <MarketPriceLine card={anchorListing(slab, owner.handle, ownerAddress)} className="mt-0.5 text-[11px] font-semibold text-accent" />
                       </div>
                       {selected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-accent text-white"><Check size={14} /></span> : null}
                     </button>

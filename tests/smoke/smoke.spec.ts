@@ -739,11 +739,13 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   }
 });
 
-test("market price: listing cards and trade tiles show the market price for that exact grade under the seller's ask, and loans are gone", async ({ page, request }) => {
+test("market price: only cards picked for a trade look up the market price for their exact grade, and loans are gone", async ({ page, request }) => {
   await resetSeeded(request);
   // Stand-in for PokémonPriceTracker: the slab's own grade is $1,234.50, another grade is a decoy.
+  const lookups: string[] = [];
   await page.route("**/api/pricing/graded?**", (route) => {
     const q = new URL(route.request().url()).searchParams;
+    lookups.push(q.get("subject")!);
     const label = `${q.get("grader")!.toUpperCase()} ${q.get("grade")}`;
     return route.fulfill({ json: { data: { productId: "1", productName: q.get("subject"), category: q.get("set"), sourceUrl: "https://www.pokemonpricetracker.com/", prices: [
       { label, value: 1234.5, count: 7, matchesSlab: true },
@@ -755,17 +757,24 @@ test("market price: listing cards and trade tiles show the market price for that
   await page.goto("/marketplace");
   const dragonite = page.locator("div.group").filter({ hasText: "Dark Dragonite" }).first();
   await expect(dragonite).toContainText("Asking price");
-  await expect(dragonite).toContainText("Market price $1,234.50");
+  // The free plan has 100 credits a day: browsing the marketplace spends none.
+  await expect(dragonite).not.toContainText("Market price");
 
-  // Same line under the seller's ask in the trade builder; no loan offer button next to it.
+  // In a trade, only the cards actually picked are priced, under the seller's ask. No loan button.
   await page.goto("/trades");
   await page.getByRole("button", { name: "Chat with @test2" }).click();
   await expect(page.getByRole("button", { name: "Make a trade offer" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Offer a loan/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Make a trade offer" }).click();
+  await page.getByRole("button", { name: "Request items" }).click();
+  await expect(page.getByRole("dialog")).toContainText("Seller ask $1,150.00");
+  await expect(page.getByRole("dialog")).not.toContainText("Market price");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  expect(lookups).toEqual([]);
   await pickTradeSlabs(page, "Request items", ["Dark Dragonite", 33333333]);
   await expect(page.getByText("Seller ask $1,150.00").first()).toBeVisible();
   await expect(page.getByText("Market price $1,234.50").first()).toBeVisible();
+  expect(lookups).toEqual(["Dark Dragonite"]);
 
   // Listing a slab has no loan option, and the Vault has no loan tab.
   await page.goto("/vault?tab=unlisted");

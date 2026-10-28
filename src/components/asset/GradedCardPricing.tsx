@@ -28,14 +28,17 @@ type PricingResponse = {
   };
   error?: string;
   setupRequired?: boolean;
+  rateLimited?: boolean;
 };
 
 class PricingError extends Error {
   setupRequired: boolean;
+  rateLimited: boolean;
 
-  constructor(message: string, setupRequired = false) {
+  constructor(message: string, setupRequired = false, rateLimited = false) {
     super(message);
     this.setupRequired = setupRequired;
+    this.rateLimited = rateLimited;
   }
 }
 
@@ -67,7 +70,7 @@ function useGradedPricing(card: Listing) {
       const response = await fetch(`/api/pricing/graded?${params}`);
       const body = await response.json() as PricingResponse;
       if (!response.ok || !body.data) {
-        throw new PricingError(body.error || "Graded pricing is unavailable.", Boolean(body.setupRequired));
+        throw new PricingError(body.error || "Graded pricing is unavailable.", Boolean(body.setupRequired), Boolean(body.rateLimited));
       }
       return body.data;
     },
@@ -78,11 +81,18 @@ function useGradedPricing(card: Listing) {
 export function MarketPriceLine({ card, className }: { card: Listing; className?: string }) {
   const query = useGradedPricing(card);
   const matched = query.data?.prices.find((price) => price.matchesSlab);
-  const value = query.isPending ? "…" : matched ? usd(matched.value, { cents: true }) : "No data";
+  const limited = query.error instanceof PricingError && query.error.rateLimited;
   const hint = matched
     ? `Recent ${card.grader} ${card.grade} sales (${matched.count} tracked), via PokémonPriceTracker`
-    : query.error?.message ?? `No recent ${card.grader} ${card.grade} sales found`;
-  return <p className={className} title={hint}>Market price {value}</p>;
+    : query.error?.message ?? `PokémonPriceTracker has no recent ${card.grader} ${card.grade} sales for this card`;
+  const text = query.isPending
+    ? "Market price …"
+    : matched
+      ? `Market price ${usd(matched.value, { cents: true })}`
+      : limited
+        ? "Market price: daily limit reached"
+        : `No ${card.grader} ${card.grade} sales yet`;
+  return <p className={className} title={hint}>{text}</p>;
 }
 
 export function GradedCardPricing({ card, embedded = false }: { card: Listing; embedded?: boolean }) {

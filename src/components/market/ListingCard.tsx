@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usd } from "@/lib/format";
 import type { Listing } from "@/lib/types";
 import { Slab } from "../slab/Slab";
-import { MarketPriceLine } from "../asset/GradedCardPricing";
 
 export function ListingCard({
   listing,
@@ -49,7 +48,6 @@ export function ListingCard({
           </span>
           <span className={clsx("text-[10px] text-muted", small && "hidden")}>Asking price</span>
         </div>
-        {!small ? <MarketPriceLine card={listing} className="mt-1 text-[10.5px] font-semibold text-accent" /> : null}
       </div>
     </div>
   );
