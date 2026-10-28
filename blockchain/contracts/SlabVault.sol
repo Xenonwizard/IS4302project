@@ -11,7 +11,7 @@ interface IAccountStatus {
     function isActive(address owner) external view returns (bool);
 }
 
-/// @dev The slice of LostAndFound this contract needs: a lost report can't close under an open finder claim.
+/// @dev The slice of LostSlabRecovery this contract needs: a lost report can't close under an open finder claim.
 interface ILostReportHook {
     function onLostReportClosed(uint256 tokenId) external;
 }
@@ -52,7 +52,7 @@ interface ILostReportHook {
  *                           the Lost page reads them from `SlabReportedLost` and `custodyOf`.
  *   8. `resolveLostReport`  the operator closes an inbound/vault return; a found outbound slab
  *                           is verified and sent through `markRecoveredShipped`.
- *      LostAndFound          a finder's claim runs steps 8 for the operator (it holds OPERATOR_ROLE).
+ *      LostSlabRecovery      a finder's claim runs steps 8 for the operator (it holds OPERATOR_ROLE).
  *                           While a claim is open the owner can't cancel the report, and closing
  *                           a report any other way refunds its escrowed bounty.
  *      `writeOffLost`        the owner gives up on a lost slab (insurance pays out off-chain):
@@ -153,8 +153,8 @@ contract SlabVault is ERC721, AccessControl {
     address public tradeEscrow;
     /// @notice The collateral escrow: may hold a vaulted slab while its loan is active.
     address public loanEscrow;
-    /// @notice The LostAndFound contract: escrows bounties and runs a finder's recovery (see the notice).
-    address public lostAndFound;
+    /// @notice The LostSlabRecovery contract: escrows bounties and runs a finder's recovery (see the notice).
+    address public lostSlabRecovery;
     /// @notice Slabs each address holds that are still physically in the vault.
     mapping(address => uint256) public vaultedCount;
 
@@ -197,7 +197,7 @@ contract SlabVault is ERC721, AccessControl {
     event SlabVaulted(uint256 indexed tokenId, address indexed owner, string certNumber, string custodianRef);
     event TradeEscrowSet(address indexed tradeEscrow);
     event LoanEscrowSet(address indexed loanEscrow);
-    event LostAndFoundSet(address indexed lostAndFound);
+    event LostSlabRecoverySet(address indexed lostSlabRecovery);
     event RedemptionRequested(uint256 indexed tokenId, address indexed owner, bytes32 shippingHash);
     event SlabShipped(
         uint256 indexed tokenId, address indexed owner, string redemptionRef, string carrier, string trackingNumber
@@ -582,11 +582,11 @@ contract SlabVault is ERC721, AccessControl {
         emit LoanEscrowSet(escrow);
     }
 
-    /// @notice Names LostAndFound and lets it close lost reports for a finder's claim.
-    function setLostAndFound(address lostAndFound_) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        lostAndFound = lostAndFound_;
-        _grantRole(OPERATOR_ROLE, lostAndFound_);
-        emit LostAndFoundSet(lostAndFound_);
+    /// @notice Names LostSlabRecovery and lets it close lost reports for a finder's claim.
+    function setLostSlabRecovery(address lostSlabRecovery_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        lostSlabRecovery = lostSlabRecovery_;
+        _grantRole(OPERATOR_ROLE, lostSlabRecovery_);
+        emit LostSlabRecoverySet(lostSlabRecovery_);
     }
 
     /* --------------------------------- views --------------------------------- */
@@ -739,8 +739,8 @@ contract SlabVault is ERC721, AccessControl {
 
     /// @dev Closing a report outside a finder's claim refunds its bounty; it reverts while a claim is open.
     function _closeLostReport(uint256 tokenId) private {
-        if (lostAndFound != address(0) && msg.sender != lostAndFound) {
-            ILostReportHook(lostAndFound).onLostReportClosed(tokenId);
+        if (lostSlabRecovery != address(0) && msg.sender != lostSlabRecovery) {
+            ILostReportHook(lostSlabRecovery).onLostReportClosed(tokenId);
         }
     }
 

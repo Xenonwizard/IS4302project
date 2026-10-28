@@ -27,7 +27,7 @@ const accountRegistryAddress = addresses["PokechainModule#AccountRegistry"];
 const slabVaultAddress = addresses["PokechainModule#SlabVault"];
 const slabMarketAddress = addresses["PokechainModule#SlabMarket"];
 const tradeEscrowAddress = addresses["PokechainModule#TradeEscrow"];
-const lostAndFoundAddress = addresses["PokechainModule#LostAndFound"];
+const lostSlabRecoveryAddress = addresses["PokechainModule#LostSlabRecovery"];
 
 const publicClient = createPublicClient({
   chain: hardhat,
@@ -277,7 +277,7 @@ const SEED_SLABS = [
   },
 ];
 
-/** Seeded slabs whose owner reports them lost (SlabVault.reportLost) and escrows a bounty (LostAndFound.setBounty). */
+/** Seeded slabs whose owner reports them lost (SlabVault.reportLost) and escrows a bounty (LostSlabRecovery.setBounty). */
 const LOST_SLABS = [
   { certNumber: "79961445", details: "Slab unaccounted for during routine Delaware vault inventory audit. Security seal #4429.", bountyUsdc: 250 },
   { certNumber: "92596655", details: "Vault location scan came back empty after a storage-bay transfer at the Delaware facility.", bountyUsdc: 100 },
@@ -523,19 +523,19 @@ async function seed() {
   ]);
 
   const currentBond = await publicClient.readContract({
-    address: lostAndFoundAddress,
+    address: lostSlabRecoveryAddress,
     abi: lostAbi,
     functionName: "claimBond",
   });
   if (currentBond === 0n) {
     const bondHash = await operatorWallet.writeContract({
-      address: lostAndFoundAddress,
+      address: lostSlabRecoveryAddress,
       abi: lostAbi,
       functionName: "setClaimBond",
       args: [parseUnits("10", 6)],
     });
     await publicClient.waitForTransactionReceipt({ hash: bondHash });
-    console.log(`  ✓ Configured $10 USDC anti-griefing claim bond on LostAndFound`);
+    console.log(`  ✓ Configured $10 USDC anti-griefing claim bond on LostSlabRecovery`);
   }
 
   // 3b. Configure Sybil anti-wash-trading protocol fees (2.5%) on SlabMarket & TradeEscrow
@@ -588,7 +588,7 @@ async function seed() {
       [mockUSDCAddress, usdcAbi, "approve", [accountRegistryAddress, bounty]],
       [accountRegistryAddress, registryAbi, "deposit", [bounty]],
       [slabVaultAddress, lostAbi, "reportLost", [tokenId, lost.details]],
-      [lostAndFoundAddress, lostAbi, "setBounty", [tokenId, bounty]],
+      [lostSlabRecoveryAddress, lostAbi, "setBounty", [tokenId, bounty]],
     ]) {
       const hash = await wallet.writeContract({ address, abi, functionName, args });
       await publicClient.waitForTransactionReceipt({ hash });

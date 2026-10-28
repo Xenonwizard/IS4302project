@@ -18,7 +18,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { certPreview, getListing, makeSubmittedListing } from "@/lib/catalog";
 import { IS_DEPLOYED, OPEN_SUBMISSION } from "@/lib/chain/config";
-import { useFoundCases, useLostReport } from "@/lib/chain/useLostAndFound";
+import { useFoundCases, useLostReport } from "@/lib/chain/useLostSlabRecovery";
 import { type SubmissionRequest, useSubmissions } from "@/lib/chain/useSubmissions";
 import { useLostSlabs, useStore } from "@/lib/store";
 import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";

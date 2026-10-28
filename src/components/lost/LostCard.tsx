@@ -6,7 +6,7 @@ import { AlertTriangle, Coins, Copy, Check, PackageCheck, Sparkles } from "lucid
 import { useState } from "react";
 import { usd } from "@/lib/format";
 import { CLAIM_STATUS, IS_DEPLOYED } from "@/lib/chain/config";
-import { isOpenCase, useFoundCases, useLostReport } from "@/lib/chain/useLostAndFound";
+import { isOpenCase, useFoundCases, useLostReport } from "@/lib/chain/useLostSlabRecovery";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { isActiveRecovery, useStore, type LostSlabItem } from "@/lib/store";
 import { Slab } from "../slab/Slab";
@@ -23,7 +23,7 @@ export function LostCard({
   onManageBounty?: (listingId: string) => void;
 }) {
   const { listing, loss, recovery } = item;
-  // A tokenised slab: its report is on SlabVault and a finder's claim on LostAndFound.
+  // A tokenised slab: its report is on SlabVault and a finder's claim on LostSlabRecovery.
   const onChain = IS_DEPLOYED && Boolean(listing.tokenId);
   const { data: cases = [] } = useFoundCases();
   const chainCase = onChain ? cases.find((c) => c.tokenId === listing.tokenId && isOpenCase(c)) : undefined;
@@ -152,7 +152,7 @@ export function LostCard({
           </div>
           {chainCase ? (
             <div className="mt-2 rounded-lg border border-accent/25 bg-accent/5 px-2.5 py-2 text-[11px] text-muted">
-              <span className="font-bold text-accent">Found · case #{chainCase.claimId}</span> · {CLAIM_STATUS[chainCase.status]} on LostAndFound
+              <span className="font-bold text-accent">Found · case #{chainCase.claimId}</span> · {CLAIM_STATUS[chainCase.status]} on LostSlabRecovery
             </div>
           ) : null}
           {recovery && !onChain ? (

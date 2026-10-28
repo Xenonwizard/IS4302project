@@ -15,7 +15,7 @@ import { useLoanOffers } from "@/lib/chain/loans";
 import { useLostSlabs, useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
-import { useLostReport } from "@/lib/chain/useLostAndFound";
+import { useLostReport } from "@/lib/chain/useLostSlabRecovery";
 import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { RedeemModal } from "../chain/RedeemModal";
 import { Slab } from "../slab/Slab";

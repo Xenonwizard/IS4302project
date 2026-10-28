@@ -644,7 +644,7 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   await depositAsTest1(200);
 
   // The slab goes missing in Collector Crypt's vault; the owner reports it with a $50 bounty,
-  // which LostAndFound escrows from their balance.
+  // which LostSlabRecovery escrows from their balance.
   await reportLostInVaultAs(1, Number(cert), "Missing at the vault audit", 50);
   expect(await escrowedBounty(Number(cert))).toBe(50);
   expect(await custodyDollars(TEST1)).toBe(150);
@@ -697,7 +697,7 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   await page.getByPlaceholder("Search by card, cert #, notes...").fill(cert);
   await expect(page.getByRole("button", { name: /Open found case|Found Slab/ })).toHaveCount(0);
 
-  // The finder claims the bounty: LostAndFound checks SlabVault says Vaulted, then pays from escrow.
+  // The finder claims the bounty: LostSlabRecovery checks SlabVault says Vaulted, then pays from escrow.
   await signOut(page, "smoke_out");
   await logIn(page, 2, "smoke_finder");
   await page.goto("/submissions?tab=found");
@@ -709,7 +709,7 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   await page.reload();
   await expect(page.getByTestId("found-case-1")).toContainText("Paid");
 
-  // The payout is in the finder's Wallet history, read from AccountRegistry/LostAndFound events.
+  // The payout is in the finder's Wallet history, read from AccountRegistry/LostSlabRecovery events.
   await page.goto("/wallet");
   const finderHistory = page.getByTestId("onchain-payments");
   await expect(finderHistory.getByRole("listitem").filter({ hasText: "Recovery bounty received · case #1" })).toContainText("+$50.00");
@@ -809,7 +809,7 @@ test("lost & found: a slab that never reached the vault: a delay report, Pokecha
   await intake.getByRole("button", { name: "Simulate investigation" }).click();
   await intake.close();
 
-  // The owner publishes it with a $75 bounty: SlabVault.reportLost, then LostAndFound escrows the $75.
+  // The owner publishes it with a $75 bounty: SlabVault.reportLost, then LostSlabRecovery escrows the $75.
   await page.goto("/submissions");
   await page.getByRole("button", { name: /Recovery & insurance/ }).click();
   await page.getByRole("button", { name: "Review reply" }).click();
@@ -1094,7 +1094,7 @@ test("bounty: the owner raises and lowers it from escrow, can't overspend, and a
   await owner.goto("/vault");
   await expect(owner.getByText("Reported lost")).toHaveCount(0);
 
-  // test1 claims the bounty: LostAndFound pays the $300 from escrow.
+  // test1 claims the bounty: LostSlabRecovery pays the $300 from escrow.
   const finderBefore = await custodyDollars(TEST1);
   await page.goto("/submissions?tab=found");
   await page.getByTestId("found-case-1").getByRole("button", { name: "Claim $300.00 bounty" }).click();

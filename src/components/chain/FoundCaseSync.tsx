@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { type FoundCase, useFoundCases } from "@/lib/chain/useLostAndFound";
+import { type FoundCase, useFoundCases } from "@/lib/chain/useLostSlabRecovery";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 
@@ -22,7 +22,7 @@ const UPDATES: Record<"owner" | "finder", Partial<Record<number, (c: FoundCase) 
 };
 
 /**
- * Watches LostAndFound for the signed-in collector: a toast for each case update. Once the slab is
+ * Watches LostSlabRecovery for the signed-in collector: a toast for each case update. Once the slab is
  * back its SlabVault custody leaves Lost, which is what takes it off the Lost page.
  */
 export function FoundCaseSync() {

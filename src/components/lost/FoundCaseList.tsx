@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Check, Coins, Home, PackageCheck, Route, Truck } from "lucide-react";
 import { useState } from "react";
 import { CLAIM_STATUS } from "@/lib/chain/config";
-import { type FoundCase, useLostAndFound } from "@/lib/chain/useLostAndFound";
+import { type FoundCase, useLostSlabRecovery } from "@/lib/chain/useLostSlabRecovery";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
@@ -37,7 +37,7 @@ function nextAction(c: FoundCase, role: "owner" | "finder") {
 }
 
 function CaseRow({ c, role, listing }: { c: FoundCase; role: "owner" | "finder"; listing?: Listing }) {
-  const { chooseReturn, claimBounty } = useLostAndFound();
+  const { chooseReturn, claimBounty } = useLostSlabRecovery();
   const { confirmDelivery } = useSlabChain();
   const { pushToast } = useStore();
   const [busy, setBusy] = useState(false);
@@ -127,7 +127,7 @@ function CaseRow({ c, role, listing }: { c: FoundCase; role: "owner" | "finder";
               size="sm"
               disabled={busy || !payable}
               title={payable ? undefined : "Paid once the slab is back in the vault or the owner confirms delivery"}
-              onClick={() => act(() => claimBounty(c.claimId), "Bounty claimed", `${usd(c.bounty, { cents: true })} moved from LostAndFound to your Pokechain balance.`)}
+              onClick={() => act(() => claimBounty(c.claimId), "Bounty claimed", `${usd(c.bounty, { cents: true })} moved from LostSlabRecovery to your Pokechain balance.`)}
             >
               <Coins size={13} /> {c.bounty > 0 ? `Claim ${usd(c.bounty, { cents: true })} bounty` : "Close case"}
             </Button>
@@ -139,7 +139,7 @@ function CaseRow({ c, role, listing }: { c: FoundCase; role: "owner" | "finder";
       {deliverOpen && action === "choose" ? (
         <div className="mt-3 space-y-2 rounded-xl bg-[#101014] p-3">
           <p className="text-[12px] text-muted">
-            Calls <Fn>LostAndFound.chooseReturn(claimId, false, keccak256(address))</Fn>. Only the hash goes on-chain; Pokechain gets the address itself.
+            Calls <Fn>LostSlabRecovery.chooseReturn(claimId, false, keccak256(address))</Fn>. Only the hash goes on-chain; Pokechain gets the address itself.
           </p>
           <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
             <input className={inputClass} value={shipTo} onChange={(e) => setShipTo(e.target.value)} placeholder="Ash Ketchum, 1 Pallet Town Road" />

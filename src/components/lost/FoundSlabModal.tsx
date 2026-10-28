@@ -3,19 +3,19 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PackageCheck, Upload } from "lucide-react";
-import { useLostAndFound } from "@/lib/chain/useLostAndFound";
+import { useLostSlabRecovery } from "@/lib/chain/useLostSlabRecovery";
 import type { Listing } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import { Fn } from "../chain/ui";
 import { Button, Field, Modal, inputClass } from "../ui/primitives";
 
 /**
- * `onChain`: the slab is Lost on SlabVault, so the claim is filed on LostAndFound and followed in
+ * `onChain`: the slab is Lost on SlabVault, so the claim is filed on LostSlabRecovery and followed in
  * Submissions. Otherwise (a demo report with no token) it stays the simulated recovery flow.
  */
 export function FoundSlabModal({ listing, open, onClose, onChain = false }: { listing: Listing; open: boolean; onClose: () => void; onChain?: boolean }) {
   const { reportFoundSlab, requireAuth, pushToast } = useStore();
-  const { fileClaim, claimBond } = useLostAndFound();
+  const { fileClaim, claimBond } = useLostSlabRecovery();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [details, setDetails] = useState("");
@@ -83,7 +83,7 @@ export function FoundSlabModal({ listing, open, onClose, onChain = false }: { li
         {onChain ? (
           <div className="space-y-1 text-[11px] leading-relaxed text-dim">
             <p>
-              Calls <Fn>LostAndFound.fileClaim(tokenId, evidenceHash, carrier, tracking)</Fn>. Your evidence is hashed, not uploaded. The bounty is already escrowed in the contract and is paid to you once the slab is back in the owner&apos;s vault or they confirm delivery.
+              Calls <Fn>LostSlabRecovery.fileClaim(tokenId, evidenceHash, carrier, tracking)</Fn>. Your evidence is hashed, not uploaded. The bounty is already escrowed in the contract and is paid to you once the slab is back in the owner&apos;s vault or they confirm delivery.
             </p>
             {claimBond > 0 ? (
               <p className="text-amber-400">

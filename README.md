@@ -179,7 +179,7 @@ npm run lint                 # eslint
 6a. **Lost slab, bounty and found-slab case** (all on-chain; only the parcels are simulated):
    - **Owner:** a slab lost on its way in, or missing from the vault, is reported lost with an optional bounty
      (a withdrawn slab can't be: its NFT locks at **Ship to me** and burns when Collector Crypt is notified, so **Status Center → Withdrawn → Report lost**
-     only says to contact Collector Crypt and SingPost). `SlabVault.reportLost` sets custody `Lost`; `LostAndFound.setBounty` escrows the bounty from their Pokechain balance (the app checks
+     only says to contact Collector Crypt and SingPost). `SlabVault.reportLost` sets custody `Lost`; `LostSlabRecovery.setBounty` escrows the bounty from their Pokechain balance (the app checks
      the balance first and says how much to deposit). **Edit bounty** on **Lost cards** or **Cancel bounty** in
      the Vault escrows more or refunds the difference. **Cancel lost status** refunds it in the same transaction,
      and **Withdraw & claim insurance** (`writeOffLost`) refunds it and burns the token.
@@ -188,7 +188,7 @@ npm run lint                 # eslint
      has test2's Shining Celebi ($250) and test1's Alakazam ★ ($100) missing from the vault, so either user
      can play the finder and earn the other's bounty.
    - **Finder:** searches the cert (top search bar or **Lost cards**) → **Found Slab** → where/how they found it,
-     its condition, photos, tracking to Pokechain. `LostAndFound.fileClaim` stores the evidence hash. The case
+     its condition, photos, tracking to Pokechain. `LostSlabRecovery.fileClaim` stores the evidence hash. The case
      appears in **Submissions → Found slabs** for both the finder and the owner, and the owner can no longer
      cancel the report (`ClaimInProgress`).
    - **Pokechain** (**/intake → Found-slab claims**, or curl): **Received & authenticated** (`markReceived`).

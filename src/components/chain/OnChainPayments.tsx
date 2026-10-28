@@ -22,11 +22,11 @@ interface Payment {
 }
 
 /** Contracts that hold money in AccountRegistry on their own account (escrows). */
-const ESCROWS: ContractName[] = ["lostAndFound", "tradeEscrow", "loanEscrow"];
+const ESCROWS: ContractName[] = ["lostSlabRecovery", "tradeEscrow", "loanEscrow"];
 
 /**
  * Every movement of the account's Pokechain balance, rebuilt from AccountRegistry's events:
- * Deposited, Withdrawn and BalanceMoved (from or to this address). LostAndFound's own events in
+ * Deposited, Withdrawn and BalanceMoved (from or to this address). LostSlabRecovery's own events in
  * the same transaction say which bounty step a move was. No server keeps this list.
  */
 export function OnChainPayments({ address }: { address: Address }) {
@@ -41,11 +41,11 @@ export function OnChainPayments({ address }: { address: Address }) {
         client!.getContractEvents({ ...contracts.accounts, eventName: "Withdrawn", args: { account: address }, ...from }),
         client!.getContractEvents({ ...contracts.accounts, eventName: "BalanceMoved", args: { from: address }, ...from }),
         client!.getContractEvents({ ...contracts.accounts, eventName: "BalanceMoved", args: { to: address }, ...from }),
-        client!.getContractEvents({ ...contracts.lostAndFound, eventName: "BountyPaid", args: { finder: address }, ...from }),
-        client!.getContractEvents({ ...contracts.lostAndFound, eventName: "BountyRefunded", args: { owner: address }, ...from }),
-        client!.getContractEvents({ ...contracts.lostAndFound, eventName: "BountySet", args: { owner: address }, ...from }),
+        client!.getContractEvents({ ...contracts.lostSlabRecovery, eventName: "BountyPaid", args: { finder: address }, ...from }),
+        client!.getContractEvents({ ...contracts.lostSlabRecovery, eventName: "BountyRefunded", args: { owner: address }, ...from }),
+        client!.getContractEvents({ ...contracts.lostSlabRecovery, eventName: "BountySet", args: { owner: address }, ...from }),
       ]);
-      // Which bounty step each LostAndFound transaction was, by tx hash.
+      // Which bounty step each LostSlabRecovery transaction was, by tx hash.
       const bountyStep = new Map<string, string>();
       for (const e of paid) bountyStep.set(e.transactionHash, `Recovery bounty received · case #${e.args.claimId} · token #${e.args.tokenId}`);
       for (const e of refunded) bountyStep.set(e.transactionHash, `Lost-slab bounty refunded · token #${e.args.tokenId}`);
@@ -73,7 +73,7 @@ export function OnChainPayments({ address }: { address: Address }) {
       };
       const moveLabel = (tx: string, incoming: boolean, other: Address) => {
         const step = bountyStep.get(tx);
-        if (step && isAddressEqual(other, contracts.lostAndFound.address)) {
+        if (step && isAddressEqual(other, contracts.lostSlabRecovery.address)) {
           // A lowered bounty is refunded through BountySet, not BountyRefunded.
           return incoming && step.startsWith("Lost-slab bounty escrowed") ? step.replace("escrowed", "lowered, difference refunded") : step;
         }
@@ -133,7 +133,7 @@ export function OnChainPayments({ address }: { address: Address }) {
         </p>
         <p className="mt-1 text-[12px] text-muted">
           Read from the chain: <Fn>AccountRegistry</Fn> <Fn>Deposited</Fn>, <Fn>Withdrawn</Fn> and <Fn>BalanceMoved</Fn> events for
-          your address. Bounty payouts and refunds come from the <Fn>LostAndFound</Fn> escrow.
+          your address. Bounty payouts and refunds come from the <Fn>LostSlabRecovery</Fn> escrow.
         </p>
       </div>
       {isLoading ? (
