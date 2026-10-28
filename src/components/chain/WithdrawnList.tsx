@@ -2,26 +2,26 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { Check, ChevronDown, PackageCheck, PackageX, Route } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, PackageCheck, PackageX, Route } from "lucide-react";
 import { useState } from "react";
 import { useReadContracts } from "wagmi";
 import { CUSTODY, contracts, type CustodyName } from "@/lib/chain/config";
-import { useLostReport } from "@/lib/chain/useLostAndFound";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { shortDate } from "@/lib/format";
-import { isActiveRecovery, useStore } from "@/lib/store";
+import { useStore } from "@/lib/store";
 import type { Listing, VaultItem } from "@/lib/types";
 import { Slab } from "../slab/Slab";
-import { Badge, Button, inputClass } from "../ui/primitives";
+import { Badge, Button } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
-import { Fn } from "./ui";
 
 const TRAIL: CustodyName[] = ["Vaulted", "Redemption requested", "Shipped", "Delivered"];
 
 /**
- * Slabs that have left the vault. Their custody state, Collector Crypt redemption id and tracking
- * come live from `SlabVault.slabOf(tokenId)`. The token remains through transit and is burned only
- * after owner-confirmed receipt; the slab record and event trail stay queryable afterwards.
+ * Slabs that have left the vault (Status Center → Withdrawn). Their custody state, Collector Crypt
+ * redemption id and tracking come live from `SlabVault.slabOf(tokenId)`. The title NFT is locked at
+ * the request and burns when Pokechain notifies Collector Crypt (`markShipped`), so the only thing
+ * left on-chain after that is `confirmDelivery`. A parcel lost on
+ * the way is between the owner, Collector Crypt and the carrier: Report lost says who to contact.
  */
 export function WithdrawnList({
   items,
@@ -93,12 +93,8 @@ function Row({
 }) {
   const { confirmDelivery } = useSlabChain();
   const { pushToast, recoveries, confirmRecoveredSlab } = useStore();
-  const lostReport = useLostReport();
-  const recovering = isActiveRecovery(recoveries[listing.id]);
   const [busy, setBusy] = useState(false);
   const [lostOpen, setLostOpen] = useState(false);
-  const [details, setDetails] = useState("");
-  const [bounty, setBounty] = useState("");
   const w = entry.withdrawal;
   const token = entry.token;
 
@@ -114,12 +110,6 @@ function Row({
     } finally {
       setBusy(false);
     }
-  };
-
-  const fileLost = async () => {
-    await act(async () => {
-      await lostReport.report(listing.id, token!.tokenId, details.trim() || "Lost in transit", { inTransit: true, bounty: Number(bounty) });
-    }, Number(bounty) > 0 ? "Lost report and bounty filed" : "Lost report filed");
   };
 
   const lost = custody === "Lost";
@@ -138,7 +128,7 @@ function Row({
               {listing.grader} cert {listing.certNumber}
             </Link>
             <p className="mt-1 truncate text-[11.5px] text-dim">
-              Token #{token?.tokenId}{custody === "Delivered" ? " · NFT burned" : " · NFT locked in transit"}
+              Token #{token?.tokenId} · {custody === "Redemption requested" ? "NFT locked until dispatch" : "NFT burned"}
             </p>
             <span className="mt-2 block">
               <Badge tone={lost ? "warn" : custody === "Delivered" ? "good" : "accent"}>{lost ? "Lost reported" : custody ?? "Reading chain…"}</Badge>
@@ -164,20 +154,13 @@ function Row({
               await confirmDelivery(token!.tokenId);
               // A found slab on its way back: receipt is also what releases the finder's bounty.
               if (recoveries[listing.id]?.status === "Returning to owner") confirmRecoveredSlab(listing.id);
-            }, "Delivery confirmed; Pokechain NFT burned")} disabled={busy}>
+            }, "Delivery confirmed")} disabled={busy}>
               <PackageCheck size={13} /> Confirm delivery
             </Button>
           ) : null}
           {custody === "Shipped" || custody === "Redemption requested" ? (
             <Button size="sm" variant="danger" onClick={() => setLostOpen((v) => !v)} disabled={busy}>
               <PackageX size={13} /> Report lost
-            </Button>
-          ) : null}
-          {custody === "Lost" && !recovering ? (
-            <Button size="sm" variant="outline" onClick={() => act(async () => {
-              await lostReport.cancel(listing.id, token!.tokenId);
-            }, "Lost report cancelled")} disabled={busy}>
-              Cancel lost status
             </Button>
           ) : null}
           <button
@@ -195,10 +178,12 @@ function Row({
       {open ? <div className="border-t border-hairline bg-black/15 px-4 py-3">
         <p className="text-[12px] text-muted">
           {custody === "Delivered"
-            ? "Delivery confirmed and the Pokechain NFT was burned."
+            ? "Delivery confirmed. The Pokechain NFT was burned when Collector Crypt was notified to ship it."
             : lost
               ? "This shipment was reported lost on-chain."
-              : "The slab remains locked to its latest owner while Collector Crypt completes delivery."}
+              : custody === "Redemption requested"
+                ? "Your Pokechain NFT is locked. It burns once Pokechain notifies Collector Crypt to ship the slab."
+                : "The Pokechain NFT was burned when Collector Crypt was notified to ship it. Collector Crypt is delivering the slab."}
           {slab?.trackingNumber ? ` Collector Crypt ${slab.redemptionRef} · ${slab.carrier} ${slab.trackingNumber}` : ""}
         </p>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-dim">
@@ -213,19 +198,26 @@ function Row({
       </div> : null}
 
       {lostOpen ? (
-        <div className="space-y-2 border-t border-hairline bg-[#101014] p-4">
+        <div data-testid="withdrawn-lost-help" className="space-y-2 border-t border-hairline bg-[#101014] p-4">
+          <p className="text-[13px] font-bold text-white">Contact Collector Crypt and SingPost</p>
           <p className="text-[12px] text-muted">
-            Calls <Fn>SlabVault.reportLost(tokenId, details)</Fn>. Custody becomes <b className="text-white">Lost</b> and{" "}
-            <Fn>SlabReportedLost</Fn> is emitted with the tracking number. The Trace page lines this up with Collector
-            Crypt&apos;s redemption record, the carrier scans and the Pokechain NFT, which stays locked until receipt is confirmed.
-            A bounty is escrowed from your Pokechain balance with <Fn>LostAndFound.setBounty</Fn> and refunded if you cancel.
+            This slab&apos;s Pokechain NFT is locked for shipping (and burned once dispatched), so there is nothing to report on Pokechain.
+            A parcel lost on its way to you is Collector Crypt&apos;s and the carrier&apos;s responsibility: contact them
+            with the references below and they will trace or compensate it.
           </p>
-          <div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]">
-            <input className={inputClass} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Not delivered after 10 days, carrier has no scan since dispatch" />
-            <input className={inputClass} inputMode="decimal" value={bounty} onChange={(e) => setBounty(e.target.value.replace(/[^\d.]/g, ""))} placeholder="Bounty (optional)" />
-            <Button variant="danger" onClick={() => void fileLost()} disabled={busy}>
-              File
-            </Button>
+          <dl className="grid gap-x-6 gap-y-1 text-[12px] sm:grid-cols-[auto_1fr]">
+            <dt className="text-dim">Collector Crypt redemption</dt>
+            <dd className="font-mono text-white">{slab?.redemptionRef || "Not shipped yet"}</dd>
+            <dt className="text-dim">Carrier tracking</dt>
+            <dd className="font-mono text-white">{slab?.trackingNumber ? `${slab.carrier} ${slab.trackingNumber}` : "Not shipped yet"}</dd>
+          </dl>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <a href="https://collectorcrypt.com" target="_blank" rel="noreferrer" className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-hairline px-3 text-[12px] font-semibold text-white hover:bg-surface-2">
+              Collector Crypt <ExternalLink size={12} />
+            </a>
+            <a href="https://www.singpost.com/track-items" target="_blank" rel="noreferrer" className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-hairline px-3 text-[12px] font-semibold text-white hover:bg-surface-2">
+              SingPost tracking <ExternalLink size={12} />
+            </a>
           </div>
         </div>
       ) : null}

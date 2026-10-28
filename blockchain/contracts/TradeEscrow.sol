@@ -323,9 +323,10 @@ contract TradeEscrow is Ownable, ReentrancyGuard {
     /// @dev Every slab is `who`'s and Vaulted, and `who` has `cash` in custody.
     function _checkSide(address who, uint256[] memory slabs, uint256 cash) private view {
         for (uint256 i; i < slabs.length; ++i) {
+            // Custody first: a dispatched slab's token is burned, so ownerOf would revert unexplained.
+            if (vault.custodyOf(slabs[i]) != VAULTED) revert SlabNotVaulted(slabs[i]);
             address owner = vault.ownerOf(slabs[i]);
             if (owner != who) revert NotYourSlab(slabs[i], owner);
-            if (vault.custodyOf(slabs[i]) != VAULTED) revert SlabNotVaulted(slabs[i]);
         }
         uint256 available = accounts.balanceOf(who);
         if (cash > available) revert NotEnoughCash(cash, available);

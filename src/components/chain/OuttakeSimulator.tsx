@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Loader2, Truck } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { keccak256, toBytes } from "viem";
+import { keccak256, toBytes, zeroAddress } from "viem";
 import { usePublicClient } from "wagmi";
 import { CUSTODY, IS_DEPLOYED, contracts } from "@/lib/chain/config";
 import { useLostSlabs, useStore } from "@/lib/store";
@@ -47,8 +47,11 @@ export function OuttakeSimulator() {
       }
       const [slab, owner] = await Promise.all([
         client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [submission.tokenId] }),
-        // Reverts once the owner confirmed receipt and the token was burned.
-        client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [submission.tokenId] }).catch(() => null),
+        // A dispatched slab's token is burned: redeemerOf says who it shipped to.
+        client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [submission.tokenId] })
+          .catch(() => client!.readContract({ ...contracts.slabVault, functionName: "redeemerOf", args: [submission.tokenId] }))
+          .then((a) => (a === zeroAddress ? null : a))
+          .catch(() => null),
       ]);
       return {
         tokenId: submission.tokenId.toString(),
@@ -163,7 +166,7 @@ export function OuttakeSimulator() {
         <div className="mt-3 text-[13px] text-muted">
           {error ? (error as Error).message : record ? (
             <>
-              SlabVault token #{record.tokenId} · current status: <span className="font-semibold text-white">{CUSTODY[record.custody]}</span> · {record.owner ? <>latest owner <span className="font-mono text-white">{shortAddress(record.owner)}</span></> : "token burned after the owner confirmed receipt"}
+              SlabVault token #{record.tokenId} · current status: <span className="font-semibold text-white">{CUSTODY[record.custody]}</span> · {record.owner ? <>latest owner <span className="font-mono text-white">{shortAddress(record.owner)}</span></> : "token burned"}
             </>
           ) : "Reading custody record…"}
         </div>

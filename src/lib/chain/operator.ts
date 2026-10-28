@@ -296,7 +296,8 @@ export async function shipSlab(origin: string, tokenId: bigint, shipTo = getRede
   if (CUSTODY[slab.custody] !== "Redemption requested") {
     throw new Error(`Slab #${tokenId} is ${CUSTODY[slab.custody]}, not awaiting shipment`);
   }
-  const latestOwner = await publicClient.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [tokenId] });
+  // The owner who asked to ship it; markShipped below burns their title NFT.
+  const latestOwner = await publicClient.readContract({ ...contracts.slabVault, functionName: "redeemerOf", args: [tokenId] });
   if (keccak256(toBytes(shipTo.trim())) !== slab.shippingHash) {
     throw new Error("That address doesn't match the shippingHash the owner signed on-chain");
   }

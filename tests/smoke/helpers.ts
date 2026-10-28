@@ -160,3 +160,21 @@ export async function custodyOf(tokenId: number) {
   const pub = createPublicClient({ chain: hardhat, transport: http() });
   return pub.readContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "custodyOf", args: [BigInt(tokenId)] });
 }
+
+/**
+ * A test wallet reports one of its vaulted slabs missing from Collector Crypt's vault, optionally
+ * escrowing a bounty (SlabVault.reportLost, then LostAndFound.setBounty). Withdrawn slabs can't
+ * be reported lost any more (their NFT burns at the request), so lost-and-found flows start here.
+ */
+export async function reportLostInVaultAs(wallet: 1 | 2, tokenId: number, details: string, bountyDollars = 0) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const client = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(wallet === 1 ? TEST1_KEY : MISTY_KEY) });
+  await pub.waitForTransactionReceipt({
+    hash: await client.writeContract({ address: local.SlabVault, abi: slabVaultAbi, functionName: "reportLost", args: [BigInt(tokenId), details] }),
+  });
+  if (bountyDollars > 0) {
+    await pub.waitForTransactionReceipt({
+      hash: await client.writeContract({ address: local.LostAndFound, abi: lostAndFoundAbi, functionName: "setBounty", args: [BigInt(tokenId), BigInt(bountyDollars * 1_000_000)] }),
+    });
+  }
+}

@@ -37,15 +37,18 @@ interface ILostReportHook {
  *                           asset id. Custody: Vaulted: only now can the token be traded.
  *                           (`rejectSubmission` at any open stage: Rejected, never burned.)
  *
- *  Offboarding a slab (the slab leaves the vault, the token stays during transit)
- *   5. `requestRedemption`  the owner asks for the slab. The token is locked: it can no longer
- *                           be transferred or traded. Custody: RedemptionRequested.
+ *  Offboarding a slab (the title NFT burns once Collector Crypt has been told to ship it)
+ *   5. `requestRedemption`  the owner asks for the slab with their address hash. The token is
+ *                           locked (no trades, listings or loans) and `redeemerOf` records who
+ *                           asked. Custody: RedemptionRequested.
  *   6. `markShipped`        Pokechain, as holder of CC's NFT, asked CC to ship to the owner;
- *                           records CC's redemption id, carrier and tracking. Custody: Shipped.
- *   7. `confirmDelivery`    the owner confirms it arrived. Custody: Delivered, then the
- *                           Pokechain title NFT is burned.
- *      `reportLost`         or reports it lost: in either direction's post, or missing from
- *                           Collector Crypt's vault. Custody: Lost. Lost reports are public:
+ *                           records CC's redemption id, carrier and tracking, then burns the
+ *                           title NFT. Custody: Shipped.
+ *   7. `confirmDelivery`    the redeemer confirms it arrived. Custody: Delivered.
+ *                           A parcel lost on this leg is a claim against Collector Crypt and the
+ *                           carrier (off-chain); there is no token left to report lost.
+ *      `reportLost`         the owner reports a slab lost in the post on its way in, or missing
+ *                           from Collector Crypt's vault. Custody: Lost. Lost reports are public:
  *                           the Lost page reads them from `SlabReportedLost` and `custodyOf`.
  *   8. `resolveLostReport`  the operator closes an inbound/vault return; a found outbound slab
  *                           is verified and sent through `markRecoveredShipped`.
@@ -58,8 +61,9 @@ interface ILostReportHook {
  *  Trading: TradeEscrow (set with `setTradeEscrow`) may hold slabs that are in an open offer and
  *  move Vaulted slabs on its own authority when both sides of a trade have agreed.
  *
- *  The NFT survives every pending and shipping state. It is burned only after the owner confirms
- *  physical receipt; the slab record and events remain available as a permanent custody trail.
+ *  The NFT survives every inbound and lost state. It is burned when Collector Crypt is notified
+ *  to ship the slab out (or after a recovered slab is delivered, or written off); the slab record and events
+ *  remain available as a permanent custody trail.
  */
 contract SlabVault is ERC721, AccessControl {
     using Strings for uint256;
@@ -136,6 +140,8 @@ contract SlabVault is ERC721, AccessControl {
 
     mapping(uint256 => Slab) private _slabs;
     mapping(uint256 => Custody) private _custodyBeforeLoss;
+    /// @notice Who asked to ship a slab out. Their token burns at dispatch, so this is who confirms delivery.
+    mapping(uint256 => address) public redeemerOf;
     mapping(uint256 => Submission) private _submissions;
     /// @notice keccak256(grader, cert) => its token once Pokechain has received and minted it.
     mapping(bytes32 => uint256) public tokenOfCert;
@@ -427,8 +433,8 @@ contract SlabVault is ERC721, AccessControl {
     /* --------------------------- slab offboarding ---------------------------- */
 
     /**
-     * @notice Step 3: the owner asks for the physical slab. The token stays with them but is
-     *         locked from here on.
+     * @notice Step 5: the owner asks for the physical slab. The token stays with them but is
+     *         locked; it burns in `markShipped`, once Collector Crypt has been told to ship it.
      * @param shippingHash keccak256 of the shipping address, computed in the browser. It lets
      *        the operator prove later which address they shipped to without publishing it.
      */
@@ -437,13 +443,15 @@ contract SlabVault is ERC721, AccessControl {
         if (isListed[tokenId]) revert SlabIsListed(tokenId);
         _moveCustody(tokenId, Custody.Vaulted, Custody.RedemptionRequested);
         _slabs[tokenId].shippingHash = shippingHash;
+        redeemerOf[tokenId] = msg.sender;
         vaultedCount[msg.sender] -= 1;
         emit RedemptionRequested(tokenId, msg.sender, shippingHash);
     }
 
     /**
      * @notice Step 6: Pokechain (holder of CC's NFT) asked Collector Crypt to ship the slab to the
-     *         owner. Records CC's redemption id and the carrier's tracking number.
+     *         owner. Records CC's redemption id and the carrier's tracking number, then burns
+     *         the title NFT: from here the slab is a parcel between CC, the carrier and the owner.
      */
     function markShipped(
         uint256 tokenId,
@@ -457,27 +465,36 @@ contract SlabVault is ERC721, AccessControl {
         slab.redemptionRef = redemptionRef;
         slab.carrier = carrier;
         slab.trackingNumber = trackingNumber;
-        emit SlabShipped(tokenId, ownerOf(tokenId), redemptionRef, carrier, trackingNumber);
-    }
-
-    /// @notice Step 7a: the owner confirms the slab arrived.
-    function confirmDelivery(uint256 tokenId) external {
-        if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
-        _moveCustody(tokenId, Custody.Shipped, Custody.Delivered);
-        emit SlabDelivered(tokenId, msg.sender);
+        emit SlabShipped(tokenId, redeemerOf[tokenId], redemptionRef, carrier, trackingNumber);
         _burn(tokenId);
     }
 
     /**
+     * @notice Step 7: the owner confirms the slab arrived. A redeemed slab's token burned at
+     *         dispatch, so its redeemer confirms; a recovered lost slab still has its token, which
+     *         burns now.
+     */
+    function confirmDelivery(uint256 tokenId) external {
+        bool redeemed = _ownerOf(tokenId) == address(0);
+        address owner = redeemed ? redeemerOf[tokenId] : ownerOf(tokenId);
+        if (owner != msg.sender) revert NotSlabOwner(tokenId);
+        _moveCustody(tokenId, Custody.Shipped, Custody.Delivered);
+        emit SlabDelivered(tokenId, msg.sender);
+        if (!redeemed) _burn(tokenId);
+    }
+
+    /**
      * @notice The owner reports the slab lost: in the post on its way to Pokechain or to Collector
-     *         Crypt (inbound), on its way back to them (outbound), or missing from CC's vault.
+     *         Crypt (inbound), or missing from CC's vault. A recovered slab on its way back
+     *         (Shipped, token not yet burned) can be reported again. A redemption can't: its token is
+     *         locked until dispatch and burned after.
      */
     function reportLost(uint256 tokenId, string calldata details) external {
         if (ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         if (isListed[tokenId]) revert SlabIsListed(tokenId);
         Custody c = _slabs[tokenId].custody;
         bool inPost = c == Custody.PostedToPokechain || c == Custody.AtPokechain || c == Custody.SentToCustodian
-            || c == Custody.RedemptionRequested || c == Custody.Shipped;
+            || c == Custody.Shipped;
         if (!inPost && c != Custody.Vaulted) revert WrongCustody(tokenId, c);
         // A Lost slab can't trade, so it stops counting as vaulted until it's found.
         if (c == Custody.Vaulted) vaultedCount[msg.sender] -= 1;
@@ -618,7 +635,7 @@ contract SlabVault is ERC721, AccessControl {
             : string.concat(s.grader, " ", s.certNumber, " (pending verification)");
         bytes memory head = abi.encodePacked(
             '{"name":"', name,
-            '","description":"Graded slab held by the Pokechain vault. The NFT remains active through transit and burns only after owner-confirmed physical delivery.",',
+            '","description":"Graded slab held by the Pokechain vault. The NFT burns when the slab is dispatched to its owner.",',
             '"image":"', s.image,
             '","attributes":[{"trait_type":"Grader","value":"', s.grader,
             '"},{"trait_type":"Cert number","value":"', s.certNumber
@@ -677,9 +694,11 @@ contract SlabVault is ERC721, AccessControl {
             if (isListed[tokenId] && msg.sender != marketplace) revert SlabIsListed(tokenId);
             Custody c = _slabs[tokenId].custody;
             if (to == address(0)) {
-                // vaultedCount was already reduced (redemption or lost report). Only confirmed
-                // delivery or a written-off loss burns.
-                if (c != Custody.Delivered && c != Custody.WrittenOff) revert SlabLocked(tokenId, c);
+                // vaultedCount was already reduced (redemption or lost report). Only a dispatched
+                // redemption, a confirmed delivery or a written-off loss burns.
+                if (c != Custody.Shipped && c != Custody.Delivered && c != Custody.WrittenOff) {
+                    revert SlabLocked(tokenId, c);
+                }
             } else {
                 if (c != Custody.Vaulted) revert SlabLocked(tokenId, c);
                 vaultedCount[from] -= 1;

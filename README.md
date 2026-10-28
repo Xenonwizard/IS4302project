@@ -15,8 +15,9 @@ is already a token that can be reported. It unlocks once Collector Crypt (simula
 slab and its Solana NFT is in Pokechain's escrow. Collectors then **trade slabs and cash both ways**
 in `TradeEscrow` ("3 Pikachus + $50 for your 2 Articunos"). The offer is made **inside a chat** while the two
 talk, reviewed using Pokechain's own listings and transactions, locked in escrow, and settled in
-one transaction, or not at all. Withdrawn slabs keep their token, locked, for tracing across
-Polygon, Solana and Collector Crypt. See **[docs/blockchain-onboarding.md](docs/blockchain-onboarding.md)**
+one transaction, or not at all. **Ship to me** burns the slab's NFT straight away; the custody record
+and events stay on-chain for tracing across Polygon, Solana and Collector Crypt, and the slab is
+followed under **Status Center → Withdrawn** until the owner confirms delivery. See **[docs/blockchain-onboarding.md](docs/blockchain-onboarding.md)**
 for the full explanation. Offers on the simulated catalogue sellers still live in `localStorage`.
 
 The name lives in one file, [`src/lib/brand.ts`](src/lib/brand.ts).
@@ -100,7 +101,7 @@ and resets to an empty chain first, except the seeded-demo test). `test:unit` al
 
 | Role | Sees | Can do |
 | --- | --- | --- |
-| **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (the NFT is minted when Pokechain receives the slab), watch each request move on live, report a parcel lost on the way in or out, trade slabs + cash with another collector in a chat (offer, accept, counter, decline, withdraw; prices negotiated using Pokechain records), transfer, withdraw a slab, trace it |
+| **Collector** (wallet account) | Home, Marketplace, Vault, Negotiation rooms, Wallet, Account, Submit | Open/close an account, deposit/withdraw USDC, submit slabs with photos (the NFT is minted when Pokechain receives the slab), watch each request move on live, report a slab lost on the way in or missing from the vault, trade slabs + cash with another collector in a chat (offer, accept, counter, decline, withdraw; prices negotiated using Pokechain records), transfer, withdraw a slab, trace it |
 | **Pokechain operator** (server key, simulated warehouse) | **/intake** and **/outtake** (the card processing simulators), curl, Postman | Receive a slab, forward it to Collector Crypt (encrypted), confirm it vaulted, notify Collector Crypt to ship a withdrawal, authenticate a found slab on **/intake** and return it to the vault or the owner, close lost reports. No power over trades and can't pay a bounty out: only the finder can claim it, once the chain shows the slab back |
 | **Collector Crypt** (simulated custodian) | **/collector-crypt**, **/intake** (Vaulted step) | Publish its encryption key, read incoming parcels by decrypting them, vault slabs |
 | **Anyone** | **/trace/[tokenId]**, the chain itself | Verify a slab's history, evidence and custody without trusting Pokechain |
@@ -176,8 +177,9 @@ npm run lint                 # eslint
 6. **Report lost**: from any trade room, file a report for a slab you should have received, a
    slab you sent, or a payment. It gets a case id, posts to the room, and is listed on `/trades`.
 6a. **Lost slab, bounty and found-slab case** (all on-chain; only the parcels are simulated):
-   - **Owner:** **Vault → Withdrawn**, **Report lost** with an optional bounty. `SlabVault.reportLost` sets
-     custody `Lost`; `LostAndFound.setBounty` escrows the bounty from their Pokechain balance (the app checks
+   - **Owner:** a slab lost on its way in, or missing from the vault, is reported lost with an optional bounty
+     (a withdrawn slab can't be: its NFT locks at **Ship to me** and burns when Collector Crypt is notified, so **Status Center → Withdrawn → Report lost**
+     only says to contact Collector Crypt and SingPost). `SlabVault.reportLost` sets custody `Lost`; `LostAndFound.setBounty` escrows the bounty from their Pokechain balance (the app checks
      the balance first and says how much to deposit). **Edit bounty** on **Lost cards** or **Cancel bounty** in
      the Vault escrows more or refunds the difference. **Cancel lost status** refunds it in the same transaction,
      and **Withdraw & claim insurance** (`writeOffLost`) refunds it and burns the token.

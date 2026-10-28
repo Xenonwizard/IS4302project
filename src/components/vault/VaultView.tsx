@@ -126,6 +126,7 @@ export function VaultView() {
     const loss = lossFor(i.entry, i.listing);
     return !hasPendingDecision(i.listing) && !loss?.published && !loss?.resolution;
   });
+
   const totalValue = items.reduce((sum, i) => sum + (i.entry.status === "Listed" ? i.entry.listedPrice ?? i.listing.price : 0), 0);
   const listed = items.filter((i) => i.entry.status === "Listed" && !lossFor(i.entry, i.listing)?.published);
   const unlisted = items.filter((i) => i.entry.status === "Vaulted" && !lossFor(i.entry, i.listing)?.published);

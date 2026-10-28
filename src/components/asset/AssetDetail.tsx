@@ -21,7 +21,7 @@ import { truncMiddle, usd } from "@/lib/format";
 import { useLostSlabs, useStore } from "@/lib/store";
 import { useMarketChain, useMarketFeeBps } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
-import { chain, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
+import { CUSTODY, chain, DEPLOY_BLOCK, IS_DEPLOYED, contracts, fromUsdcUnits, shortHash } from "@/lib/chain/config";
 import { zeroAddress } from "viem";
 import { usePublicClient } from "wagmi";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -139,6 +139,18 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     },
   });
 
+  // A slab whose owner asked to ship it out: locked from the request, burned once markShipped
+  // has notified Collector Crypt. Either way it is no longer tradeable.
+  const { data: shippedOut = false } = useQuery({
+    queryKey: ["token-shipped-out", resolvedTokenId],
+    enabled: enabledOnChain,
+    queryFn: async () => {
+      if (!client || tokenIdBigInt === null) return false;
+      const custody = await client.readContract({ ...contracts.slabVault, functionName: "custodyOf", args: [tokenIdBigInt] }).catch(() => null);
+      return custody !== null && ["Redemption requested", "Shipped", "Delivered"].includes(CUSTODY[custody]);
+    },
+  });
+
   const currentOwner = enabledOnChain && onChainOwner?.handle
     ? onChainOwner.handle
     : listing.owner;
@@ -152,6 +164,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
     : isOwned(listing.id);
   const vaultEntry = vault.find((entry) => entry.listingId === listing.id || entry.token?.tokenId === resolvedTokenId);
   const awaitingVaulting = owned && vaultEntry?.status === "Awaiting vaulting";
+  const withdrawn = shippedOut || (owned && vaultEntry?.status === "Withdrawn");
+  const withdrawnBurned = withdrawn && onChainOwner === null;
   // A slab still being vaulted has no page of its own: it lives in the Vault's Awaiting vault tab.
   useEffect(() => {
     if (awaitingVaulting) router.replace("/vault?tab=awaiting");
@@ -304,10 +318,12 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           const block = await client.getBlock({ blockNumber: log.blockNumber }).catch(() => null);
           const at = block?.timestamp ? new Date(Number(block.timestamp) * 1000).toISOString() : new Date().toISOString();
 
+          // A transfer to the zero address is the burn when the slab was withdrawn (or written off).
+          const burned = a.to === zeroAddress;
           events.push({
-            kind: "Transfer",
+            kind: burned ? "Burn" : "Transfer",
             from: fromName,
-            to: toName,
+            to: burned ? "burned" : toName,
             at,
             txHash: log.transactionHash ?? "",
           });
@@ -499,10 +515,17 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
         {/* ---------------- right ---------------- */}
         <div className="min-w-0 space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
-              <ShieldCheck size={13} className="text-good" />
-              Vaulted and insured
-            </Badge>
+            {withdrawn ? (
+              <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
+                <Truck size={13} className="text-muted" />
+                {withdrawnBurned ? "Withdrawn · NFT burned" : "Withdrawn · NFT locked"}
+              </Badge>
+            ) : (
+              <Badge tone="neutral" className="gap-1.5 px-2.5 py-1.5">
+                <ShieldCheck size={13} className="text-good" />
+                Vaulted and insured
+              </Badge>
+            )}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
@@ -572,7 +595,27 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
             </button>
           </div>
 
-          {!lostView ? <>
+          {withdrawn ? (
+            <div data-testid="withdrawn-status" className="rounded-card border border-hairline bg-surface p-4 sm:p-5">
+              <p className="text-[12px] font-semibold text-muted">Status</p>
+              <p className="mt-1 text-[24px] font-bold leading-tight">Withdrawn from the vault</p>
+              <p className="mt-2 text-[12px] leading-relaxed text-muted">
+                {withdrawnBurned
+                  ? "This slab was shipped out of Collector Crypt's vault. Its Pokechain NFT was burned once Collector Crypt was notified to ship it, so it can't be listed, traded or used for a loan."
+                  : "Its owner asked to ship this slab out. Its Pokechain NFT is locked, so it can't be listed, traded or used for a loan, and burns once Collector Crypt is notified to ship it."}
+              </p>
+              {owned ? (
+                <Link href="/submissions?tab=withdrawn" className="mt-4 block">
+                  <Button size="lg" variant="secondary" className="w-full">
+                    <Truck size={16} />
+                    Track it in Status Center
+                  </Button>
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!lostView && !withdrawn ? <>
           {/* listing status and actions */}
           <div className="overflow-hidden rounded-card border border-hairline bg-surface">
             <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] sm:items-center sm:p-5">

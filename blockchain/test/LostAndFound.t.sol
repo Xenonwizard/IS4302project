@@ -50,7 +50,7 @@ contract LostAndFoundTest is Test {
         accounts.register(handle);
     }
 
-    /// A vaulted slab the owner withdrew, which never arrived: custody Lost, with a $50 bounty escrowed.
+    /// A vaulted slab missing from Collector Crypt's vault: custody Lost, with a $50 bounty escrowed.
     function _lostWithBounty() internal returns (uint256 tokenId) {
         vm.prank(owner);
         uint256 sid = vault.requestSubmission("PSA", "12345678", EVIDENCE, "SingPost", "RR1SG");
@@ -60,12 +60,8 @@ contract LostAndFoundTest is Test {
         vault.confirmVaulted(sid, "Charizard PSA 10", "img", "CCsol1111");
         vm.stopPrank();
         tokenId = sid;
-        vm.prank(owner);
-        vault.requestRedemption(tokenId, ADDRESS_HASH);
-        vm.prank(operator);
-        vault.markShipped(tokenId, "CCR-1", "DHL", "LOST-1");
         vm.startPrank(owner);
-        vault.reportLost(tokenId, "Never arrived");
+        vault.reportLost(tokenId, "Missing at audit");
         lf.setBounty(tokenId, BOUNTY);
         vm.stopPrank();
     }
