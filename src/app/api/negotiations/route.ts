@@ -17,6 +17,8 @@ function dedupeMessages(messages: Negotiation["messages"]): Negotiation["message
 
   for (const m of sorted) {
     if (seenIds.has(m.id)) continue;
+    // Loan offers were removed; old ones point at a contract that no longer exists.
+    if ((m.kind as string) === "loan") continue;
     // Discard identical duplicate sent by same sender within 3 seconds
     const isDup = result.some(
       (r) =>
@@ -24,7 +26,6 @@ function dedupeMessages(messages: Negotiation["messages"]): Negotiation["message
         r.kind === m.kind &&
         r.text === m.text &&
         r.trade?.offerId === m.trade?.offerId &&
-        r.loan?.offerId === m.loan?.offerId &&
         Math.abs((Date.parse(r.at) || 0) - (Date.parse(m.at) || 0)) < 3000,
     );
     if (isDup) continue;

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
+import { usd } from "@/lib/format";
 import type { Listing } from "@/lib/types";
 import { Button } from "../ui/primitives";
 
@@ -48,8 +49,9 @@ const date = (value?: string) => value
   ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(value))
   : "Not available";
 
-export function GradedCardPricing({ card, embedded = false }: { card: Listing; embedded?: boolean }) {
-  const query = useQuery({
+/** One cached pricing lookup per card and grade, shared by the asset page and every price line. */
+function useGradedPricing(card: Listing) {
+  return useQuery({
     queryKey: ["graded-card-pricing", card.subject, card.set, card.cardNumber, card.grader, card.grade, card.gradeLabel],
     staleTime: 24 * 60 * 60 * 1000,
     retry: false,
@@ -70,6 +72,21 @@ export function GradedCardPricing({ card, embedded = false }: { card: Listing; e
       return body.data;
     },
   });
+}
+
+/** Market estimate for this exact grade from recent graded sales, shown under a seller's ask. */
+export function MarketPriceLine({ card, className }: { card: Listing; className?: string }) {
+  const query = useGradedPricing(card);
+  const matched = query.data?.prices.find((price) => price.matchesSlab);
+  const value = query.isPending ? "…" : matched ? usd(matched.value, { cents: true }) : "No data";
+  const hint = matched
+    ? `Recent ${card.grader} ${card.grade} sales (${matched.count} tracked), via PokémonPriceTracker`
+    : query.error?.message ?? `No recent ${card.grader} ${card.grade} sales found`;
+  return <p className={className} title={hint}>Market price {value}</p>;
+}
+
+export function GradedCardPricing({ card, embedded = false }: { card: Listing; embedded?: boolean }) {
+  const query = useGradedPricing(card);
 
   const matchedPrice = query.data?.prices.find((price) => price.matchesSlab);
   const error = query.error instanceof PricingError ? query.error : null;

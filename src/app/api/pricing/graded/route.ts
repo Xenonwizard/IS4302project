@@ -77,19 +77,21 @@ export async function GET(request: NextRequest) {
       return Response.json({ error: payload.error || payload.message || "The free graded-pricing provider could not complete this request." }, { status: response.status });
     }
 
+    // No match is a normal answer for an obscure card, not a failed request: 200, so every marketplace
+    // card can ask without filling the console with 404s.
     const card = Array.isArray(payload.data) ? payload.data[0] : payload.data;
     if (!card?.name || !card.ebay?.salesByGrade) {
-      return Response.json({ error: "No graded sales were found for this card." }, { status: 404 });
+      return Response.json({ error: "No graded sales were found for this card." });
     }
 
     const returnedNumber = (card.cardNumber || "").split("/")[0].replace(/^0+/, "") || "0";
     if (card.cardNumber && returnedNumber !== number) {
-      return Response.json({ error: "The provider did not return an exact card-number match." }, { status: 404 });
+      return Response.json({ error: "The provider did not return an exact card-number match." });
     }
     const expectedSet = normalizedSet(set);
     const returnedSet = normalizedSet(card.setName || "");
     if (returnedSet && returnedSet !== expectedSet && !returnedSet.endsWith(expectedSet) && !expectedSet.endsWith(returnedSet)) {
-      return Response.json({ error: "The provider did not return an exact set match." }, { status: 404 });
+      return Response.json({ error: "The provider did not return an exact set match." });
     }
 
     const requestedGradeKey = normalized(`${grader}${String(grade).replace(".", "_")}`);

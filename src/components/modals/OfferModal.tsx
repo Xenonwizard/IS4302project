@@ -1,9 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, HandCoins } from "lucide-react";
+import { ArrowLeftRight } from "lucide-react";
 import { useHandleAddress } from "@/lib/chain/trades";
-import { useLoanListing } from "@/lib/chain/loans";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import type { Listing } from "@/lib/types";
@@ -30,9 +29,6 @@ export function OfferModal({
   const router = useRouter();
   // A slab held by another wallet account is traded for in a chat, with slabs from both vaults.
   const { data: ownerAddress } = useHandleAddress(listing.owner);
-  const { data: loanListing } = useLoanListing(listing.tokenId);
-  // Never trust cached catalogue data for eligibility: the live SlabMarket listing is authoritative.
-  const loanEnabled = loanListing?.acceptsLoan === true;
   const collectorTrade = Boolean(user?.address && ownerAddress && ownerAddress.toLowerCase() !== user.address.toLowerCase());
 
   if (collectorTrade) {
@@ -43,11 +39,10 @@ export function OfferModal({
             <span className="font-semibold text-white">{listing.owner}</span> is a collector on Pokechain. Offers to them are made in a private
             chat: pick slabs from both vaults and choose any cash to add. Review comparable Pokechain listings and transactions before agreeing to a trade.
           </p>
-          <dl className={loanEnabled ? "grid grid-cols-2 gap-2 text-center text-[12px]" : "mx-auto grid w-1/2 min-w-[180px] gap-2 text-center text-[12px]"}>
+          <dl className="mx-auto grid w-1/2 min-w-[180px] gap-2 text-center text-[12px]">
             <Fact label="Seller asking price" value={listing.price > 0 ? usd(listing.price, { cents: true }) : "Not listed"} />
-            {loanEnabled ? <Fact label="Minimum loan" value={usd(loanListing.loanAsk, { cents: true })} /> : null}
           </dl>
-          <div className={loanEnabled ? "grid grid-cols-2 gap-3" : "grid"}>
+          <div className="grid">
             <Button
               size="lg"
               className="w-full"
@@ -61,22 +56,6 @@ export function OfferModal({
               <ArrowLeftRight size={16} />
               Make a trade offer
             </Button>
-            {loanEnabled ? (
-              <Button
-                size="lg"
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  const id = openChat(listing);
-                  if (!id) return;
-                  onClose();
-                  router.push(`/trades/${id}?loan=1`);
-                }}
-              >
-                <HandCoins size={16} />
-                Offer a loan
-              </Button>
-            ) : null}
           </div>
         </div>
       </Modal>

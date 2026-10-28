@@ -2,7 +2,7 @@ import { createPublicClient, createWalletClient, http, parseEventLogs, type Addr
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { accountRegistryAbi, deployments, loanEscrowAbi, lostSlabRecoveryAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
+import { accountRegistryAbi, deployments, lostSlabRecoveryAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect } from "./fixtures";
 
 const local = deployments["31337"];
@@ -56,23 +56,6 @@ export async function listAsMisty(tokenId: number, dollars: number) {
   await pub.waitForTransactionReceipt({
     hash: await wallet.writeContract({ address: local.SlabMarket, abi: slabMarketAbi, functionName: "list", args: [BigInt(tokenId), BigInt(dollars * 1_000_000)] }),
   });
-}
-
-/**
- * A full loan against one of @misty's slabs, straight on the chain: she lists it open to loans,
- * @ash (test1) lends $100 + $5 for a day, she accepts (the slab moves into LoanEscrow) and repays.
- */
-export async function loanRoundTripOnMistySlab(tokenId: number) {
-  const pub = createPublicClient({ chain: hardhat, transport: http() });
-  const misty = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(MISTY_KEY) });
-  const ash = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(TEST1_KEY) });
-  const id = BigInt(tokenId);
-  const wait = async (hash: `0x${string}`) => pub.waitForTransactionReceipt({ hash });
-  await wait(await misty.writeContract({ address: local.SlabMarket, abi: slabMarketAbi, functionName: "listWithLoan", args: [id, 500_000_000n, 100_000_000n] }));
-  await wait(await ash.writeContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "createOffer", args: [id, 100_000_000n, 5_000_000n, 86_400n, "smoke"] }));
-  const offerId = await pub.readContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "nextOfferId" }) - 1n;
-  await wait(await misty.writeContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "accept", args: [offerId] }));
-  await wait(await misty.writeContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "repay", args: [offerId] }));
 }
 
 /** Whether SlabVault says a slab is currently listed for sale. */

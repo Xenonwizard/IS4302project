@@ -14,6 +14,8 @@ export const test = base.extend<{ problems: string[] }>({
       page.on("response", (r) => {
         if (r.status() >= 500) problems.push(`${r.status()} ${r.request().method()} ${r.url()}`);
       });
+      // Graded prices come from a rate-limited free API: keep it out of the tests unless a test stubs a price.
+      await page.route("**/api/pricing/graded?**", (route) => route.fulfill({ json: { error: "Pricing is stubbed in smoke tests." } }));
       await use(problems);
       expect(problems, problems.join("\n")).toEqual([]);
     },

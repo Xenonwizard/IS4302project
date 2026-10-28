@@ -33,12 +33,6 @@ export default buildModule("PokechainModule", (m) => {
   m.call(accounts, "setSlabMarket", [slabMarket]);
   m.call(slabVault, "setMarketplace", [slabMarket]);
 
-  // Fully funded loan offers lock cash here; accepted loans hold the slab until repayment or default.
-  const loanEscrow = m.contract("LoanEscrow", [accounts, slabVault, slabMarket]);
-  m.call(accounts, "setLoanEscrow", [loanEscrow]);
-  m.call(slabVault, "setLoanEscrow", [loanEscrow]);
-  m.call(slabMarket, "setLoanEscrow", [loanEscrow]);
-
   // Lost-slab bounties are escrowed here; it closes lost reports on SlabVault for a finder's claim.
   const lostSlabRecovery = m.contract("LostSlabRecovery", [accounts, slabVault, operator]);
   m.call(accounts, "setLostSlabRecovery", [lostSlabRecovery]);
@@ -48,5 +42,5 @@ export default buildModule("PokechainModule", (m) => {
   m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector1, id: "seed_collector1" });
   m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector2, id: "seed_collector2" });
 
-  return { usdc, accounts, slabVault, tradeEscrow, slabMarket, loanEscrow, lostSlabRecovery };
+  return { usdc, accounts, slabVault, tradeEscrow, slabMarket, lostSlabRecovery };
 });

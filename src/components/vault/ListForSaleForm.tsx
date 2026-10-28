@@ -21,23 +21,19 @@ export function ListForSaleForm({
   const { listCard } = useMarketChain();
   const { data: marketFeeBps = 0 } = useMarketFeeBps();
   const [price, setPrice] = useState("");
-  const [acceptsLoan, setAcceptsLoan] = useState(false);
-  const [loanAsk, setLoanAsk] = useState("");
   const [busy, setBusy] = useState(false);
   const value = Math.max(0, Number(price) || 0);
-  const loanValue = Math.max(0, Number(loanAsk) || 0);
-  const loanTermsValid = !acceptsLoan || (loanValue > 0 && loanValue < value);
   const feeAmount = (value * marketFeeBps) / 10000;
   const netProceeds = value - feeAmount;
 
   const handleSubmit = async () => {
-    if (value <= 0 || !loanTermsValid) return;
+    if (value <= 0) return;
     setBusy(true);
     try {
       if (user?.address && listing.tokenId) {
-        await listCard(listing.tokenId, value, acceptsLoan, loanValue);
+        await listCard(listing.tokenId, value);
       }
-      listFromVault(listing.id, value, acceptsLoan, loanValue);
+      listFromVault(listing.id, value);
       onListed?.();
     } catch (err) {
       pushToast({
@@ -68,43 +64,6 @@ export function ListForSaleForm({
         </div>
       </Field>
 
-      <div className="mt-4 rounded-2xl border border-hairline bg-surface p-4">
-        <label className="flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={acceptsLoan}
-            onChange={(e) => setAcceptsLoan(e.target.checked)}
-            disabled={busy}
-            className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
-          />
-          <span>
-            <span className="block text-sm font-semibold text-white">Accept loan offers</span>
-            <span className="mt-1 block text-[12px] leading-relaxed text-muted">
-              A funded offer uses this slab as collateral. It returns after repayment, or transfers to the lender after default.
-            </span>
-          </span>
-        </label>
-
-        {acceptsLoan ? (
-          <div className="mt-4">
-            <Field label="Minimum loan principal" hint={`Must be less than your ${usd(value, { cents: true })} sale price.`}>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-muted">$</span>
-                <input
-                  className={`${inputClass} pl-7`}
-                  inputMode="decimal"
-                  value={loanAsk}
-                  onChange={(e) => setLoanAsk(e.target.value.replace(/[^\d.]/g, ""))}
-                  disabled={busy}
-                  aria-invalid={!loanTermsValid}
-                />
-              </div>
-            </Field>
-            {!loanTermsValid ? <p className="mt-2 text-[12px] text-bad">Enter an amount above $0 and below the sale price.</p> : null}
-          </div>
-        ) : null}
-      </div>
-
       <dl className="mt-4 space-y-2.5 rounded-2xl bg-surface p-4 text-[13px]">
         <div className="flex justify-between">
           <dt className="text-muted">Pokéchain platform fee {marketFeeBps > 0 ? `(${marketFeeBps / 100}%)` : "(Rule 2)"}</dt>
@@ -122,14 +81,14 @@ export function ListForSaleForm({
       <div className="mt-3 flex items-start gap-2 rounded-xl bg-surface-2 p-3 text-[12px] text-muted">
         <Lock size={15} className="mt-0.5 shrink-0 text-accent" />
         <p>
-          Listed slabs cannot simultaneously be pledged, redeemed, or transferred. Cancelling this listing releases the restriction.
+          Listed slabs cannot be redeemed or transferred. Cancelling this listing releases the restriction.
         </p>
       </div>
 
       <Button
         size="lg"
         className="mt-5 w-full"
-        disabled={!Number.isFinite(Number(price)) || value <= 0 || !loanTermsValid || busy}
+        disabled={!Number.isFinite(Number(price)) || value <= 0 || busy}
         onClick={handleSubmit}
       >
         {busy ? "Broadcasting transaction..." : `List for ${usd(value, { cents: true })}`}

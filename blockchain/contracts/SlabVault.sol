@@ -39,7 +39,7 @@ interface ILostReportHook {
  *
  *  Offboarding a slab (the title NFT burns once Collector Crypt has been told to ship it)
  *   5. `requestRedemption`  the owner asks for the slab with their address hash. The token is
- *                           locked (no trades, listings or loans) and `redeemerOf` records who
+ *                           locked (no trades or listings) and `redeemerOf` records who
  *                           asked. Custody: RedemptionRequested.
  *   6. `markShipped`        Pokechain, as holder of CC's NFT, asked CC to ship to the owner;
  *                           records CC's redemption id, carrier and tracking, then burns the
@@ -151,8 +151,6 @@ contract SlabVault is ERC721, AccessControl {
     mapping(uint256 => uint256) public submissionOfToken;
     /// @notice The TradeEscrow contract: may hold slabs in open offers and move Vaulted slabs for agreed trades.
     address public tradeEscrow;
-    /// @notice The collateral escrow: may hold a vaulted slab while its loan is active.
-    address public loanEscrow;
     /// @notice The LostSlabRecovery contract: escrows bounties and runs a finder's recovery (see the notice).
     address public lostSlabRecovery;
     /// @notice Slabs each address holds that are still physically in the vault.
@@ -196,7 +194,6 @@ contract SlabVault is ERC721, AccessControl {
     event SubmissionRejected(uint256 indexed submissionId, address indexed owner, string reason);
     event SlabVaulted(uint256 indexed tokenId, address indexed owner, string certNumber, string custodianRef);
     event TradeEscrowSet(address indexed tradeEscrow);
-    event LoanEscrowSet(address indexed loanEscrow);
     event LostSlabRecoverySet(address indexed lostSlabRecovery);
     event RedemptionRequested(uint256 indexed tokenId, address indexed owner, bytes32 shippingHash);
     event SlabShipped(
@@ -577,11 +574,6 @@ contract SlabVault is ERC721, AccessControl {
         emit TradeEscrowSet(escrow);
     }
 
-    function setLoanEscrow(address escrow) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        loanEscrow = escrow;
-        emit LoanEscrowSet(escrow);
-    }
-
     /// @notice Names LostSlabRecovery and lets it close lost reports for a finder's claim.
     function setLostSlabRecovery(address lostSlabRecovery_) external onlyRole(DEFAULT_ADMIN_ROLE) {
         lostSlabRecovery = lostSlabRecovery_;
@@ -620,8 +612,7 @@ contract SlabVault is ERC721, AccessControl {
      *      slabs, called by the taker), so nobody's slab moves without its owner's transaction.
      */
     function isApprovedForAll(address owner, address operator) public view override returns (bool) {
-        return (operator == tradeEscrow && tradeEscrow != address(0))
-            || (operator == loanEscrow && loanEscrow != address(0)) || super.isApprovedForAll(owner, operator);
+        return (operator == tradeEscrow && tradeEscrow != address(0)) || super.isApprovedForAll(owner, operator);
     }
 
     /// @notice Fully on-chain ERC-721 metadata: a base64 JSON document, no server or IPFS needed.
@@ -686,7 +677,7 @@ contract SlabVault is ERC721, AccessControl {
      */
     function _update(address to, uint256 tokenId, address auth) internal override returns (address from) {
         from = _ownerOf(tokenId);
-        if (to != address(0) && to != tradeEscrow && to != loanEscrow && !accounts.isActive(to)) {
+        if (to != address(0) && to != tradeEscrow && !accounts.isActive(to)) {
             revert AccountNotActive(to);
         }
         if (from != address(0)) {

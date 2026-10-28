@@ -7,7 +7,6 @@ export const deployments = {
     "SlabVault": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
     "TradeEscrow": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
     "SlabMarket": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-    "LoanEscrow": "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e",
     "LostSlabRecovery": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
     "fromBlock": 1
   }
@@ -632,22 +631,6 @@ export const accountRegistryAbi = [
   },
   {
     "inputs": [],
-    "name": "LoanEscrowAlreadySet",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "count",
-        "type": "uint256"
-      }
-    ],
-    "name": "LoansStillOpen",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "LostSlabRecoveryAlreadySet",
     "type": "error"
   },
@@ -839,19 +822,6 @@ export const accountRegistryAbi = [
       }
     ],
     "name": "Deposited",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "loanEscrow",
-        "type": "address"
-      }
-    ],
-    "name": "LoanEscrowSet",
     "type": "event"
   },
   {
@@ -1103,19 +1073,6 @@ export const accountRegistryAbi = [
   },
   {
     "inputs": [],
-    "name": "loanEscrow",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "lostSlabRecovery",
     "outputs": [
       {
@@ -1179,19 +1136,6 @@ export const accountRegistryAbi = [
   {
     "inputs": [],
     "name": "renounceOwnership",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "escrow",
-        "type": "address"
-      }
-    ],
-    "name": "setLoanEscrow",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1753,19 +1697,6 @@ export const slabVaultAbi = [
       }
     ],
     "name": "ListingRestrictionUpdated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "loanEscrow",
-        "type": "address"
-      }
-    ],
-    "name": "LoanEscrowSet",
     "type": "event"
   },
   {
@@ -2654,19 +2585,6 @@ export const slabVaultAbi = [
   },
   {
     "inputs": [],
-    "name": "loanEscrow",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "lostSlabRecovery",
     "outputs": [
       {
@@ -3141,19 +3059,6 @@ export const slabVaultAbi = [
       }
     ],
     "name": "setListingRestriction",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "escrow",
-        "type": "address"
-      }
-    ],
-    "name": "setLoanEscrow",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -4455,17 +4360,7 @@ export const slabMarketAbi = [
   },
   {
     "inputs": [],
-    "name": "InvalidLoanAsk",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "InvalidPrice",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "LoanEscrowAlreadySet",
     "type": "error"
   },
   {
@@ -4515,11 +4410,6 @@ export const slabMarketAbi = [
       }
     ],
     "name": "NotVaulted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "OnlyLoanEscrow",
     "type": "error"
   },
   {
@@ -4695,44 +4585,6 @@ export const slabMarketAbi = [
       {
         "indexed": true,
         "internalType": "address",
-        "name": "loanEscrow",
-        "type": "address"
-      }
-    ],
-    "name": "LoanEscrowSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "bool",
-        "name": "acceptsLoan",
-        "type": "bool"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "loanAsk",
-        "type": "uint256"
-      }
-    ],
-    "name": "LoanTermsSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
         "name": "previousOwner",
         "type": "address"
       },
@@ -4856,16 +4708,6 @@ export const slabMarketAbi = [
             "type": "uint64"
           },
           {
-            "internalType": "bool",
-            "name": "acceptsLoan",
-            "type": "bool"
-          },
-          {
-            "internalType": "uint256",
-            "name": "loanAsk",
-            "type": "uint256"
-          },
-          {
             "internalType": "string",
             "name": "grader",
             "type": "string"
@@ -4965,16 +4807,6 @@ export const slabMarketAbi = [
             "internalType": "uint64",
             "name": "listedAt",
             "type": "uint64"
-          },
-          {
-            "internalType": "bool",
-            "name": "acceptsLoan",
-            "type": "bool"
-          },
-          {
-            "internalType": "uint256",
-            "name": "loanAsk",
-            "type": "uint256"
           }
         ],
         "internalType": "struct SlabMarket.Listing",
@@ -5077,29 +4909,6 @@ export const slabMarketAbi = [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "price",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "loanAsk",
-        "type": "uint256"
-      }
-    ],
-    "name": "listWithLoan",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
         "name": "",
         "type": "uint256"
       }
@@ -5120,29 +4929,6 @@ export const slabMarketAbi = [
         "internalType": "uint64",
         "name": "listedAt",
         "type": "uint64"
-      },
-      {
-        "internalType": "bool",
-        "name": "acceptsLoan",
-        "type": "bool"
-      },
-      {
-        "internalType": "uint256",
-        "name": "loanAsk",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "loanEscrow",
-    "outputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -5159,24 +4945,6 @@ export const slabMarketAbi = [
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address",
-        "name": "seller",
-        "type": "address"
-      }
-    ],
-    "name": "releaseForLoan",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -5249,19 +5017,6 @@ export const slabMarketAbi = [
     "type": "function"
   },
   {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "escrow",
-        "type": "address"
-      }
-    ],
-    "name": "setLoanEscrow",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
     "inputs": [],
     "name": "totalSales",
     "outputs": [
@@ -5311,634 +5066,6 @@ export const slabMarketAbi = [
       }
     ],
     "stateMutability": "view",
-    "type": "function"
-  }
-] as const;
-
-export const loanEscrowAbi = [
-  {
-    "inputs": [
-      {
-        "internalType": "contract AccountRegistry",
-        "name": "accounts_",
-        "type": "address"
-      },
-      {
-        "internalType": "contract SlabVault",
-        "name": "vault_",
-        "type": "address"
-      },
-      {
-        "internalType": "contract SlabMarket",
-        "name": "market_",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "constructor"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "account",
-        "type": "address"
-      }
-    ],
-    "name": "AccountNotActive",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "DeadlineNotPassed",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "DeadlinePassed",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidDuration",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      }
-    ],
-    "name": "LoanNotAccepted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "LoanNotActive",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotBorrower",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotLender",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "OfferNotOpen",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "principal",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "ask",
-        "type": "uint256"
-      }
-    ],
-    "name": "PrincipalBelowAsk",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "principal",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "price",
-        "type": "uint256"
-      }
-    ],
-    "name": "PrincipalMustBeBelowPrice",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ReentrancyGuardReentrantCall",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "SelfLoan",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      }
-    ],
-    "name": "TokenAlreadyCollateral",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "acceptedAt",
-        "type": "uint64"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "deadline",
-        "type": "uint64"
-      }
-    ],
-    "name": "LoanAccepted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "closedAt",
-        "type": "uint64"
-      }
-    ],
-    "name": "LoanDeclined",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "lender",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "closedAt",
-        "type": "uint64"
-      }
-    ],
-    "name": "LoanDefaulted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "lender",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "borrower",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "principal",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "interest",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "duration",
-        "type": "uint64"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "room",
-        "type": "string"
-      }
-    ],
-    "name": "LoanOffered",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "repayment",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "closedAt",
-        "type": "uint64"
-      }
-    ],
-    "name": "LoanRepaid",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint64",
-        "name": "closedAt",
-        "type": "uint64"
-      }
-    ],
-    "name": "LoanWithdrawn",
-    "type": "event"
-  },
-  {
-    "inputs": [],
-    "name": "MAX_DURATION",
-    "outputs": [
-      {
-        "internalType": "uint64",
-        "name": "",
-        "type": "uint64"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "MIN_DURATION",
-    "outputs": [
-      {
-        "internalType": "uint64",
-        "name": "",
-        "type": "uint64"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      }
-    ],
-    "name": "accept",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "accounts",
-    "outputs": [
-      {
-        "internalType": "contract AccountRegistry",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "name": "activeLoanForToken",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      }
-    ],
-    "name": "claimDefault",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "name": "commitments",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tokenId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "principal",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "interest",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint64",
-        "name": "duration",
-        "type": "uint64"
-      },
-      {
-        "internalType": "string",
-        "name": "room",
-        "type": "string"
-      }
-    ],
-    "name": "createOffer",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      }
-    ],
-    "name": "decline",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "market",
-    "outputs": [
-      {
-        "internalType": "contract SlabMarket",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "nextOfferId",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "participant",
-        "type": "address"
-      }
-    ],
-    "name": "offerIdsOf",
-    "outputs": [
-      {
-        "internalType": "uint256[]",
-        "name": "",
-        "type": "uint256[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      }
-    ],
-    "name": "offerOf",
-    "outputs": [
-      {
-        "components": [
-          {
-            "internalType": "address",
-            "name": "lender",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "borrower",
-            "type": "address"
-          },
-          {
-            "internalType": "uint256",
-            "name": "tokenId",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "principal",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "interest",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint64",
-            "name": "duration",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "deadline",
-            "type": "uint64"
-          },
-          {
-            "internalType": "enum LoanEscrow.Status",
-            "name": "status",
-            "type": "uint8"
-          },
-          {
-            "internalType": "string",
-            "name": "room",
-            "type": "string"
-          },
-          {
-            "internalType": "uint64",
-            "name": "createdAt",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "acceptedAt",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "closedAt",
-            "type": "uint64"
-          }
-        ],
-        "internalType": "struct LoanEscrow.Offer",
-        "name": "",
-        "type": "tuple"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      }
-    ],
-    "name": "repay",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "vault",
-    "outputs": [
-      {
-        "internalType": "contract SlabVault",
-        "name": "",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "offerId",
-        "type": "uint256"
-      }
-    ],
-    "name": "withdraw",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   }
 ] as const;

@@ -141,7 +141,7 @@ function Redeem({ listingId, listing, onClose }: { listingId: string; listing: L
           </Field>
           <p className="text-[12px] text-muted">
             Shipping it home locks this slab&apos;s Pokechain NFT (<span className="font-mono">SlabVault.requestRedemption</span>),
-            and it burns once Collector Crypt is notified to ship it. It can&apos;t be listed, traded or used for a loan again. Once it&apos;s in the post, Collector Crypt and the
+            and it burns once Collector Crypt is notified to ship it. It can&apos;t be listed or traded again. Once it&apos;s in the post, Collector Crypt and the
             carrier are responsible for it.
           </p>
           <Button className="w-full" size="lg" onClick={withdraw} disabled={busy || !shipTo.trim()}>
