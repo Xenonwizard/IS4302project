@@ -236,7 +236,7 @@ export function VaultView() {
       </div>
 
       <div className="mt-5">
-        {tab === "all" || tab === "awaiting" || tab === "unlisted" || tab === "loans" || tab === "lost" ? (
+        {tab === "all" || tab === "awaiting" || tab === "listed" || tab === "unlisted" || tab === "loans" || tab === "lost" ? (
           <div className="mb-3 flex justify-end">
             <div className="flex h-10 items-center rounded-xl border border-hairline bg-surface p-1" role="group" aria-label="Vault grid size">
               <button
@@ -405,56 +405,38 @@ export function VaultView() {
 
         {tab === "listed" ? (
           listed.length ? (
-            <ul className="divide-y divide-[rgba(255,255,255,0.08)] overflow-hidden rounded-card border border-hairline bg-surface">
-              {listed.map(({ entry, listing }) => {
+            <div className={clsx(
+              "grid gap-3",
+              gridSize === "small"
+                ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9"
+                : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
+            )}>
+              {listed.map(({ entry, listing }, index) => {
                 const chats = Object.values(negotiations).filter(
                   (n) => n.listingId === listing.id && n.seller === user.username && n.status === "open",
                 );
                 const offers = chats.map(pendingOffer).filter((m) => m?.offer);
                 const best = Math.max(0, ...offers.map((m) => bidValue(m!.offer!)));
                 return (
-                  <li key={listing.id} className="flex flex-wrap items-center gap-4 p-4">
-                    <Link href={`/asset/${listing.id}`} className="w-12 shrink-0">
-                      <Slab listing={listing} flat />
-                    </Link>
-                    <div className="min-w-0 flex-1">
-                      <Link
-                        href={`/asset/${listing.id}`}
-                        className="line-clamp-1 text-[13px] font-semibold hover:underline"
-                      >
-                        {listing.title}
-                      </Link>
-                      <p className="mt-1 text-[12px] text-muted">
-                        Asking {usd(entry.listedPrice ?? listing.price)}
-                      </p>
-                      <p className="mt-1 text-[12px] text-muted">
-                        {offers.length
-                          ? `${offers.length} offer${offers.length === 1 ? "" : "s"} to review · best ${usd(best, { cents: true })}`
-                          : chats.length
-                            ? `${chats.length} open chat${chats.length === 1 ? "" : "s"}`
-                            : "No offers yet. Buyers' offers show up as private chats."}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Link href={`/trades?listing=${listing.id}`}>
-                        <Button size="sm">
-                          <MessagesSquare size={13} />
-                          Negotiation rooms{chats.length ? ` (${chats.length})` : ""}
-                        </Button>
-                      </Link>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={delistingId === listing.id}
-                        onClick={() => handleDelist(listing.id, entry.token?.tokenId ?? listing.tokenId)}
-                      >
-                        {delistingId === listing.id ? "Delisting..." : "Delist"}
-                      </Button>
-                    </div>
-                  </li>
+                  <div
+                    key={listing.id}
+                    className={clsx("min-w-0", index < 12 && "fade-up motion-reduce:animate-none")}
+                    style={index < 12 ? { animationDelay: `${index * 22}ms` } : undefined}
+                  >
+                    <ListedSlabCard
+                      entry={entry}
+                      listing={listing}
+                      size={gridSize}
+                      chats={chats.length}
+                      offers={offers.length}
+                      bestOffer={best}
+                      delisting={delistingId === listing.id}
+                      onDelist={() => handleDelist(listing.id, entry.token?.tokenId ?? listing.tokenId)}
+                    />
+                  </div>
                 );
               })}
-            </ul>
+            </div>
           ) : (
             <Empty
               icon={<Tag size={24} />}
@@ -681,6 +663,77 @@ function Stat({ label, value, href }: { label: string; value: string; href?: str
     </Link>
   ) : (
     <div className={className}>{body}</div>
+  );
+}
+
+/** A marketplace listing presented with the same slab-card layout as the rest of the Vault. */
+function ListedSlabCard({
+  entry,
+  listing,
+  size,
+  chats,
+  offers,
+  bestOffer,
+  delisting,
+  onDelist,
+}: {
+  entry: VaultItem;
+  listing: Listing;
+  size: "medium" | "small";
+  chats: number;
+  offers: number;
+  bestOffer: number;
+  delisting: boolean;
+  onDelist: () => void;
+}) {
+  const small = size === "small";
+  const activity = offers
+    ? `${offers} offer${offers === 1 ? "" : "s"} to review · best ${usd(bestOffer, { cents: true })}`
+    : chats
+      ? `${chats} open chat${chats === 1 ? "" : "s"}`
+      : "No offers yet";
+
+  return (
+    <div className="overflow-hidden rounded-card border border-hairline bg-surface">
+      <Link href={`/asset/${listing.id}`} className={clsx("block bg-[#101014]", small ? "p-2" : "p-4")}>
+        <Slab listing={listing} interactive maxTilt={9} />
+      </Link>
+      <div className={small ? "p-2" : "p-3.5"}>
+        <Link
+          href={`/asset/${listing.id}`}
+          className={clsx("line-clamp-2 font-semibold leading-snug hover:underline", small ? "text-[10.5px]" : "text-[12px]")}
+        >
+          {listing.title}
+        </Link>
+        <div className={clsx("mt-2", small ? "space-y-1.5" : "flex items-center justify-between gap-2")}>
+          <span className={clsx("font-bold", small ? "text-[11px]" : "text-[13px]")}>Asking {usd(entry.listedPrice ?? listing.price, { cents: true })}</span>
+          <Badge className={small ? "w-fit px-1.5 text-[9px]" : undefined} tone="accent">Listed</Badge>
+        </div>
+        <p className={clsx("mt-1.5 line-clamp-2 text-muted", small ? "text-[9.5px]" : "text-[11px]")}>{activity}</p>
+        <p className={clsx("mt-1 text-dim", small ? "text-[9.5px]" : "text-[11px]")}>
+          {entry.via} · <TimeAgo value={entry.acquiredAt} />
+        </p>
+        {entry.token ? (
+          <Link
+            href={`/trace/${entry.token.tokenId}`}
+            className={clsx("mt-1 flex items-center gap-1 font-semibold text-accent hover:underline", small ? "text-[9.5px]" : "text-[11px]")}
+          >
+            <Blocks size={11} /> Token #{entry.token.tokenId} · <Route size={11} /> Trace
+          </Link>
+        ) : null}
+        <div className={clsx("mt-3 grid", small ? "gap-1.5" : "gap-2")}>
+          <Link href={`/trades?listing=${listing.id}`} className="block">
+            <Button size="sm" className="w-full">
+              <MessagesSquare size={13} />
+              Negotiations{chats ? ` (${chats})` : ""}
+            </Button>
+          </Link>
+          <Button size="sm" variant="secondary" className="w-full" disabled={delisting} onClick={onDelist}>
+            {delisting ? "Delisting..." : "Delist"}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
