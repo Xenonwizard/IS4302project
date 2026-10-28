@@ -3,7 +3,7 @@ import { createPublicClient, createWalletClient, http, keccak256, toBytes } from
 import { hardhat } from "viem/chains";
 import { deployments, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect, test } from "./fixtures";
-import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
+import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, loanRoundTripOnMistySlab, logIn, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
 
 // One test per role's main job, against the real app and local chain. Each test starts from a
 // freshly reset chain and a fresh browser (empty localStorage).
@@ -547,8 +547,18 @@ test("outtake: Ship to me locks the NFT, notifying Collector Crypt burns it, the
   await expect.poll(() => custodyOf(Number(cert))).toBe(4); // Delivered
   await page.reload();
   await expect(page.getByTestId("withdraw-requests").getByText("Delivered").first()).toBeVisible();
+  // A withdrawn slab's NFT is gone, so Withdrawn offers no link to it.
+  await expect(page.getByRole("link", { name: "View Withdrawn NFT" })).toHaveCount(0);
+  // Its submission stays in Slab submissions as history, with no link to a vaulted NFT.
+  await page.getByRole("button", { name: /^Slab submissions/ }).click();
+  await page.getByRole("button", { name: /^History/ }).click();
+  const history = page.getByTestId(`request-${cert}`);
+  await expect(history.getByTestId("request-stage")).toHaveText("Vaulted · since withdrawn");
+  await history.getByRole("button").first().click();
+  await expect(history.getByRole("link", { name: "View Vaulted NFT" })).toHaveCount(0);
+  await expect(history).toContainText("vaulted, then withdrawn");
   // Its asset page says it was withdrawn and offers no way to list it.
-  await page.getByRole("link", { name: "View Withdrawn NFT" }).click();
+  await page.goto(`/asset/token-${cert}`);
   await expect(page.getByTestId("withdrawn-status")).toContainText("Withdrawn from the vault");
   await expect(page.getByRole("button", { name: /List it from your Vault/ })).toHaveCount(0);
 
@@ -721,6 +731,50 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   const ownerHistory = page.getByTestId("onchain-payments");
   await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Lost-slab bounty escrowed" })).toHaveCount(1);
   await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Deposit from wallet" })).toContainText("+$200.00");
+
+  // The slab's /trace has the whole recovery from LostSlabRecovery, not just SlabVault.
+  await page.goto(`/trace/${cert}`);
+  for (const e of ["SlabVault.SlabReportedLost", "LostSlabRecovery.BountySet", "LostSlabRecovery.ClaimFiled", "LostSlabRecovery.ClaimReceived", "LostSlabRecovery.ReturnChosen", "LostSlabRecovery.ReturnCompleted", "LostSlabRecovery.BountyPaid"]) {
+    await expect(page.getByText(e, { exact: true }).first()).toBeVisible();
+  }
+});
+
+test("trace: a loan against a slab shows up in its /trace, with LoanEscrow holding it as collateral", async ({ page, request }) => {
+  await loadDemoTraders(request);
+  await loanRoundTripOnMistySlab(70000136);
+  const trace = await (await request.get("/api/trace/70000136")).json();
+  const events = trace.polygon.map((e: { contract: string; event: string }) => `${e.contract}.${e.event}`);
+  for (const e of ["SlabMarket.CardListed", "LoanEscrow.LoanOffered", "LoanEscrow.LoanAccepted", "LoanEscrow.LoanRepaid"]) expect(events).toContain(e);
+  await page.goto("/trace/70000136");
+  await expect(page.getByText("LoanEscrow.LoanAccepted")).toBeVisible();
+  await expect(page.getByText(/→ LoanEscrow/)).toBeVisible();
+  await expect(page.getByText(/Owner LoanEscrow →/)).toBeVisible();
+});
+
+test("session: signing out in one tab signs the other tab out too, and the navbars don't flicker", async ({ page }) => {
+  await openAccount(page, "smoke_tabs");
+  const other = await page.context().newPage();
+  await other.goto("/");
+  await expect(other.locator("header")).toContainText("smoke_tabs");
+  // Count every signed-in ↔ signed-out change of each navbar from here on.
+  const watch = () => {
+    const w = window as unknown as { __navbar: string[] };
+    w.__navbar = [];
+    const record = () => {
+      const signedIn = document.querySelector("header")?.textContent?.includes("smoke_tabs") ? "in" : "out";
+      if (w.__navbar.at(-1) !== signedIn) w.__navbar.push(signedIn);
+    };
+    new MutationObserver(record).observe(document, { subtree: true, childList: true, characterData: true });
+    record();
+  };
+  for (const tab of [page, other]) await tab.evaluate(watch);
+  await page.locator("header").getByRole("button", { name: /smoke_tabs/ }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  for (const tab of [page, other]) await expect(tab.locator("header").getByRole("button", { name: "Log in" })).toBeVisible();
+  await page.waitForTimeout(3000);
+  // Each tab signed out exactly once: neither signed the other back in.
+  for (const tab of [page, other]) expect(await tab.evaluate(() => (window as unknown as { __navbar: string[] }).__navbar)).toEqual(["in", "out"]);
+  await other.close();
 });
 
 test("lost & found: the owner picks delivery, and the bounty unlocks only after they confirm receipt", async ({ page, request }) => {

@@ -29,7 +29,7 @@ import { Button, Field, Modal, TimeAgo, inputClass } from "../ui/primitives";
 import { Empty, LoginPrompt } from "../vault/shared";
 
 type Category = "submissions" | "withdrawals" | "bounties" | "recovery";
-type StatusFilter = "all" | "progress" | "awaiting" | "vaulted" | "action" | "completed" | "bounty";
+type StatusFilter = "all" | "progress" | "awaiting" | "vaulted" | "withdrawn" | "action" | "completed" | "bounty";
 
 const CATEGORIES: { value: Category; label: string }[] = [
   { value: "submissions", label: "Slab submissions" },
@@ -44,6 +44,7 @@ const CATEGORY_FILTERS: Record<Category, { value: StatusFilter; label: string }[
     { value: "progress", label: "In progress" },
     { value: "awaiting", label: "Awaiting vault" },
     { value: "vaulted", label: "Vaulted" },
+    { value: "withdrawn", label: "History" },
   ],
   withdrawals: [
     { value: "all", label: "All" },
@@ -70,6 +71,9 @@ export const SUBMISSION_STAGE: Record<number, string> = {
   4: "Vaulted",
   5: "Rejected",
 };
+
+/** A vaulted submission whose slab was later withdrawn: kept as history. */
+const WITHDRAWN_LABEL = "Vaulted · since withdrawn";
 
 const TIMELINE_STEPS = ["Sent", "At Pokechain", "At Vault", "Vaulted"];
 
@@ -127,12 +131,15 @@ export function SubmissionsView() {
       }),
     [resolve, vault],
   );
+  const withdrawnTokens = useMemo(() => new Set(withdrawals.map(({ entry }) => entry.token?.tokenId)), [withdrawals]);
   // A submission that never reached the vault but is now a withdrawal (a found slab delivered to its
-  // owner) has left the vaulting pipeline: it shows under Slab withdrawals only.
-  const requests = useMemo(() => {
-    const withdrawnTokens = new Set(withdrawals.map(({ entry }) => entry.token?.tokenId));
-    return submissionRequests.filter((request) => request.status === 4 || !withdrawnTokens.has(request.tokenId));
-  }, [submissionRequests, withdrawals]);
+  // owner) has left the vaulting pipeline: it shows under Slab withdrawals only. A vaulted submission
+  // that was later withdrawn stays here as history, marked Withdrawn.
+  const requests = useMemo(
+    () => submissionRequests.filter((request) => request.status === 4 || !withdrawnTokens.has(request.tokenId)),
+    [submissionRequests, withdrawnTokens],
+  );
+  const isWithdrawn = (request: SubmissionRequest) => request.status === 4 && withdrawnTokens.has(request.tokenId);
 
   // A found-slab case belongs to different workflows depending on this collector's role.
   const { data: allCases = [] } = useFoundCases();
@@ -177,7 +184,8 @@ export function SubmissionsView() {
   const visible = category === "submissions" ? requests.filter((request) => {
     if (filter === "progress") return OPEN_SUBMISSION.has(request.status) && inPipeline(request);
     if (filter === "awaiting") return (request.status === 2 || request.status === 3) && inPipeline(request);
-    if (filter === "vaulted") return request.status === 4;
+    if (filter === "vaulted") return request.status === 4 && !isWithdrawn(request);
+    if (filter === "withdrawn") return isWithdrawn(request);
     return true;
   }) : [];
   const visibleLocal = category === "submissions" && (filter === "all" || filter === "vaulted") ? localRequests : [];
@@ -205,7 +213,7 @@ export function SubmissionsView() {
   const total = requests.length + localRequests.length + withdrawals.length + bountyClaimCases.length + ownerCases.length + trackedRecoveryReports.length;
   const inProgress = requests.filter((request) => OPEN_SUBMISSION.has(request.status) && inPipeline(request)).length;
   const awaitingVault = requests.filter((request) => (request.status === 2 || request.status === 3) && inPipeline(request)).length;
-  const vaulted = requests.filter((request) => request.status === 4).length + localRequests.length;
+  const vaulted = requests.filter((request) => request.status === 4 && !isWithdrawn(request)).length + localRequests.length;
   const categoryCounts: Record<Category, number> = {
     submissions: requests.length + localRequests.length,
     withdrawals: withdrawals.length,
@@ -217,6 +225,7 @@ export function SubmissionsView() {
     progress: category === "submissions" ? inProgress : category === "withdrawals" ? withdrawals.length : category === "bounties" ? bountyClaimCases.filter((c) => c.status >= 1 && c.status <= 4).length : ownerCases.filter((c) => c.status >= 1 && c.status <= 4).length + trackedRecoveryReports.filter(({ listing, loss }) => !loss.published && !loss.resolution && !pendingLossDecisions[listing.id] && !pendingLossDecisions[listing.tokenId] && !pendingLossDecisions[`token-${listing.tokenId}`]).length,
     awaiting: awaitingVault,
     vaulted,
+    withdrawn: requests.filter(isWithdrawn).length,
     action: category === "bounties" ? bountyClaimCases.filter((c) => c.status === 4).length : ownerCases.filter((c) => c.status === 2 || (c.status === 4 && c.returnTo === 2 && c.custody === "Shipped")).length + trackedRecoveryReports.filter(({ listing }) => Boolean(pendingLossDecisions[listing.id] ?? pendingLossDecisions[listing.tokenId] ?? pendingLossDecisions[`token-${listing.tokenId}`])).length,
     completed: bountyClaimCases.filter((c) => c.status === 5 || c.status === 6).length,
     bounty: ownerCases.filter((c) => c.bounty > 0 && c.status < 5).length + trackedRecoveryReports.filter(({ loss }) => Boolean(loss.bounty)).length,
@@ -277,7 +286,6 @@ export function SubmissionsView() {
             Add slabs and track every request here. Select a request to review the form you submitted.
           </p>
         </div>
-        {category === "submissions" ? <AddSlabLink label="Add a slab" /> : null}
       </div>
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -358,6 +366,7 @@ export function SubmissionsView() {
                   key={request.submissionId}
                   request={request}
                   recovery={request.tokenId !== "0" ? recoveryByToken.get(request.tokenId) : undefined}
+                  withdrawn={isWithdrawn(request)}
                   onOpenRecovery={() => { setCategory("recovery"); setFilter("all"); }}
                   open={openId === request.submissionId}
                   onToggle={() => setOpenId((current) => current === request.submissionId ? null : request.submissionId)}
@@ -382,7 +391,7 @@ export function SubmissionsView() {
                 Slabs you asked to ship home. Their NFTs lock when you ask and burn once Collector Crypt is notified to ship them.
                 Confirm delivery when it arrives.
               </p>
-              <WithdrawnList items={visibleWithdrawals} showNftAction />
+              <WithdrawnList items={visibleWithdrawals} />
             </section>
           ) : null}
           {visibleOwnerRecoveries.length || visibleRecovery.length ? (
@@ -525,12 +534,14 @@ function RecoveryRow({
 function RequestAccordion({
   request,
   recovery,
+  withdrawn,
   onOpenRecovery,
   open,
   onToggle,
 }: {
   request: SubmissionRequest;
   recovery?: RecoveryState;
+  withdrawn: boolean;
   onOpenRecovery: () => void;
   open: boolean;
   onToggle: () => void;
@@ -549,7 +560,7 @@ function RequestAccordion({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        aria-label={`${request.grader} cert ${request.certNumber}, ${recovery ? RECOVERY_LABEL[recovery] : SUBMISSION_STAGE[request.status]}`}
+        aria-label={`${request.grader} cert ${request.certNumber}, ${recovery ? RECOVERY_LABEL[recovery] : withdrawn ? WITHDRAWN_LABEL : SUBMISSION_STAGE[request.status]}`}
         className="grid w-full grid-cols-1 gap-3 px-4 py-4 text-left transition hover:bg-white/[0.035] md:grid-cols-[minmax(240px,1.25fr)_minmax(210px,1fr)_150px_28px] md:items-center md:gap-4"
       >
         <div className="flex min-w-0 items-center gap-3">
@@ -559,7 +570,7 @@ function RequestAccordion({
             <span className="mt-1 block text-[11.5px] text-dim">
               Request #{request.submissionId}{request.tokenId !== "0" ? ` · NFT #${request.tokenId}` : ""}
             </span>
-            <span className="mt-2 block"><StatusBadge status={request.status} recovery={recovery} /></span>
+            <span className="mt-2 block"><StatusBadge status={request.status} recovery={recovery} withdrawn={withdrawn} /></span>
           </span>
         </div>
 
@@ -567,7 +578,7 @@ function RequestAccordion({
         <span className="hidden text-[11.5px] text-muted md:block"><TimeAgo value={request.requestedAt * 1000} /></span>
         <ChevronDown size={17} className={clsx("justify-self-end text-dim transition", open && "rotate-180 text-white")} />
       </button>
-      {open ? <SubmissionFormDetails request={request} recovery={recovery} onOpenRecovery={onOpenRecovery} /> : null}
+      {open ? <SubmissionFormDetails request={request} recovery={recovery} withdrawn={withdrawn} onOpenRecovery={onOpenRecovery} /> : null}
     </li>
   );
 }
@@ -662,10 +673,12 @@ function ProgressTimeline({ status }: { status: number }) {
 function SubmissionFormDetails({
   request,
   recovery,
+  withdrawn,
   onOpenRecovery,
 }: {
   request: SubmissionRequest;
   recovery?: RecoveryState;
+  withdrawn: boolean;
   onOpenRecovery: () => void;
 }) {
   const evidence = useQuery({
@@ -742,6 +755,10 @@ function SubmissionFormDetails({
             View in Recovery & insurance
           </button>
         </div>
+      ) : withdrawn ? (
+        <p className="mt-4 text-[11.5px] text-muted">
+          This slab was vaulted, then withdrawn. NFT #{request.tokenId} has left your Vault; follow the shipment under Withdrawn.
+        </p>
       ) : request.tokenId !== "0" && request.status !== 5 ? (
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <span className="mr-auto text-[11.5px] text-muted">
@@ -762,7 +779,7 @@ function SubmissionFormDetails({
   );
 }
 
-function StatusBadge({ status, recovery }: { status: number; recovery?: RecoveryState }) {
+function StatusBadge({ status, recovery, withdrawn }: { status: number; recovery?: RecoveryState; withdrawn?: boolean }) {
   return (
     <span
       data-testid="request-stage"
@@ -770,12 +787,12 @@ function StatusBadge({ status, recovery }: { status: number; recovery?: Recovery
         "inline-flex rounded-md px-2 py-1 text-[10.5px] font-bold",
         recovery === "recovery"
           ? "bg-bad/15 text-bad"
-          : recovery === "insurance"
+          : recovery === "insurance" || withdrawn
             ? "bg-surface-3 text-muted"
             : status === 5 ? "bg-bad/15 text-bad" : status === 4 ? "bg-good-bg text-good" : "bg-warn/15 text-warn",
       )}
     >
-      {recovery ? RECOVERY_LABEL[recovery] : SUBMISSION_STAGE[status]}
+      {recovery ? RECOVERY_LABEL[recovery] : withdrawn ? WITHDRAWN_LABEL : SUBMISSION_STAGE[status]}
     </span>
   );
 }

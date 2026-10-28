@@ -23,13 +23,7 @@ const TRAIL: CustodyName[] = ["Vaulted", "Redemption requested", "Shipped", "Del
  * left on-chain after that is `confirmDelivery`. A parcel lost on
  * the way is between the owner, Collector Crypt and the carrier: Report lost says who to contact.
  */
-export function WithdrawnList({
-  items,
-  showNftAction = false,
-}: {
-  items: { entry: VaultItem; listing: Listing }[];
-  showNftAction?: boolean;
-}) {
+export function WithdrawnList({ items }: { items: { entry: VaultItem; listing: Listing }[] }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const tokenIds = items.map((i) => BigInt(i.entry.token?.tokenId ?? 0));
   const { data, refetch } = useReadContracts({
@@ -57,7 +51,6 @@ export function WithdrawnList({
               open={openId === item.listing.id}
               onToggle={() => setOpenId((current) => current === item.listing.id ? null : item.listing.id)}
               onChange={() => void refetch()}
-              showNftAction={showNftAction}
             />
           );
         })}
@@ -81,7 +74,6 @@ function Row({
   open,
   onToggle,
   onChange,
-  showNftAction,
 }: {
   item: { entry: VaultItem; listing: Listing };
   slab?: OnChainSlab;
@@ -89,7 +81,6 @@ function Row({
   open: boolean;
   onToggle: () => void;
   onChange: () => void;
-  showNftAction: boolean;
 }) {
   const { confirmDelivery } = useSlabChain();
   const { pushToast, recoveries, confirmRecoveredSlab } = useStore();
@@ -141,14 +132,6 @@ function Row({
         <span className="text-[11.5px] text-muted">{w?.requestedAt ? shortDate(w.requestedAt) : "—"}</span>
 
         <div className="flex flex-wrap justify-start gap-2 md:flex-col md:items-stretch">
-          {showNftAction ? (
-            <Link
-              href={token?.tokenId ? `/asset/token-${token.tokenId}` : `/asset/${listing.id}`}
-              className="inline-flex min-h-8 items-center justify-center rounded-lg border border-hairline px-3 text-[12px] font-semibold text-white transition hover:border-white/30 hover:bg-surface-2"
-            >
-              View Withdrawn NFT
-            </Link>
-          ) : null}
           {custody === "Shipped" ? (
             <Button size="sm" onClick={() => act(async () => {
               await confirmDelivery(token!.tokenId);

@@ -97,6 +97,13 @@ npm run test:smoke
 a lost parcel and two-browser trades in a chat (it starts the chain and the app if they aren't running,
 and resets to an empty chain first, except the seeded-demo test). `test:unit` also checks the trade balance maths.
 
+While iterating, stop at the first failure and run only the flow you touched (extra arguments after `--` go to
+Playwright; traces are only recorded when `CI` is set):
+
+```bash
+npm run test:smoke:quick -- -g "lost & found"
+```
+
 ### Who uses it
 
 | Role | Sees | Can do |
