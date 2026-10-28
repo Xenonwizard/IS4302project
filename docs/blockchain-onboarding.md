@@ -144,7 +144,7 @@ Swaps between two collectors with **slabs and cash on both sides**, like a real-
 AccountRegistry gains `moveBalance(from, to, amount)` (TradeEscrow only; `totalCustody` never changes)
 and refuses `closeAccount` while the account has open offers (`OffersStillOpen`).
 
-### LostAndFound (`blockchain/contracts/LostAndFound.sol`)
+### LostSlabRecovery (`blockchain/contracts/LostSlabRecovery.sol`)
 
 Bounties for slabs lost in the post, and the finder's recovery case. Nobody has to trust the owner to
 pay: the bounty is escrowed before anyone claims it, and the payout condition is the slab's custody on
@@ -166,7 +166,7 @@ itself, and it is a balance mover on AccountRegistry, like TradeEscrow.
 sequenceDiagram
   actor A as Owner
   actor F as Finder
-  participant LF as LostAndFound
+  participant LF as LostSlabRecovery
   participant SV as SlabVault
   participant P as Pokechain intake (/api/chain/found)
   A->>SV: reportLost(1, "no scan for 10 days")
@@ -570,11 +570,11 @@ blockchain/
   contracts/AccountRegistry.sol   account onboarding / offboarding, USDC custody
   contracts/SlabVault.sol         ERC-721 slab tokens, custody state machine
   contracts/TradeEscrow.sol       slabs + cash swaps between two collectors, atomic
-  contracts/LostAndFound.sol      escrowed lost-slab bounties + finder recovery cases
+  contracts/LostSlabRecovery.sol  escrowed lost-slab bounties + finder recovery cases
   contracts/MockUSDC.sol          test USDC with EIP-2612 permit
   test/Pokechain.t.sol            accounts + slab lifecycle unit and fuzz tests
   test/TradeEscrow.t.sol          trade unit tests + cash-conservation fuzz test
-  test/LostAndFound.t.sol         bounty escrow, claim, vault/delivery return, refund, rejection
+  test/LostSlabRecovery.t.sol     bounty escrow, claim, vault/delivery return, refund, rejection
   ignition/modules/Pokechain.ts   deployment + wiring
   scripts/dev-chain.mjs           npm run chain
   scripts/export-frontend.mjs     ABIs + addresses → src/lib/chain/generated.ts
@@ -586,7 +586,7 @@ src/lib/chain/
   useSlabChain.ts    submit / receive / forward / verify+confirm / transfer / redeem / confirm / report lost / resolve
   trades.ts          TradeEscrow reads (slabs, offers, In offer) and writes (create / accept / decline / withdraw / counter)
   operator.ts        server-side operator key: markReceived, markForwarded, confirmVaulted, markShipped, resolveLostReport, gas faucet
-  useLostAndFound.ts bounty escrow, found-slab claims (read all cases, file, choose return, claim bounty)
+  useLostSlabRecovery.ts bounty escrow, found-slab claims (read all cases, file, choose return, claim bounty)
   trace.ts           one slab's journey across Polygon, Solana and Collector Crypt
 src/lib/evidence/
   store.ts           intake photos + manifest; evidenceHash = keccak256(manifest); re-verification
@@ -595,7 +595,7 @@ src/lib/collectorCrypt/
   client.ts          how the operator calls CC and Solana: custody check, shipment, trace
 src/app/api/
   evidence, evidence/[hash], evidence/[hash]/[slot]   intake evidence upload, verification, photos
-  chain/{receive,forward,mint,ship,resolve-lost,found,faucet}   operator routes (found = LostAndFound intake steps)
+  chain/{receive,forward,mint,ship,resolve-lost,found,faucet}   operator routes (found = LostSlabRecovery intake steps)
   dev/{reset,demo-traders}   local only: roll the chain back; seed @ash and @misty
   collector-crypt/{intake,cards,redemptions} mock Collector Crypt REST
   mock-solana                mock Solana DAS JSON-RPC

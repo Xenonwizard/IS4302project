@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useDisconnect } from "wagmi";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useStore } from "@/lib/store";
 
@@ -14,8 +14,9 @@ const NO_WALLET_TIMEOUT_MS = 8000;
  * handle, and when the wallet disconnects (or switches to another address) it signs out.
  */
 export function ChainSessionSync() {
-  const { ready, user, login, logout, syncChainBalance } = useStore();
+  const { ready, user, login, logout, signedOutElsewhere, syncChainBalance } = useStore();
   const { status: connection } = useAccount();
+  const { disconnect } = useDisconnect();
   const { address, isConnected, status, handle, loaded, walletUsdc, custodyBalance } = useOnchainAccount();
   /** wagmi starts every page load "disconnected" until it reconnects, so only a real drop counts */
   const seenConnected = useRef(false);
@@ -23,6 +24,16 @@ export function ChainSessionSync() {
   useEffect(() => {
     if (isConnected) seenConnected.current = true;
   }, [isConnected]);
+
+  // Signing out in another tab signs this one out too. Its wallet is still connected here, so drop
+  // it as well; otherwise this tab logs straight back in, writes that to storage, and the two tabs
+  // keep signing each other in and out (the navbar flickers).
+  const leavingWallet = useRef(false);
+  useEffect(() => {
+    if (!signedOutElsewhere) return;
+    leavingWallet.current = true;
+    disconnect();
+  }, [signedOutElsewhere, disconnect]);
 
   useEffect(() => {
     if (isConnected && address && loaded) {
@@ -32,6 +43,10 @@ export function ChainSessionSync() {
 
   useEffect(() => {
     if (!ready || connection === "connecting" || connection === "reconnecting") return;
+    if (leavingWallet.current) {
+      if (connection === "disconnected") leavingWallet.current = false;
+      return;
+    }
     // Someone using the off-chain demo login is left alone.
     if (user && !user.address) return;
     if (isConnected && address && loaded && status === "Active") {

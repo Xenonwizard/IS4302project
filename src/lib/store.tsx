@@ -235,6 +235,8 @@ interface StoreValue extends PersistShape {
   /** `address` marks a wallet account opened on-chain: no demo credit, funds come from USDC deposits */
   login: (username: string, email?: string, address?: string) => void;
   logout: () => void;
+  /** bumps when another tab signs this browser out, so this tab can drop its wallet connection too */
+  signedOutElsewhere: number;
   requireAuth: (then?: () => void) => boolean;
   authOpen: boolean;
   setAuthOpen: (open: boolean) => void;
@@ -678,6 +680,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const toastSeq = useRef(0);
   const pendingAction = useRef<(() => void) | null>(null);
   const applyingCrossTabState = useRef(false);
+  const [signedOutElsewhere, setSignedOutElsewhere] = useState(0);
   /** latest state for timers, which outlive the render that scheduled them */
   const latest = useRef(state);
   useEffect(() => {
@@ -714,6 +717,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(event.newValue) as PersistShape;
         const next = { ...EMPTY, ...parsed };
         next.slabs.forEach(registerListing);
+        if (latest.current.user && !next.user) setSignedOutElsewhere((n) => n + 1);
         setState((current) => {
           if (JSON.stringify(current) === JSON.stringify(next)) return current;
           applyingCrossTabState.current = true;
@@ -2365,6 +2369,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     syncChainBalance,
     login,
     logout,
+    signedOutElsewhere,
     requireAuth,
     authOpen,
     setAuthOpen,

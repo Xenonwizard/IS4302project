@@ -5,14 +5,14 @@ import {Test} from "forge-std/Test.sol";
 import {MockUSDC} from "../contracts/MockUSDC.sol";
 import {AccountRegistry, ISlabVaultCustody} from "../contracts/AccountRegistry.sol";
 import {SlabVault, IAccountStatus} from "../contracts/SlabVault.sol";
-import {LostAndFound} from "../contracts/LostAndFound.sol";
+import {LostSlabRecovery} from "../contracts/LostSlabRecovery.sol";
 
 /// A lost slab's bounty is escrowed, a finder files a claim, Pokechain returns it, and the finder is paid.
-contract LostAndFoundTest is Test {
+contract LostSlabRecoveryTest is Test {
     MockUSDC usdc;
     AccountRegistry accounts;
     SlabVault vault;
-    LostAndFound lf;
+    LostSlabRecovery lf;
 
     address operator = makeAddr("operator");
     address owner = makeAddr("owner");
@@ -32,9 +32,9 @@ contract LostAndFoundTest is Test {
         vault.setCustodian(collectorCrypt);
         vm.prank(collectorCrypt);
         vault.setEncryptionKey(keccak256("cc key"));
-        lf = new LostAndFound(accounts, vault, operator);
-        accounts.setLostAndFound(address(lf));
-        vault.setLostAndFound(address(lf));
+        lf = new LostSlabRecovery(accounts, vault, operator);
+        accounts.setLostSlabRecovery(address(lf));
+        vault.setLostSlabRecovery(address(lf));
 
         _register(owner, "owner");
         _register(finder, "finder");
@@ -99,7 +99,7 @@ contract LostAndFoundTest is Test {
         // The slab is at Pokechain, not yet in Collector Crypt's vault: the bounty stays locked.
         assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.AtPokechain));
         vm.prank(finder);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.NotReturnedYet.selector, tokenId));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.NotReturnedYet.selector, tokenId));
         lf.claimBounty(claimId);
 
         _revault(tokenId, "CCsol1111-2");
@@ -112,7 +112,7 @@ contract LostAndFoundTest is Test {
         lf.claimBounty(claimId);
         assertEq(accounts.balanceOf(finder), BOUNTY);
         assertEq(accounts.balanceOf(address(lf)), 0);
-        assertEq(uint8(lf.claimOf(claimId).status), uint8(LostAndFound.Status.Paid));
+        assertEq(uint8(lf.claimOf(claimId).status), uint8(LostSlabRecovery.Status.Paid));
     }
 
     function test_DeliveryPaysOnlyAfterTheOwnerConfirmsReceipt() public {
@@ -126,7 +126,7 @@ contract LostAndFoundTest is Test {
 
         // Shipped is not enough: the finder waits for the owner's confirmDelivery.
         vm.prank(finder);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.NotReturnedYet.selector, tokenId));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.NotReturnedYet.selector, tokenId));
         lf.claimBounty(claimId);
 
         vm.prank(owner);
@@ -142,9 +142,9 @@ contract LostAndFoundTest is Test {
         uint256 claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
 
         vm.startPrank(owner);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.ClaimInProgress.selector, claimId));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.ClaimInProgress.selector, claimId));
         vault.cancelLostReport(tokenId);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.ClaimInProgress.selector, claimId));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.ClaimInProgress.selector, claimId));
         lf.setBounty(tokenId, 0);
         vm.stopPrank();
     }
@@ -170,7 +170,7 @@ contract LostAndFoundTest is Test {
         uint256 tokenId = _lostWithBounty();
         uint256 claimId = _fileAndReceive(tokenId);
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.ClaimInProgress.selector, claimId));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.ClaimInProgress.selector, claimId));
         vault.writeOffLost(tokenId);
     }
 
@@ -215,23 +215,23 @@ contract LostAndFoundTest is Test {
     function test_InvalidClaimsAreRefused() public {
         uint256 tokenId = _lostWithBounty();
         vm.prank(owner);
-        vm.expectRevert(LostAndFound.OwnSlab.selector);
+        vm.expectRevert(LostSlabRecovery.OwnSlab.selector);
         lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR1");
 
         vm.prank(finder);
         lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR1");
         // Only the owner chooses, and only after Pokechain has the slab.
         vm.prank(finder);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.WrongClaimStatus.selector, 1, LostAndFound.Status.Filed));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.WrongClaimStatus.selector, 1, LostSlabRecovery.Status.Filed));
         lf.chooseReturn(1, true, bytes32(0));
         vm.prank(operator);
         lf.markReceived(1);
         vm.prank(finder);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.NotSlabOwner.selector, tokenId));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.NotSlabOwner.selector, tokenId));
         lf.chooseReturn(1, true, bytes32(0));
         // Only the finder collects, and only after the return.
         vm.prank(finder);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.WrongClaimStatus.selector, 1, LostAndFound.Status.AtPokechain));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.WrongClaimStatus.selector, 1, LostSlabRecovery.Status.AtPokechain));
         lf.claimBounty(1);
     }
 
@@ -240,7 +240,7 @@ contract LostAndFoundTest is Test {
         vm.prank(owner);
         vault.cancelLostReport(tokenId);
         vm.prank(finder);
-        vm.expectRevert(abi.encodeWithSelector(LostAndFound.SlabNotLost.selector, tokenId));
+        vm.expectRevert(abi.encodeWithSelector(LostSlabRecovery.SlabNotLost.selector, tokenId));
         lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR1");
     }
 
@@ -258,7 +258,7 @@ contract LostAndFoundTest is Test {
 
         uint256 tokenId = _lostWithBounty();
 
-        // Filing claim moves bond from finder to LostAndFound contract
+        // Filing claim moves bond from finder to LostSlabRecovery contract
         vm.prank(finder);
         uint256 claimId = lf.fileClaim(tokenId, EVIDENCE, "SingPost", "RR555SG");
         assertEq(accounts.balanceOf(finder), 90 * USD);

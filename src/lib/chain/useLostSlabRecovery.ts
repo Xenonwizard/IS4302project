@@ -1,12 +1,12 @@
 "use client";
 
 /**
- * Lost-slab bounties and found-slab claims, on LostAndFound.
+ * Lost-slab bounties and found-slab claims, on LostSlabRecovery.
  *
- *  Owner      setBounty()     LostAndFound.setBounty: escrows the bounty from their Pokechain balance
- *             chooseReturn()  LostAndFound.chooseReturn: vault, or delivery (keccak256 of the address)
- *  Finder     fileClaim()     LostAndFound.fileClaim: evidence hash + the parcel's tracking number
- *             claimBounty()   LostAndFound.claimBounty: paid once SlabVault shows the slab back
+ *  Owner      setBounty()     LostSlabRecovery.setBounty: escrows the bounty from their Pokechain balance
+ *             chooseReturn()  LostSlabRecovery.chooseReturn: vault, or delivery (keccak256 of the address)
+ *  Finder     fileClaim()     LostSlabRecovery.fileClaim: evidence hash + the parcel's tracking number
+ *             claimBounty()   LostSlabRecovery.claimBounty: paid once SlabVault shows the slab back
  *  Pokechain  step()          POST /api/chain/found: markReceived, completeReturn or rejectClaim
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,9 +35,9 @@ export interface FoundCase {
   evidenceHash: `0x${string}`;
   inboundCarrier: string;
   inboundTracking: string;
-  /** LostAndFound.Status: 1 Filed, 2 At Pokechain, 3 Return chosen, 4 Returned, 5 Paid, 6 Rejected */
+  /** LostSlabRecovery.Status: 1 Filed, 2 At Pokechain, 3 Return chosen, 4 Returned, 5 Paid, 6 Rejected */
   status: number;
-  /** LostAndFound.ReturnTo: 1 Vault, 2 Owner */
+  /** LostSlabRecovery.ReturnTo: 1 Vault, 2 Owner */
   returnTo: number;
   shippingHash: `0x${string}`;
   /** What the finder was paid, in dollars (0 until paid). */
@@ -60,13 +60,13 @@ export function useFoundCases() {
     queryKey: ["found-cases"],
     enabled: Boolean(client && IS_DEPLOYED),
     queryFn: async (): Promise<FoundCase[]> => {
-      const filed = await client!.getContractEvents({ ...contracts.lostAndFound, eventName: "ClaimFiled", fromBlock: DEPLOY_BLOCK });
+      const filed = await client!.getContractEvents({ ...contracts.lostSlabRecovery, eventName: "ClaimFiled", fromBlock: DEPLOY_BLOCK });
       const ids = [...new Set(filed.map((e) => e.args.claimId!))].reverse();
       return Promise.all(
         ids.map(async (id) => {
-          const c = await client!.readContract({ ...contracts.lostAndFound, functionName: "claimOf", args: [id] });
+          const c = await client!.readContract({ ...contracts.lostSlabRecovery, functionName: "claimOf", args: [id] });
           const [bounty, slab] = await Promise.all([
-            client!.readContract({ ...contracts.lostAndFound, functionName: "bountyOf", args: [c.tokenId] }),
+            client!.readContract({ ...contracts.lostSlabRecovery, functionName: "bountyOf", args: [c.tokenId] }),
             // slabOf still answers after the token burns on confirmed delivery.
             client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [c.tokenId] }),
           ]);
@@ -105,7 +105,7 @@ const STEP_LABEL: Record<FoundStep, string> = {
   reject: "Pokechain rejects the claim",
 };
 
-export function useLostAndFound() {
+export function useLostSlabRecovery() {
   const { send, operator } = useChainTx();
   const client = usePublicClient();
   const log = useChainLog();
@@ -124,7 +124,7 @@ export function useLostAndFound() {
   const setBounty = useCallback(
     async (tokenId: string, dollars: number) => {
       await send({
-        contract: "lostAndFound",
+        contract: "lostSlabRecovery",
         functionName: "setBounty",
         args: [BigInt(tokenId), toUsdcUnits(dollars)],
         label: dollars > 0 ? "Escrow lost-slab bounty" : "Refund lost-slab bounty",
@@ -146,12 +146,12 @@ export function useLostAndFound() {
       const evidenceHash = keccak256(toBytes(manifest));
       log.add({ kind: "check", label: "Hash found-slab evidence", call: "keccak256(evidence manifest)", args: [evidenceHash], status: "success" });
       const receipt = await send({
-        contract: "lostAndFound",
+        contract: "lostSlabRecovery",
         functionName: "fileClaim",
         args: [BigInt(input.tokenId), evidenceHash, input.carrier.trim(), input.tracking.trim()],
         label: "File found-slab claim",
       });
-      const [event] = parseEventLogs({ abi: contracts.lostAndFound.abi, logs: receipt.logs, eventName: "ClaimFiled" });
+      const [event] = parseEventLogs({ abi: contracts.lostSlabRecovery.abi, logs: receipt.logs, eventName: "ClaimFiled" });
       await refresh();
       return event.args.claimId.toString();
     },
@@ -162,7 +162,7 @@ export function useLostAndFound() {
     async (claimId: string, toVault: boolean, shipTo = "") => {
       const shippingHash = toVault ? (`0x${"0".repeat(64)}` as const) : keccak256(toBytes(shipTo.trim()));
       await send({
-        contract: "lostAndFound",
+        contract: "lostSlabRecovery",
         functionName: "chooseReturn",
         args: [BigInt(claimId), toVault, shippingHash],
         label: toVault ? "Return found slab to vault" : "Deliver found slab to me",
@@ -174,7 +174,7 @@ export function useLostAndFound() {
 
   const claimBounty = useCallback(
     async (claimId: string) => {
-      await send({ contract: "lostAndFound", functionName: "claimBounty", args: [BigInt(claimId)], label: "Claim recovery bounty" });
+      await send({ contract: "lostSlabRecovery", functionName: "claimBounty", args: [BigInt(claimId)], label: "Claim recovery bounty" });
       await refresh();
     },
     [send, refresh],
@@ -190,12 +190,12 @@ export function useLostAndFound() {
   );
 
   const { data: claimBondUnits } = useQuery({
-    queryKey: ["lost-and-found-claim-bond", client?.chain?.id],
+    queryKey: ["lost-slab-recovery-claim-bond", client?.chain?.id],
     enabled: Boolean(client && IS_DEPLOYED),
     queryFn: async () => {
       try {
         const bond = await client!.readContract({
-          ...contracts.lostAndFound,
+          ...contracts.lostSlabRecovery,
           functionName: "claimBond",
         });
         return fromUsdcUnits(bond as bigint);
@@ -211,11 +211,11 @@ export function useLostAndFound() {
 
 /**
  * Every lost-report action. With a chain the report and its bounty live only on SlabVault and
- * LostAndFound, and the Lost page reads them back from there (useChainLostSlabs); this browser
+ * LostSlabRecovery, and the Lost page reads them back from there (useChainLostSlabs); this browser
  * only takes the slab off sale. Without a chain (or a slab with no token) it is the local demo.
  */
 export function useLostReport() {
-  const { setBounty } = useLostAndFound();
+  const { setBounty } = useLostSlabRecovery();
   const { reportLost, cancelLost, writeOffLost } = useSlabChain();
   const { reportVaultLost, delistLostSlab, cancelVaultLost, setVaultBounty, cancelVaultBounty, withdrawLostForInsurance } = useStore();
   const queryClient = useQueryClient();
@@ -227,7 +227,7 @@ export function useLostReport() {
       if (!client || !address) return;
       const [balance, current] = await Promise.all([
         client.readContract({ ...contracts.accounts, functionName: "balanceOf", args: [address] }),
-        client.readContract({ ...contracts.lostAndFound, functionName: "bountyOf", args: [BigInt(tokenId)] }),
+        client.readContract({ ...contracts.lostSlabRecovery, functionName: "bountyOf", args: [BigInt(tokenId)] }),
       ]);
       const extra = toUsdcUnits(dollars) - current;
       if (extra > balance) {
@@ -248,7 +248,7 @@ export function useLostReport() {
   );
   const onChain = (tokenId?: string): tokenId is string => IS_DEPLOYED && Boolean(tokenId);
 
-  /** Sets the bounty to `dollars` (0 refunds it): escrowed on LostAndFound, so the Lost page never advertises money the contract doesn't hold. */
+  /** Sets the bounty to `dollars` (0 refunds it): escrowed on LostSlabRecovery, so the Lost page never advertises money the contract doesn't hold. */
   const setLostBounty = useCallback(
     async (listingId: string, dollars: number, tokenId?: string) => {
       if (onChain(tokenId)) {
@@ -303,7 +303,7 @@ export function useLostReport() {
         const custody = CUSTODY[await client.readContract({ ...contracts.slabVault, functionName: "custodyOf", args: [id] })];
         // None: not on this chain. Delivered / Written off: already burned.
         if (custody !== "None" && custody !== "Delivered" && custody !== "Written off") {
-          const claimId = await client.readContract({ ...contracts.lostAndFound, functionName: "activeClaimOf", args: [id] });
+          const claimId = await client.readContract({ ...contracts.lostSlabRecovery, functionName: "activeClaimOf", args: [id] });
           if (claimId !== BigInt(0)) {
             throw new Error(`A finder has filed claim #${claimId} for this slab. Wait for Pokechain to check it before claiming insurance.`);
           }

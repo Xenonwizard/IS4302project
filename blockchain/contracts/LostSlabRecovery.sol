@@ -7,8 +7,9 @@ import {AccountRegistry} from "./AccountRegistry.sol";
 import {SlabVault} from "./SlabVault.sol";
 
 /**
- * @title LostAndFound
- * @notice Bounties for slabs lost in the post, and the finder's recovery case, settled on-chain.
+ * @title LostSlabRecovery
+ * @notice Finder bounties and recovery for lost slabs, settled on-chain. The lost report itself
+ *         lives on SlabVault (reportLost); this contract runs everything after a finder turns up.
  *
  *  The owner's side
  *   1. `setBounty`      the owner of a Lost slab escrows a bounty from their Pokechain balance.
@@ -32,7 +33,7 @@ import {SlabVault} from "./SlabVault.sol";
  *  Nobody has to trust the owner to pay: the bounty is escrowed before anyone claims it, and the
  *  payout condition is the slab's custody on SlabVault, not anyone's say-so.
  */
-contract LostAndFound is AccessControl, ReentrancyGuard {
+contract LostSlabRecovery is AccessControl, ReentrancyGuard {
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
     enum Status {

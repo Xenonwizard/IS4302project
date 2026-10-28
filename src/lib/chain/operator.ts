@@ -390,35 +390,35 @@ export async function sendGas(to: Address) {
   return { skipped: false as const, tx };
 }
 
-/* ---------------- found-slab claims (LostAndFound) ---------------- */
+/* ---------------- found-slab claims (LostSlabRecovery) ---------------- */
 
 export const FOUND_STEPS = ["receive", "return", "reject"] as const;
 export type FoundStep = (typeof FOUND_STEPS)[number];
 
 /**
- * Pokechain's intake for a finder's parcel, on LostAndFound:
+ * Pokechain's intake for a finder's parcel, on LostSlabRecovery:
  *   receive  markReceived: the parcel arrived and the slab matches the lost token
  *   return   completeReturn: back into the vault, or shipped to the owner (closes the lost report on SlabVault)
  *   reject   rejectClaim: wrong or fake slab; the bounty stays posted for the next finder
  */
 export async function foundClaimStep(claimId: bigint, step: FoundStep, reason = "") {
-  const claim = await publicClient.readContract({ ...contracts.lostAndFound, functionName: "claimOf", args: [claimId] });
+  const claim = await publicClient.readContract({ ...contracts.lostSlabRecovery, functionName: "claimOf", args: [claimId] });
   if (claim.status === 0) throw new Error(`Found-slab claim #${claimId} doesn't exist`);
   const wallet = walletClient();
   if (step === "receive") {
-    const hash = await wallet.writeContract({ ...contracts.lostAndFound, functionName: "markReceived", args: [claimId] });
-    return { step, tx: await receiptOf("LostAndFound.markReceived", [claimId.toString()], hash, wallet.account.address) };
+    const hash = await wallet.writeContract({ ...contracts.lostSlabRecovery, functionName: "markReceived", args: [claimId] });
+    return { step, tx: await receiptOf("LostSlabRecovery.markReceived", [claimId.toString()], hash, wallet.account.address) };
   }
   if (step === "reject") {
     const why = reason.trim() || "Slab did not match the lost token";
-    const hash = await wallet.writeContract({ ...contracts.lostAndFound, functionName: "rejectClaim", args: [claimId, why] });
-    return { step, tx: await receiptOf("LostAndFound.rejectClaim", [claimId.toString(), why], hash, wallet.account.address) };
+    const hash = await wallet.writeContract({ ...contracts.lostSlabRecovery, functionName: "rejectClaim", args: [claimId, why] });
+    return { step, tx: await receiptOf("LostSlabRecovery.rejectClaim", [claimId.toString(), why], hash, wallet.account.address) };
   }
   // Delivery gets a Pokechain courier reference; a vault return needs none.
   const toOwner = claim.returnTo === 2;
   const carrier = toOwner ? "Pokechain Secure" : "";
   const tracking = toOwner ? `PCR-${claimId}-${claim.tokenId.toString().slice(-4)}` : "";
-  const hash = await wallet.writeContract({ ...contracts.lostAndFound, functionName: "completeReturn", args: [claimId, carrier, tracking] });
-  const tx = await receiptOf("LostAndFound.completeReturn", [claimId.toString(), carrier, tracking], hash, wallet.account.address);
+  const hash = await wallet.writeContract({ ...contracts.lostSlabRecovery, functionName: "completeReturn", args: [claimId, carrier, tracking] });
+  const tx = await receiptOf("LostSlabRecovery.completeReturn", [claimId.toString(), carrier, tracking], hash, wallet.account.address);
   return { step, returnTo: toOwner ? "owner" : "vault", carrier, trackingNumber: tracking, tx };
 }

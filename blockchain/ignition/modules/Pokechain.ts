@@ -4,11 +4,11 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
  * Deploys the three contracts and wires them together. Ignition records every step in
  * ignition/deployments/chain-<id>/, so a deploy that fails halfway resumes where it stopped.
  *
- *   MockUSDC         test dollars (6 decimals, EIP-2612 permit, public faucet)
- *   AccountRegistry  handles, custody balances, account close
- *   SlabVault        ERC-721 per physical slab, custody trail, encrypted hand-off to the custodian
- *   TradeEscrow      slabs + cash swaps between two collectors, settled atomically
- *   LostAndFound     escrowed bounties for lost slabs, paid to the finder once the slab is back
+ *   MockUSDC          test dollars (6 decimals, EIP-2612 permit, public faucet)
+ *   AccountRegistry   handles, custody balances, account close
+ *   SlabVault         ERC-721 per physical slab, custody trail, encrypted hand-off to the custodian
+ *   TradeEscrow       slabs + cash swaps between two collectors, settled atomically
+ *   LostSlabRecovery  escrowed bounties for lost slabs, paid to the finder once the slab is back
  */
 export default buildModule("PokechainModule", (m) => {
   // The deployer is also the vault operator: the server key that mints and ships slabs.
@@ -40,13 +40,13 @@ export default buildModule("PokechainModule", (m) => {
   m.call(slabMarket, "setLoanEscrow", [loanEscrow]);
 
   // Lost-slab bounties are escrowed here; it closes lost reports on SlabVault for a finder's claim.
-  const lostAndFound = m.contract("LostAndFound", [accounts, slabVault, operator]);
-  m.call(accounts, "setLostAndFound", [lostAndFound]);
-  m.call(slabVault, "setLostAndFound", [lostAndFound]);
+  const lostSlabRecovery = m.contract("LostSlabRecovery", [accounts, slabVault, operator]);
+  m.call(accounts, "setLostSlabRecovery", [lostSlabRecovery]);
+  m.call(slabVault, "setLostSlabRecovery", [lostSlabRecovery]);
 
   // Seed default test USDC balance for Hardhat test collectors (accounts #1 and #2)
   m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector1, id: "seed_collector1" });
   m.call(usdc, "faucet", [BigInt(100_000) * BigInt(1_000_000)], { from: collector2, id: "seed_collector2" });
 
-  return { usdc, accounts, slabVault, tradeEscrow, slabMarket, loanEscrow, lostAndFound };
+  return { usdc, accounts, slabVault, tradeEscrow, slabMarket, loanEscrow, lostSlabRecovery };
 });

@@ -11,7 +11,7 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   reporter: [["list"]],
   // PLAYWRIGHT_CHANNEL=chrome uses the installed Google Chrome, so nothing extra has to be downloaded.
-  use: { baseURL, channel: process.env.PLAYWRIGHT_CHANNEL, screenshot: "only-on-failure", trace: "retain-on-failure" },
+  use: { baseURL, channel: process.env.PLAYWRIGHT_CHANNEL, screenshot: "only-on-failure", trace: process.env.CI ? "retain-on-failure" : "off" },
   projects: [{ name: "desktop", use: { viewport: { width: 1440, height: 900 } } }],
   // Starts whatever isn't already running: the local chain (with its reset snapshot) and the app.
   webServer: [

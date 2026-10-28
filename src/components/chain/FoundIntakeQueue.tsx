@@ -4,7 +4,7 @@ import { Check, Copy, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { CLAIM_STATUS } from "@/lib/chain/config";
 import type { FoundStep } from "@/lib/chain/operator";
-import { type FoundCase, useFoundCases, useLostAndFound } from "@/lib/chain/useLostAndFound";
+import { type FoundCase, useFoundCases, useLostSlabRecovery } from "@/lib/chain/useLostSlabRecovery";
 import { usd } from "@/lib/format";
 import { useStore } from "@/lib/store";
 import { Button } from "../ui/primitives";
@@ -22,7 +22,7 @@ export function FoundIntakeQueue({ onOpenCert }: { onOpenCert: (certNumber: stri
     <section className="mt-8 rounded-card border border-hairline bg-surface p-4" data-testid="found-intake">
       <p className="text-[15px] font-bold">Found-slab claims</p>
       <p className="mt-1 text-[12px] leading-relaxed text-muted">
-        A collector found a slab reported lost and posted it here. Authenticate it, wait for the owner to choose vault or delivery, then send it back. Each step is a <span className="font-mono">LostAndFound</span> transaction from the operator key.
+        A collector found a slab reported lost and posted it here. Authenticate it, wait for the owner to choose vault or delivery, then send it back. Each step is a <span className="font-mono">LostSlabRecovery</span> transaction from the operator key.
       </p>
       <div className="mt-4 space-y-3">
         {open.map((c) => <QueueItem key={c.claimId} c={c} onOpenCert={onOpenCert} />)}
@@ -35,7 +35,7 @@ export function FoundIntakeQueue({ onOpenCert }: { onOpenCert: (certNumber: stri
 }
 
 function QueueItem({ c, onOpenCert }: { c: FoundCase; onOpenCert: (certNumber: string) => void }) {
-  const { step } = useLostAndFound();
+  const { step } = useLostSlabRecovery();
   const { pushToast } = useStore();
   const [busy, setBusy] = useState<FoundStep | null>(null);
   const [copied, setCopied] = useState(false);

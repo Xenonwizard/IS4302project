@@ -8,7 +8,7 @@ export const deployments = {
     "TradeEscrow": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
     "SlabMarket": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
     "LoanEscrow": "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e",
-    "LostAndFound": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+    "LostSlabRecovery": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
     "fromBlock": 1
   }
 } as const;
@@ -648,7 +648,7 @@ export const accountRegistryAbi = [
   },
   {
     "inputs": [],
-    "name": "LostAndFoundAlreadySet",
+    "name": "LostSlabRecoveryAlreadySet",
     "type": "error"
   },
   {
@@ -860,11 +860,11 @@ export const accountRegistryAbi = [
       {
         "indexed": false,
         "internalType": "address",
-        "name": "lostAndFound",
+        "name": "lostSlabRecovery",
         "type": "address"
       }
     ],
-    "name": "LostAndFoundSet",
+    "name": "LostSlabRecoverySet",
     "type": "event"
   },
   {
@@ -1116,7 +1116,7 @@ export const accountRegistryAbi = [
   },
   {
     "inputs": [],
-    "name": "lostAndFound",
+    "name": "lostSlabRecovery",
     "outputs": [
       {
         "internalType": "address",
@@ -1200,11 +1200,11 @@ export const accountRegistryAbi = [
     "inputs": [
       {
         "internalType": "address",
-        "name": "lostAndFound_",
+        "name": "lostSlabRecovery_",
         "type": "address"
       }
     ],
-    "name": "setLostAndFound",
+    "name": "setLostSlabRecovery",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1773,19 +1773,6 @@ export const slabVaultAbi = [
     "inputs": [
       {
         "indexed": true,
-        "internalType": "address",
-        "name": "lostAndFound",
-        "type": "address"
-      }
-    ],
-    "name": "LostAndFoundSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
         "internalType": "uint256",
         "name": "tokenId",
         "type": "uint256"
@@ -1860,6 +1847,19 @@ export const slabVaultAbi = [
       }
     ],
     "name": "LostSlabRecovered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "lostSlabRecovery",
+        "type": "address"
+      }
+    ],
+    "name": "LostSlabRecoverySet",
     "type": "event"
   },
   {
@@ -2667,7 +2667,7 @@ export const slabVaultAbi = [
   },
   {
     "inputs": [],
-    "name": "lostAndFound",
+    "name": "lostSlabRecovery",
     "outputs": [
       {
         "internalType": "address",
@@ -3162,11 +3162,11 @@ export const slabVaultAbi = [
     "inputs": [
       {
         "internalType": "address",
-        "name": "lostAndFound_",
+        "name": "lostSlabRecovery_",
         "type": "address"
       }
     ],
-    "name": "setLostAndFound",
+    "name": "setLostSlabRecovery",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -5943,7 +5943,7 @@ export const loanEscrowAbi = [
   }
 ] as const;
 
-export const lostAndFoundAbi = [
+export const lostSlabRecoveryAbi = [
   {
     "inputs": [
       {
@@ -6074,7 +6074,7 @@ export const lostAndFoundAbi = [
         "type": "uint256"
       },
       {
-        "internalType": "enum LostAndFound.Status",
+        "internalType": "enum LostSlabRecovery.Status",
         "name": "current",
         "type": "uint8"
       }
@@ -6342,7 +6342,7 @@ export const lostAndFoundAbi = [
       },
       {
         "indexed": false,
-        "internalType": "enum LostAndFound.ReturnTo",
+        "internalType": "enum LostSlabRecovery.ReturnTo",
         "name": "returnTo",
         "type": "uint8"
       },
@@ -6373,7 +6373,7 @@ export const lostAndFoundAbi = [
       },
       {
         "indexed": false,
-        "internalType": "enum LostAndFound.ReturnTo",
+        "internalType": "enum LostSlabRecovery.ReturnTo",
         "name": "returnTo",
         "type": "uint8"
       }
@@ -6663,12 +6663,12 @@ export const lostAndFoundAbi = [
             "type": "string"
           },
           {
-            "internalType": "enum LostAndFound.Status",
+            "internalType": "enum LostSlabRecovery.Status",
             "name": "status",
             "type": "uint8"
           },
           {
-            "internalType": "enum LostAndFound.ReturnTo",
+            "internalType": "enum LostSlabRecovery.ReturnTo",
             "name": "returnTo",
             "type": "uint8"
           },
@@ -6693,7 +6693,7 @@ export const lostAndFoundAbi = [
             "type": "uint64"
           }
         ],
-        "internalType": "struct LostAndFound.Claim",
+        "internalType": "struct LostSlabRecovery.Claim",
         "name": "",
         "type": "tuple"
       }

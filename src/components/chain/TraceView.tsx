@@ -53,7 +53,7 @@ export function TraceView({ tokenId }: { tokenId: string }) {
         ...data.polygon.map<Row>((e) => ({
           source: "Polygon",
           at: e.at,
-          title: `SlabVault.${e.event}`,
+          title: `${e.contract}.${e.event}`,
           detail: e.detail,
           ref: e.tx,
           refLabel: `block ${e.block}`,

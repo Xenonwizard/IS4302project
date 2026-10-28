@@ -2,7 +2,7 @@ import { createPublicClient, createWalletClient, http, parseEventLogs, type Addr
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { accountRegistryAbi, deployments, lostAndFoundAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
+import { accountRegistryAbi, deployments, loanEscrowAbi, lostSlabRecoveryAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect } from "./fixtures";
 
 const local = deployments["31337"];
@@ -56,6 +56,23 @@ export async function listAsMisty(tokenId: number, dollars: number) {
   await pub.waitForTransactionReceipt({
     hash: await wallet.writeContract({ address: local.SlabMarket, abi: slabMarketAbi, functionName: "list", args: [BigInt(tokenId), BigInt(dollars * 1_000_000)] }),
   });
+}
+
+/**
+ * A full loan against one of @misty's slabs, straight on the chain: she lists it open to loans,
+ * @ash (test1) lends $100 + $5 for a day, she accepts (the slab moves into LoanEscrow) and repays.
+ */
+export async function loanRoundTripOnMistySlab(tokenId: number) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const misty = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(MISTY_KEY) });
+  const ash = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(TEST1_KEY) });
+  const id = BigInt(tokenId);
+  const wait = async (hash: `0x${string}`) => pub.waitForTransactionReceipt({ hash });
+  await wait(await misty.writeContract({ address: local.SlabMarket, abi: slabMarketAbi, functionName: "listWithLoan", args: [id, 500_000_000n, 100_000_000n] }));
+  await wait(await ash.writeContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "createOffer", args: [id, 100_000_000n, 5_000_000n, 86_400n, "smoke"] }));
+  const offerId = await pub.readContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "nextOfferId" }) - 1n;
+  await wait(await misty.writeContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "accept", args: [offerId] }));
+  await wait(await misty.writeContract({ address: local.LoanEscrow, abi: loanEscrowAbi, functionName: "repay", args: [offerId] }));
 }
 
 /** Whether SlabVault says a slab is currently listed for sale. */
@@ -148,10 +165,10 @@ async function depositAs(key: `0x${string}`, dollars: number) {
   });
 }
 
-/** The bounty LostAndFound holds in escrow for a slab, in dollars. */
+/** The bounty LostSlabRecovery holds in escrow for a slab, in dollars. */
 export async function escrowedBounty(tokenId: number) {
   const pub = createPublicClient({ chain: hardhat, transport: http() });
-  const units = await pub.readContract({ address: local.LostAndFound, abi: lostAndFoundAbi, functionName: "bountyOf", args: [BigInt(tokenId)] });
+  const units = await pub.readContract({ address: local.LostSlabRecovery, abi: lostSlabRecoveryAbi, functionName: "bountyOf", args: [BigInt(tokenId)] });
   return Number(units) / 1e6;
 }
 
@@ -163,7 +180,7 @@ export async function custodyOf(tokenId: number) {
 
 /**
  * A test wallet reports one of its vaulted slabs missing from Collector Crypt's vault, optionally
- * escrowing a bounty (SlabVault.reportLost, then LostAndFound.setBounty). Withdrawn slabs can't
+ * escrowing a bounty (SlabVault.reportLost, then LostSlabRecovery.setBounty). Withdrawn slabs can't
  * be reported lost any more (their NFT burns at the request), so lost-and-found flows start here.
  */
 export async function reportLostInVaultAs(wallet: 1 | 2, tokenId: number, details: string, bountyDollars = 0) {
@@ -174,7 +191,7 @@ export async function reportLostInVaultAs(wallet: 1 | 2, tokenId: number, detail
   });
   if (bountyDollars > 0) {
     await pub.waitForTransactionReceipt({
-      hash: await client.writeContract({ address: local.LostAndFound, abi: lostAndFoundAbi, functionName: "setBounty", args: [BigInt(tokenId), BigInt(bountyDollars * 1_000_000)] }),
+      hash: await client.writeContract({ address: local.LostSlabRecovery, abi: lostSlabRecoveryAbi, functionName: "setBounty", args: [BigInt(tokenId), BigInt(bountyDollars * 1_000_000)] }),
     });
   }
 }

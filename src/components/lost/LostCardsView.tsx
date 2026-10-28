@@ -16,7 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usd } from "@/lib/format";
 import { IS_DEPLOYED } from "@/lib/chain/config";
-import { useLostReport } from "@/lib/chain/useLostAndFound";
+import { useLostReport } from "@/lib/chain/useLostSlabRecovery";
 import { useLostSlabs, useStore } from "@/lib/store";
 import { Button, Modal, inputClass } from "../ui/primitives";
 import { Select } from "../ui/Select";
@@ -364,7 +364,7 @@ export function LostCardsView() {
                   if (!Number.isFinite(val) || val <= 0) return;
                   const { listing } = activeBountyTarget;
                   try {
-                    // Escrowed on LostAndFound, not just advertised.
+                    // Escrowed on LostSlabRecovery, not just advertised.
                     await lostReport.setBounty(listing.id, val, IS_DEPLOYED ? listing.tokenId : undefined);
                     setBountyTargetId(null);
                   } catch (err) {

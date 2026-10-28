@@ -6,7 +6,7 @@
  *   SlabVault.SlabReportedLost   every report ever filed (tokenId, owner, details)
  *   SlabVault.slabOf             still Lost? (a cancelled, found or written-off report isn't)
  *   SlabVault.custodyBeforeLossOf  Vaulted = missing from the vault, otherwise lost in the post
- *   LostAndFound.bountyOf        the bounty escrowed for it right now
+ *   LostSlabRecovery.bountyOf        the bounty escrowed for it right now
  *   AccountRegistry.accountOf    the owner's handle
  *
  * Nothing about a public report is kept in browser storage.
@@ -24,7 +24,7 @@ export interface ChainLostSlab {
   details: string;
   reportedAt: string;
   source: "vault" | "transit";
-  /** Escrowed on LostAndFound, in dollars. */
+  /** Escrowed on LostSlabRecovery, in dollars. */
   bounty: number;
 }
 
@@ -49,7 +49,7 @@ export function useChainLostSlabs() {
           const [owner, before, bounty] = await Promise.all([
             client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [id] }),
             client!.readContract({ ...contracts.slabVault, functionName: "custodyBeforeLossOf", args: [id] }),
-            client!.readContract({ ...contracts.lostAndFound, functionName: "bountyOf", args: [id] }),
+            client!.readContract({ ...contracts.lostSlabRecovery, functionName: "bountyOf", args: [id] }),
           ]);
           const account = await client!.readContract({ ...contracts.accounts, functionName: "accountOf", args: [owner] });
           // A slab lost before Collector Crypt vaulted it has no title or image on-chain yet.

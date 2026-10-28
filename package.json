@@ -16,6 +16,7 @@
     "contracts:test": "npm --prefix blockchain test",
     "deploy:amoy": "npm --prefix blockchain run deploy:amoy",
     "test:smoke": "PLAYWRIGHT_CHANNEL=chrome playwright test",
+    "test:smoke:quick": "PLAYWRIGHT_CHANNEL=chrome playwright test --max-failures=1",
     "test:unit": "node --experimental-strip-types --test tests/unit/*.test.mts"
   },
   "dependencies": {

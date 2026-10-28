@@ -1,5 +1,5 @@
 /**
- * Pokechain operator: moves a finder's claim through intake on LostAndFound.
+ * Pokechain operator: moves a finder's claim through intake on LostSlabRecovery.
  *
  *   POST /api/chain/found   { "claimId": "1", "step": "receive" | "return" | "reject", "reason"?: "…" }
  */
