@@ -11,7 +11,6 @@ import { getListing } from "@/lib/catalog";
 import { usd } from "@/lib/format";
 import { bidValue, pendingOffer } from "@/lib/negotiation";
 import { useEscrowedByMe } from "@/lib/chain/trades";
-import { useLoanOffers } from "@/lib/chain/loans";
 import { useLostSlabs, useStore } from "@/lib/store";
 import { IS_DEPLOYED } from "@/lib/chain/config";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
@@ -23,14 +22,13 @@ import { Badge, Button, Field, Modal, TimeAgo, inputClass } from "../ui/primitiv
 import { ListForSaleForm } from "./ListForSaleForm";
 import { Empty, LoginPrompt } from "./shared";
 
-type Tab = "all" | "awaiting" | "listed" | "unlisted" | "loans" | "lost";
+type Tab = "all" | "awaiting" | "listed" | "unlisted" | "lost";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "all", label: "All" },
   { value: "awaiting", label: "Awaiting vault" },
   { value: "listed", label: "Listed" },
   { value: "unlisted", label: "Unlisted" },
-  { value: "loans", label: "Used for Loan" },
   { value: "lost", label: "Lost" },
 ];
 
@@ -40,7 +38,6 @@ export function VaultView() {
     user,
     ready,
     vault,
-    slabs,
     delist,
     requestShipping,
     resolve,
@@ -91,11 +88,6 @@ export function VaultView() {
   const [insuranceWithdrawTarget, setInsuranceWithdrawTarget] = useState<{ entry: VaultItem; listing: Listing } | null>(null);
   // Slabs locked in one of my open trade offers (held by TradeEscrow): tokenId → offerId
   const { data: escrowed = {} } = useEscrowedByMe(user?.address as Address | undefined);
-  const { data: loanOffers = [] } = useLoanOffers(user?.address as Address | undefined);
-  const activeBorrowedLoans = loanOffers.filter(
-    (loan) => loan.status === "Active" && user?.address && loan.borrower.toLowerCase() === user.address.toLowerCase(),
-  );
-  const loanTokenIds = new Set(activeBorrowedLoans.map((loan) => loan.tokenId));
 
   const allItems = useMemo(
     () =>
@@ -111,14 +103,9 @@ export function VaultView() {
   const hasPendingDecision = (listing: Listing) => Object.keys(pendingLossDecisions).some(
     (id) => id === listing.id || id === listing.tokenId || id === `token-${listing.tokenId}`,
   );
-  const loanCards = activeBorrowedLoans.flatMap((loan) => {
-    const listing = allItems.find((item) => item.listing.tokenId === loan.tokenId)?.listing
-      ?? slabs.find((slab) => slab.tokenId === loan.tokenId);
-    return listing ? [{ loan, listing }] : [];
-  });
   // Insurance-claimed slabs had their NFT burned: they're tracked in Status Center, not the Vault.
   const items = allItems.filter(
-    (i) => i.entry.status !== "Withdrawn" && !loanTokenIds.has(i.listing.tokenId ?? "") && lossFor(i.entry, i.listing)?.resolution !== "insurance",
+    (i) => i.entry.status !== "Withdrawn" && lossFor(i.entry, i.listing)?.resolution !== "insurance",
   );
   const lostItems = items.filter((i) => lossFor(i.entry, i.listing)?.published);
   const awaiting = items.filter((i) => {
@@ -135,7 +122,6 @@ export function VaultView() {
     awaiting: awaiting.length,
     listed: listed.length,
     unlisted: unlisted.length,
-    loans: loanCards.length,
     lost: lostItems.length,
   };
 
@@ -236,7 +222,7 @@ export function VaultView() {
       </div>
 
       <div className="mt-5">
-        {tab === "all" || tab === "awaiting" || tab === "listed" || tab === "unlisted" || tab === "loans" || tab === "lost" ? (
+        {tab === "all" || tab === "awaiting" || tab === "listed" || tab === "unlisted" || tab === "lost" ? (
           <div className="mb-3 flex justify-end">
             <div className="flex h-10 items-center rounded-xl border border-hairline bg-surface p-1" role="group" aria-label="Vault grid size">
               <button
@@ -372,36 +358,6 @@ export function VaultView() {
           )
         ) : null}
 
-        {tab === "loans" ? (
-          loanCards.length ? (
-            <div className={clsx(
-              "grid gap-3",
-              gridSize === "small" ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-9" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7",
-            )}>
-              {loanCards.map(({ loan, listing }) => (
-                <div key={loan.id} className="overflow-hidden rounded-card border border-accent/40 bg-surface ring-1 ring-accent/15">
-                  <Link href={`/asset/${listing.id}`} className={clsx("block bg-[#101014]", gridSize === "small" ? "p-2" : "p-4")}>
-                    <Slab listing={listing} interactive maxTilt={9} />
-                  </Link>
-                  <div className={gridSize === "small" ? "space-y-2 p-2" : "space-y-3 p-3.5"}>
-                    <p className={clsx("line-clamp-2 font-semibold leading-snug", gridSize === "small" ? "text-[10.5px]" : "text-[12px]")}>{listing.title}</p>
-                    <Badge tone="accent"><Lock size={11} /> Used for Loan</Badge>
-                    <div className={clsx("space-y-1 text-muted", gridSize === "small" ? "text-[9.5px]" : "text-[11px]")}>
-                      <p>Principal: <span className="font-semibold text-white">{usd(loan.principal, { cents: true })}</span></p>
-                      <p>Repayment: <span className="font-semibold text-white">{usd(loan.principal + loan.interest, { cents: true })}</span></p>
-                      <p>Due: <span className="font-semibold text-white">{new Date(loan.deadline * 1000).toLocaleDateString()}</span></p>
-                    </div>
-                    <Link href={`/trades/${loan.room}`} className="block">
-                      <Button size="sm" variant="secondary" className="w-full">View loan</Button>
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Empty icon={<Lock size={24} />} title="No cards used for loans" body="Cards securing an active accepted loan will be stored here until repayment or default." />
-          )
-        ) : null}
 
         {tab === "listed" ? (
           listed.length ? (

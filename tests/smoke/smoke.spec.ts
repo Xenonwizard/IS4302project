@@ -3,7 +3,7 @@ import { createPublicClient, createWalletClient, http, keccak256, toBytes } from
 import { hardhat } from "viem/chains";
 import { deployments, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect, test } from "./fixtures";
-import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, loanRoundTripOnMistySlab, logIn, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
+import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
 
 // One test per role's main job, against the real app and local chain. Each test starts from a
 // freshly reset chain and a fresh browser (empty localStorage).
@@ -739,21 +739,49 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   }
 });
 
-test("trace: a loan against a slab shows up in its /trace, with LoanEscrow holding it as collateral", async ({ page, request }) => {
-  await loadDemoTraders(request);
-  await loanRoundTripOnMistySlab(70000136);
-  const trace = await (await request.get("/api/trace/70000136")).json();
-  const events = trace.polygon.map((e: { contract: string; event: string }) => `${e.contract}.${e.event}`);
-  for (const e of ["SlabMarket.CardListed", "LoanEscrow.LoanOffered", "LoanEscrow.LoanAccepted", "LoanEscrow.LoanRepaid"]) expect(events).toContain(e);
-  await page.goto("/trace/70000136");
-  await expect(page.getByText("LoanEscrow.LoanAccepted")).toBeVisible();
-  await expect(page.getByText(/→ LoanEscrow/)).toBeVisible();
-  await expect(page.getByText(/Owner LoanEscrow →/)).toBeVisible();
-  // Timeline is newest first: the repay comes above the listing.
-  const rows = await page.locator("ol > li").allInnerTexts();
-  const at = (name: string) => rows.findIndex((r) => r.includes(name));
-  expect(at("LoanEscrow.LoanRepaid")).toBeGreaterThanOrEqual(0);
-  expect(at("LoanEscrow.LoanRepaid")).toBeLessThan(at("SlabMarket.CardListed"));
+test("market price: only cards picked for a trade look up the market price for their exact grade, and loans are gone", async ({ page, request }) => {
+  await resetSeeded(request);
+  // Stand-in for PokémonPriceTracker: the slab's own grade is $1,234.50, another grade is a decoy.
+  const lookups: string[] = [];
+  await page.route("**/api/pricing/graded?**", (route) => {
+    const q = new URL(route.request().url()).searchParams;
+    lookups.push(q.get("subject")!);
+    const label = `${q.get("grader")!.toUpperCase()} ${q.get("grade")}`;
+    return route.fulfill({ json: { data: { productId: "1", productName: q.get("subject"), category: q.get("set"), sourceUrl: "https://www.pokemonpricetracker.com/", prices: [
+      { label, value: 1234.5, count: 7, matchesSlab: true },
+      { label: "CGC 1", value: 9999, count: 1, matchesSlab: false },
+    ] } } });
+  });
+
+  await logIn(page, 1, "test1");
+  await page.goto("/marketplace");
+  const dragonite = page.locator("div.group").filter({ hasText: "Dark Dragonite" }).first();
+  await expect(dragonite).toContainText("Asking price");
+  // The free plan has 100 credits a day: browsing the marketplace spends none.
+  await expect(dragonite).not.toContainText("Market price");
+
+  // In a trade, only the cards actually picked are priced, under the seller's ask. No loan button.
+  await page.goto("/trades");
+  await page.getByRole("button", { name: "Chat with @test2" }).click();
+  await expect(page.getByRole("button", { name: "Make a trade offer" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Offer a loan/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Make a trade offer" }).click();
+  await page.getByRole("button", { name: "Request items" }).click();
+  await expect(page.getByRole("dialog")).toContainText("Seller ask $1,150.00");
+  await expect(page.getByRole("dialog")).not.toContainText("Market price");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  expect(lookups).toEqual([]);
+  await pickTradeSlabs(page, "Request items", ["Dark Dragonite", 33333333]);
+  await expect(page.getByText("Seller ask $1,150.00").first()).toBeVisible();
+  await expect(page.getByText("Market price $1,234.50").first()).toBeVisible();
+  expect(lookups).toEqual(["Dark Dragonite"]);
+
+  // Listing a slab has no loan option, and the Vault has no loan tab.
+  await page.goto("/vault?tab=unlisted");
+  await expect(page.getByRole("button", { name: /Used for Loan/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "List for sale" }).first().click();
+  await expect(page.getByRole("dialog")).toContainText("Asking price (USDC)");
+  await expect(page.getByRole("dialog")).not.toContainText(/loan/i);
 });
 
 test("session: signing out in one tab signs the other tab out too, and the navbars don't flicker", async ({ page }) => {
@@ -1011,6 +1039,8 @@ test("lost & found: choosing insurance after Pokechain's investigation burns the
   await page.getByRole("button", { name: /Claim vault-service insurance/ }).click();
   await page.getByRole("button", { name: "Submit insurance claim" }).click();
   await expect.poll(() => custodyOf(Number(cert))).toBe(10); // Written off
+  // The app confirms once it has saved the outcome; leaving before that used to lose it.
+  await expect(page.getByText("Insurance claim submitted").first()).toBeVisible();
   await expect(ownerOf(Number(cert))).rejects.toThrow();
 
   // It leaves the Vault and shows as claimed in Status Center, after a reload too.

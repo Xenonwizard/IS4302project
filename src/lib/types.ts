@@ -69,10 +69,6 @@ export interface Listing {
   contract: string;
   ownerAddress: string;
   isListed?: boolean;
-  /** Seller opted this listing into slab-secured loan offers. */
-  acceptsLoan?: boolean;
-  /** Minimum principal the seller will consider, in USDC. */
-  loanAsk?: number;
   chain: "Polygon";
   note: string;
   /** hi-res card scan and a small one for thumbnails */
@@ -206,28 +202,15 @@ export interface ChatTrade {
   counterOf?: string;
 }
 
-/** A funded slab-secured loan offer shown in the conversation. Live status comes from LoanEscrow. */
-export interface ChatLoan {
-  offerId: string;
-  lender: string;
-  borrower: string;
-  tokenId: string;
-  principal: number;
-  interest: number;
-  duration: number;
-}
-
 export interface ChatMessage {
   id: string;
   from: string;
   at: string;
-  kind: "text" | "offer" | "trade" | "loan" | "system";
+  kind: "text" | "offer" | "trade" | "system";
   text?: string;
   offer?: TradeBid;
   /** trade offers only */
   trade?: ChatTrade;
-  /** funded loan offers only */
-  loan?: ChatLoan;
   /** offers only */
   status?: OfferStatus;
   /** system messages: who caused it, so the other side can react */

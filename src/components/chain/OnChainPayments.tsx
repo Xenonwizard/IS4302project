@@ -22,7 +22,7 @@ interface Payment {
 }
 
 /** Contracts that hold money in AccountRegistry on their own account (escrows). */
-const ESCROWS: ContractName[] = ["lostSlabRecovery", "tradeEscrow", "loanEscrow"];
+const ESCROWS: ContractName[] = ["lostSlabRecovery", "tradeEscrow"];
 
 /**
  * Every movement of the account's Pokechain balance, rebuilt from AccountRegistry's events:

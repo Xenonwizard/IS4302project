@@ -100,8 +100,6 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
           seller: l.seller,
           price: fromUsdcUnits(l.price),
           listedAt: Number(l.listedAt),
-          acceptsLoan: l.acceptsLoan,
-          loanAsk: fromUsdcUnits(l.loanAsk),
         };
       } catch {
         return null;
@@ -187,10 +185,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
       owner: lostView ? "Anonymous owner" : currentOwner,
       ownerAddress: lostView ? "" : currentOwnerAddress,
       price: displayPrice,
-      acceptsLoan: onChainMarketListing?.acceptsLoan ?? listing.acceptsLoan,
-      loanAsk: onChainMarketListing?.loanAsk ?? listing.loanAsk,
     }),
-    [listing, lostView, currentOwner, currentOwnerAddress, displayPrice, onChainMarketListing],
+    [listing, lostView, currentOwner, currentOwnerAddress, displayPrice],
   );
 
   const refreshActivity = () => {
@@ -601,8 +597,8 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
               <p className="mt-1 text-[24px] font-bold leading-tight">Withdrawn from the vault</p>
               <p className="mt-2 text-[12px] leading-relaxed text-muted">
                 {withdrawnBurned
-                  ? "This slab was shipped out of Collector Crypt's vault. Its Pokechain NFT was burned once Collector Crypt was notified to ship it, so it can't be listed, traded or used for a loan."
-                  : "Its owner asked to ship this slab out. Its Pokechain NFT is locked, so it can't be listed, traded or used for a loan, and burns once Collector Crypt is notified to ship it."}
+                  ? "This slab was shipped out of Collector Crypt's vault. Its Pokechain NFT was burned once Collector Crypt was notified to ship it, so it can't be listed or traded."
+                  : "Its owner asked to ship this slab out. Its Pokechain NFT is locked, so it can't be listed or traded, and burns once Collector Crypt is notified to ship it."}
               </p>
               {owned ? (
                 <Link href="/submissions?tab=withdrawn" className="mt-4 block">

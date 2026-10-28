@@ -3,8 +3,6 @@
 import clsx from "clsx";
 import { ArrowDownToLine, ArrowUpFromLine, Coins } from "lucide-react";
 import { useState } from "react";
-import { parseSignature } from "viem";
-import { usePublicClient, useSignTypedData } from "wagmi";
 import { chain, contracts, toUsdcUnits } from "@/lib/chain/config";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useChainTx } from "@/lib/chain/useChainTx";
@@ -17,22 +15,17 @@ type Mode = "deposit" | "withdraw";
 /**
  * Account onboarding (money in) and offboarding (money out):
  *   MockUSDC.faucet                          test USDC into the wallet
- *   EIP-2612 permit signature + AccountRegistry.depositWithPermit
- *                                            wallet → Pokechain custody in one transaction
  *   MockUSDC.approve + AccountRegistry.deposit
- *                                            the classic two-transaction way
+ *                                            wallet → Pokechain custody
  *   AccountRegistry.withdraw                 custody → wallet
  * Every move is mirrored into the wallet history below with its transaction hash.
  */
 export function OnChainFunds() {
   const acct = useOnchainAccount();
-  const { send, sign } = useChainTx();
-  const client = usePublicClient();
-  const { signTypedDataAsync } = useSignTypedData();
+  const { send } = useChainTx();
   const { recordChainCash, pushToast } = useStore();
   const [mode, setMode] = useState<Mode>("deposit");
   const [amount, setAmount] = useState("250");
-  const [usePermit, setUsePermit] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
 
   const value = Number(amount);
@@ -60,47 +53,11 @@ export function OnChainFunds() {
   const deposit = () =>
     run("move", async () => {
       const units = toUsdcUnits(value);
-      let hash: `0x${string}`;
-      if (usePermit) {
-        // Off-chain: sign the EIP-712 Permit struct. No gas, nothing broadcast.
-        const owner = acct.address!;
-        const nonce = await client!.readContract({ ...contracts.usdc, functionName: "nonces", args: [owner] });
-        const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-        const signature = await sign(
-          "Authorise deposit",
-          "EIP-712 USDC deposit permit",
-          [`spender ${contracts.accounts.address}`, `value ${units}`, `nonce ${nonce}`, `deadline ${deadline}`],
-          () =>
-            signTypedDataAsync({
-              domain: { name: "Pokechain Test USD Coin", version: "1", chainId: chain.id, verifyingContract: contracts.usdc.address },
-              types: {
-                Permit: [
-                  { name: "owner", type: "address" },
-                  { name: "spender", type: "address" },
-                  { name: "value", type: "uint256" },
-                  { name: "nonce", type: "uint256" },
-                  { name: "deadline", type: "uint256" },
-                ],
-              },
-              primaryType: "Permit",
-              message: { owner, spender: contracts.accounts.address, value: units, nonce, deadline },
-            }),
-        );
-        const { r, s, v, yParity } = parseSignature(signature);
-        const receipt = await send({
-          contract: "accounts",
-          functionName: "depositWithPermit",
-          args: [units, deadline, Number(v ?? BigInt(27 + yParity)), r, s],
-          label: "Deposit USDC",
-        });
-        hash = receipt.transactionHash;
-      } else {
-        if (acct.allowance < value) {
-          await send({ contract: "usdc", functionName: "approve", args: [contracts.accounts.address, units], label: "Approve USDC" });
-        }
-        const receipt = await send({ contract: "accounts", functionName: "deposit", args: [units], label: "Deposit USDC" });
-        hash = receipt.transactionHash;
+      if (acct.allowance < value) {
+        await send({ contract: "usdc", functionName: "approve", args: [contracts.accounts.address, units], label: "Approve USDC" });
       }
+      const receipt = await send({ contract: "accounts", functionName: "deposit", args: [units], label: "Deposit USDC" });
+      const hash = receipt.transactionHash;
       recordChainCash(value, "USDC deposited from your wallet", hash);
       pushToast({ title: `${usd(value, { cents: true })} deposited`, body: "It's now in your Pokechain account.", tone: "success" });
     });
@@ -160,13 +117,6 @@ export function OnChainFunds() {
             {busy === "move" ? "Confirm in your wallet…" : mode === "deposit" ? "Deposit" : "Withdraw"}
           </Button>
         </div>
-
-        {mode === "deposit" ? (
-          <label className="mt-3 flex items-center gap-2 text-[12.5px] text-muted">
-            <input type="checkbox" checked={usePermit} onChange={(e) => setUsePermit(e.target.checked)} className="accent-[#2f5bf9]" />
-            One-step deposit with an EIP-2612 permit signature
-          </label>
-        ) : null}
 
       </div>
     </section>

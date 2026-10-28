@@ -17,10 +17,6 @@ interface ITradeEscrowOffers {
     function openOffers(address maker) external view returns (uint256);
 }
 
-interface ILoanEscrowCommitments {
-    function commitments(address participant) external view returns (uint256);
-}
-
 /**
  * @title AccountRegistry
  * @notice Account onboarding and offboarding for Pokechain.
@@ -38,7 +34,7 @@ interface ILoanEscrowCommitments {
  *                             Also refused while it has trade offers open (assets in escrow).
  *
  *  Trading and marketplace purchases
- *      `moveBalance`         TradeEscrow, SlabMarket, LoanEscrow and LostSlabRecovery move custody balances: it locks the cash
+ *      `moveBalance`         TradeEscrow, SlabMarket and LostSlabRecovery move custody balances: it locks the cash
  *                            in an offer or pays a seller without taking USDC out of custody.
  *
  *  Nothing is deleted. A closed account keeps its record and its handle stays reserved to that
@@ -66,8 +62,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     address public tradeEscrow;
     /// @notice The SlabMarket contract, which may move balances for marketplace purchases.
     address public slabMarket;
-    /// @notice The LoanEscrow contract, which locks principal and settles secured loans.
-    address public loanEscrow;
     /// @notice The LostSlabRecovery contract, which escrows lost-slab bounties until the finder is paid.
     address public lostSlabRecovery;
 
@@ -86,7 +80,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     event SlabVaultSet(address slabVault);
     event TradeEscrowSet(address tradeEscrow);
     event SlabMarketSet(address slabMarket);
-    event LoanEscrowSet(address loanEscrow);
     event LostSlabRecoverySet(address lostSlabRecovery);
     event BalanceMoved(address indexed from, address indexed to, uint256 amount);
 
@@ -100,11 +93,9 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
     error SlabVaultAlreadySet();
     error TradeEscrowAlreadySet();
     error SlabMarketAlreadySet();
-    error LoanEscrowAlreadySet();
     error LostSlabRecoveryAlreadySet();
     error OnlyBalanceMover();
     error OffersStillOpen(uint256 count);
-    error LoansStillOpen(uint256 count);
 
     constructor(IERC20 usdc_) Ownable(msg.sender) {
         usdc = usdc_;
@@ -131,13 +122,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         emit SlabMarketSet(market);
     }
 
-    /// @notice One-time wiring to LoanEscrow.
-    function setLoanEscrow(address escrow) external onlyOwner {
-        if (loanEscrow != address(0)) revert LoanEscrowAlreadySet();
-        loanEscrow = escrow;
-        emit LoanEscrowSet(escrow);
-    }
-
     /// @notice One-time wiring to LostSlabRecovery.
     function setLostSlabRecovery(address lostSlabRecovery_) external onlyOwner {
         if (lostSlabRecovery != address(0)) revert LostSlabRecoveryAlreadySet();
@@ -154,7 +138,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         if (
             (msg.sender != tradeEscrow || tradeEscrow == address(0))
                 && (msg.sender != slabMarket || slabMarket == address(0))
-                && (msg.sender != loanEscrow || loanEscrow == address(0))
                 && (msg.sender != lostSlabRecovery || lostSlabRecovery == address(0))
         ) {
             revert OnlyBalanceMover();
@@ -226,8 +209,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         if (vaulted > 0) revert SlabsStillVaulted(vaulted);
         uint256 open = tradeEscrow == address(0) ? 0 : ITradeEscrowOffers(tradeEscrow).openOffers(msg.sender);
         if (open > 0) revert OffersStillOpen(open);
-        uint256 loans = loanEscrow == address(0) ? 0 : ILoanEscrowCommitments(loanEscrow).commitments(msg.sender);
-        if (loans > 0) revert LoansStillOpen(loans);
 
         a.status = Status.Closed;
         a.closedAt = uint64(block.timestamp);

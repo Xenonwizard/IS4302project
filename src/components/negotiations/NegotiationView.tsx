@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import Link from "next/link";
-import { ArrowLeft, ArrowLeftRight, Check, Gavel, HandCoins, Send } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Check, Gavel, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { keccak256, toBytes, zeroAddress } from "viem";
@@ -12,7 +12,6 @@ import { getListing } from "@/lib/catalog";
 import { contracts } from "@/lib/chain/config";
 import { useHandleAddress, useTradeFeeBps, useTradeOffers } from "@/lib/chain/trades";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
-import { useLoanListing, useLoanOffers } from "@/lib/chain/loans";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { usd } from "@/lib/format";
@@ -27,9 +26,6 @@ import { ReportLostModal, reportItemLabel } from "./ReportLostModal";
 import { TradeBuilder, type CounterOf } from "./TradeBuilder";
 import { SoldBanner } from "./SoldBanner";
 import { TradeCard } from "./TradeCard";
-import { LoanBuilder } from "./LoanBuilder";
-import { LoanStatusPanel } from "./LoanStatusPanel";
-import { LoanCard } from "./LoanCard";
 
 const exact = (n: number) => usd(n, { cents: true });
 
@@ -40,11 +36,11 @@ const SELLER_QUICK = ["Yes, it's available.", "Price is firm, sorry.", "Can you 
  * A one-to-one chat between two collectors about one slab. Between two wallet accounts it also carries
  * multi-slab trade offers, settled on-chain by TradeEscrow.
  */
-export function NegotiationView({ id, openTrade = false, openLoan = false }: { id: string; openTrade?: boolean; openLoan?: boolean }) {
-  return <ListingChat id={id} openTrade={openTrade} openLoan={openLoan} />;
+export function NegotiationView({ id, openTrade = false }: { id: string; openTrade?: boolean }) {
+  return <ListingChat id={id} openTrade={openTrade} />;
 }
 
-function ListingChat({ id, openTrade, openLoan }: { id: string; openTrade: boolean; openLoan: boolean }) {
+function ListingChat({ id, openTrade }: { id: string; openTrade: boolean }) {
   const { ready, user, negotiations, requireAuth, slabs } = useStore();
   const n = negotiations[id];
   const base = n
@@ -86,10 +82,10 @@ function ListingChat({ id, openTrade, openLoan }: { id: string; openTrade: boole
       </div>
     );
   }
-  return <Chat negotiation={n} base={base} me={user.username} openTrade={openTrade} openLoan={openLoan} />;
+  return <Chat negotiation={n} base={base} me={user.username} openTrade={openTrade} />;
 }
 
-function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: Negotiation; base: Listing; me: string; openTrade: boolean; openLoan: boolean }) {
+function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiation; base: Listing; me: string; openTrade: boolean }) {
   const { resolve, isListed, sendMessage, respondToOffer, withdrawOffer, lostReports, user, pushToast } = useStore();
   const { transfer } = useSlabChain();
   const { cancelListing } = useMarketChain();
@@ -113,11 +109,6 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
   const { data: chainOffers = [] } = useTradeOffers(wallet.address, otherAddress ?? undefined);
   // "Make an offer" on the asset page lands here with the builder already open.
   const [builder, setBuilder] = useState<{ counter?: CounterOf } | null>(openTrade ? {} : null);
-  const [loanBuilder, setLoanBuilder] = useState(openLoan);
-  const { data: loanListing } = useLoanListing(listing.tokenId);
-  // The live listing is the only eligibility source. Cached card data must not expose loan actions.
-  const acceptsLoan = loanListing?.acceptsLoan === true;
-  const { data: chainLoans = [] } = useLoanOffers(wallet.address, otherAddress ?? undefined, listing.tokenId);
   const openTrades = chainOffers.filter((o) => o.status === "Open");
 
 
@@ -146,7 +137,7 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
     if (!el) return;
     const last = el.lastElementChild as HTMLElement | null;
     // A trade offer is taller than the chat, so show it from its top instead of its bottom edge.
-    if (last && (lastKind === "trade" || lastKind === "loan")) {
+    if (last && lastKind === "trade") {
       el.scrollTo({ top: el.scrollTop + last.getBoundingClientRect().top - el.getBoundingClientRect().top - 8, behavior: "smooth" });
     } else {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -255,7 +246,7 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
 
   return (
     <div className="px-4 py-5 lg:px-6">
-      <div className={clsx("grid gap-5 transition-[grid-template-columns] duration-300", builder || (loanBuilder && acceptsLoan) ? "lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]" : "xl:grid-cols-[minmax(0,1fr)_340px]")}>
+      <div className={clsx("grid gap-5 transition-[grid-template-columns] duration-300", builder ? "lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]" : "xl:grid-cols-[minmax(0,1fr)_340px]")}>
         <section className="flex h-[calc(100dvh-230px)] min-h-[480px] flex-col lg:h-[calc(100vh-150px)] overflow-hidden rounded-card border border-hairline bg-surface">
           {/* who you are talking to */}
           <header className="flex items-center gap-3 border-b border-hairline px-4 py-3">
@@ -295,21 +286,11 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
                   {builder ? (
                     <Badge tone="good"><ArrowLeftRight size={12} />Trade room open</Badge>
                   ) : (
-                    <Button size="sm" onClick={() => { setLoanBuilder(false); setBuilder({}); }}>
+                    <Button size="sm" onClick={() => setBuilder({})}>
                       <ArrowLeftRight size={14} />
                       Make a trade offer
                     </Button>
                   )}
-                  {acceptsLoan && iAmBuyer ? (
-                    loanBuilder ? (
-                      <Badge tone="good"><HandCoins size={12} />Loan offer open</Badge>
-                    ) : (
-                      <Button size="sm" variant="outline" onClick={() => { setBuilder(null); setLoanBuilder(true); }}>
-                        <HandCoins size={14} />
-                        Offer a loan
-                      </Button>
-                    )
-                  ) : null}
                 </div>
               ) : (
                 <Badge tone="neutral">Closed</Badge>
@@ -342,16 +323,6 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
                       me={{ address: wallet.address, handle: me }}
                       offer={chainOffers.find((o) => o.id === m.trade!.offerId)}
                       onCounter={counterTrade}
-                    />
-                  ) : null
-                }
-                loan={
-                  m.kind === "loan" && m.loan && wallet.address ? (
-                    <LoanCard
-                      message={m}
-                      negotiationId={n.id}
-                      me={{ address: wallet.address, handle: me }}
-                      offer={chainLoans.find((offer) => offer.id === m.loan!.offerId)}
                     />
                   ) : null
                 }
@@ -408,24 +379,12 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
             counterOf={builder.counter}
             initialRequestedTokenId={openTrade ? listing.tokenId : undefined}
           />
-        ) : chainMode && wallet.address && otherAddress && loanBuilder && iAmBuyer && acceptsLoan ? (
-          <LoanBuilder
-            listing={{ ...listing, acceptsLoan, loanAsk: loanListing?.loanAsk ?? listing.loanAsk }}
-            room={n.id}
-            available={wallet.custodyBalance}
-            lender={wallet.address}
-            borrower={otherAddress}
-            onClose={() => setLoanBuilder(false)}
-          />
         ) : <aside className="space-y-4">
           <div className="rounded-card border border-hairline bg-[#0c0c10] p-6">
             <div className="mx-auto w-[62%] max-w-[220px]">
               <Slab listing={listing} interactive sizes="240px" />
             </div>
           </div>
-          {chainMode && wallet.address && otherAddress && listing.tokenId ? (
-            <LoanStatusPanel me={wallet.address} other={otherAddress} tokenId={listing.tokenId} />
-          ) : null}
           <div className="rounded-card border border-hairline bg-surface p-4 text-[12px] leading-relaxed text-muted">
             <p className="mb-2 text-[13px] font-bold text-white">How negotiating works</p>
             {chainMode ? (
@@ -433,8 +392,6 @@ function Chat({ negotiation: n, base, me, openTrade, openLoan }: { negotiation: 
                 <li>Chat as long as you like, then make a trade offer: slabs from both vaults, plus cash either way.</li>
                 <li>Compare listings and completed Pokechain transactions on each slab page, then agree on slabs and cash with the other collector.</li>
                 <li>Your side is locked in TradeEscrow. They accept, counter or decline; accepting swaps everything in one transaction.</li>
-                {acceptsLoan ? <li>Loan principal is funded with the offer. If accepted, the slab stays in LoanEscrow until repayment.</li> : null}
-                {acceptsLoan ? <li>The borrower repays principal plus interest by the deadline; after it passes, the lender can claim the slab.</li> : null}
                 <li>Nothing ships: only the tokens change hands, the slabs stay vaulted.</li>
                 <li>Slab transfers are 0% fee. A {tradeFeeBps > 0 ? `${tradeFeeBps / 100}%` : "0%"} protocol fee applies to cash legs to prevent wash trading.</li>
               </ul>
@@ -546,12 +503,9 @@ const STATUS_LABEL: Record<OfferStatus, string> = {
   replaced: "Replaced",
 };
 
-function MessageRow({ message: m, me, trade, loan }: { message: ChatMessage; me: string; trade?: React.ReactNode; loan?: React.ReactNode }) {
+function MessageRow({ message: m, me, trade }: { message: ChatMessage; me: string; trade?: React.ReactNode }) {
   if (m.kind === "trade") {
     return <div className={clsx("flex", m.from === me && "justify-end")}>{trade}</div>;
-  }
-  if (m.kind === "loan") {
-    return <div className={clsx("flex", m.from === me && "justify-end")}>{loan}</div>;
   }
   if (m.kind === "system") {
     return (

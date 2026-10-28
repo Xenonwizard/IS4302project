@@ -10,8 +10,6 @@ export interface OnChainListing {
   seller: string;
   price: number;
   listedAt: number;
-  acceptsLoan: boolean;
-  loanAsk: number;
 }
 
 export interface OnChainSaleRecord {
@@ -29,14 +27,12 @@ export function useMarketChain() {
   const queryClient = useQueryClient();
 
   const listCard = useCallback(
-    async (tokenId: string, priceDollars: number, acceptsLoan = false, loanAskDollars = 0) => {
+    async (tokenId: string, priceDollars: number) => {
       const units = toUsdcUnits(priceDollars);
       const receipt = await send({
         contract: "slabMarket",
-        functionName: acceptsLoan ? "listWithLoan" : "list",
-        args: acceptsLoan
-          ? [BigInt(tokenId), units, toUsdcUnits(loanAskDollars)]
-          : [BigInt(tokenId), units],
+        functionName: "list",
+        args: [BigInt(tokenId), units],
         label: `List token #${tokenId} for $${priceDollars.toLocaleString()}`,
       });
       await queryClient.invalidateQueries({ queryKey: ["market-listing", tokenId] });
@@ -97,8 +93,6 @@ export function useMarketChain() {
           seller: res.seller,
           price: fromUsdcUnits(res.price),
           listedAt: Number(res.listedAt) * 1000,
-          acceptsLoan: res.acceptsLoan,
-          loanAsk: fromUsdcUnits(res.loanAsk),
         };
       } catch {
         return null;

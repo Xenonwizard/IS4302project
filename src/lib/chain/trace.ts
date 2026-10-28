@@ -4,8 +4,8 @@
  *   Polygon      eth_getLogs on SlabVault: the inbound trail (submission → received → forwarded),
  *                the mint, every ERC-721 Transfer (each change of owner), and the outbound trail
  *                (redemption → shipped → delivered / lost / written off); plus every other contract
- *                that touches the token: SlabMarket listings and sales, TradeEscrow swaps, LoanEscrow
- *                loans against it, and LostSlabRecovery bounties and finder claims
+ *                that touches the token: SlabMarket listings and sales, TradeEscrow swaps, and
+ *                LostSlabRecovery bounties and finder claims
  *   Solana       getAsset + getSignaturesForAsset on Collector Crypt's NFT for the slab
  *   CC           the redemption's carrier tracking
  *
@@ -33,7 +33,7 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const usdc = (units: bigint) => `${fromUsdcUnits(units).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`;
 const RETURN_TO = ["unset", "the vault", "the owner"];
 
-/** Our own contracts, by address: a Transfer into LoanEscrow reads as such, not as a bare address. */
+/** Our own contracts, by address: a Transfer into TradeEscrow reads as such, not as a bare address. */
 const CONTRACT_BY_ADDRESS = new Map(
   (Object.keys(contracts) as ContractName[]).map((name) => [contracts[name].address.toLowerCase(), CONTRACT_LABEL[name]]),
 );
@@ -54,7 +54,6 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   const bySub = { args: { submissionId }, ...from };
 
   const lsr = contracts.lostSlabRecovery;
-  const loans = contracts.loanEscrow;
   const market = contracts.slabMarket;
   const trades = contracts.tradeEscrow;
 
@@ -72,13 +71,12 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     publicClient.getContractEvents({ ...sv, eventName: "SubmissionReceived", ...bySub }),
     publicClient.getContractEvents({ ...sv, eventName: "SubmissionForwarded", ...bySub }),
   ]);
-  // The other contracts that move or lock this token. tokenId isn't indexed on LoanOffered or
+  // The other contracts that move or lock this token. tokenId isn't indexed on
   // TradeEscrow.OfferCreated, so those are filtered here, then their follow-ups fetched by offer id.
-  const [listed, delisted, purchased, loanTerms, bountySet, bountyRefunded, claimFiled, claimReceived, returnChosen, returnCompleted, bountyPaid, claimRejected, loanOffers, tradeOffers] = await Promise.all([
+  const [listed, delisted, purchased, bountySet, bountyRefunded, claimFiled, claimReceived, returnChosen, returnCompleted, bountyPaid, claimRejected, tradeOffers] = await Promise.all([
     publicClient.getContractEvents({ ...market, eventName: "CardListed", ...byToken }),
     publicClient.getContractEvents({ ...market, eventName: "ListingCancelled", ...byToken }),
     publicClient.getContractEvents({ ...market, eventName: "CardPurchased", ...byToken }),
-    publicClient.getContractEvents({ ...market, eventName: "LoanTermsSet", ...byToken }),
     publicClient.getContractEvents({ ...lsr, eventName: "BountySet", ...byToken }),
     publicClient.getContractEvents({ ...lsr, eventName: "BountyRefunded", ...byToken }),
     publicClient.getContractEvents({ ...lsr, eventName: "ClaimFiled", ...byToken }),
@@ -87,21 +85,14 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     publicClient.getContractEvents({ ...lsr, eventName: "ReturnCompleted", ...byToken }),
     publicClient.getContractEvents({ ...lsr, eventName: "BountyPaid", ...byToken }),
     publicClient.getContractEvents({ ...lsr, eventName: "ClaimRejected", ...byToken }),
-    publicClient.getContractEvents({ ...loans, eventName: "LoanOffered", ...from }).then((logs) => logs.filter((l) => l.args.tokenId === tokenId)),
     publicClient.getContractEvents({ ...trades, eventName: "OfferCreated", ...from }).then((logs) =>
       logs.filter((l) => l.args.makerSlabs?.includes(tokenId) || l.args.takerSlabs?.includes(tokenId)),
     ),
   ]);
-  const loanIds = loanOffers.map((l) => l.args.offerId!);
   const tradeIds = tradeOffers.map((l) => l.args.offerId!);
   const claimIds = claimFiled.map((l) => l.args.claimId!);
   const none = Promise.resolve([]);
-  const [loanAccepted, loanRepaid, loanDefaulted, loanDeclined, loanWithdrawn, tradeAccepted, tradeDeclined, tradeWithdrawn, bondRefunded, bondSlashed] = await Promise.all([
-    loanIds.length ? publicClient.getContractEvents({ ...loans, eventName: "LoanAccepted", args: { offerId: loanIds }, ...from }) : none,
-    loanIds.length ? publicClient.getContractEvents({ ...loans, eventName: "LoanRepaid", args: { offerId: loanIds }, ...from }) : none,
-    loanIds.length ? publicClient.getContractEvents({ ...loans, eventName: "LoanDefaulted", args: { offerId: loanIds }, ...from }) : none,
-    loanIds.length ? publicClient.getContractEvents({ ...loans, eventName: "LoanDeclined", args: { offerId: loanIds }, ...from }) : none,
-    loanIds.length ? publicClient.getContractEvents({ ...loans, eventName: "LoanWithdrawn", args: { offerId: loanIds }, ...from }) : none,
+  const [tradeAccepted, tradeDeclined, tradeWithdrawn, bondRefunded, bondSlashed] = await Promise.all([
     tradeIds.length ? publicClient.getContractEvents({ ...trades, eventName: "OfferAccepted", args: { offerId: tradeIds }, ...from }) : none,
     tradeIds.length ? publicClient.getContractEvents({ ...trades, eventName: "OfferDeclined", args: { offerId: tradeIds }, ...from }) : none,
     tradeIds.length ? publicClient.getContractEvents({ ...trades, eventName: "OfferWithdrawn", args: { offerId: tradeIds }, ...from }) : none,
@@ -119,7 +110,6 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   const push = pushFrom("SlabVault");
   const pushMarket = pushFrom("SlabMarket");
   const pushTrade = pushFrom("TradeEscrow");
-  const pushLoan = pushFrom("LoanEscrow");
   const pushLsr = pushFrom("LostSlabRecovery");
 
   for (const l of requested) {
@@ -146,7 +136,6 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   for (const l of writtenOff) push("LostSlabWrittenOff", `${short(l.args.owner!)} claimed insurance; title NFT burned`, l);
 
   for (const l of listed) pushMarket("CardListed", `${short(l.args.seller!)} listed it for ${usdc(l.args.price!)}`, l);
-  for (const l of loanTerms) pushMarket("LoanTermsSet", l.args.acceptsLoan ? `Open to loans, asking ${usdc(l.args.loanAsk!)}` : "No longer open to loans", l);
   for (const l of delisted) pushMarket("ListingCancelled", `${short(l.args.seller!)} delisted it`, l);
   for (const l of purchased) pushMarket("CardPurchased", `${short(l.args.buyer!)} bought it from ${short(l.args.seller!)} for ${usdc(l.args.price!)} (fee ${usdc(l.args.fee!)})`, l);
 
@@ -159,15 +148,6 @@ export async function traceSlab(origin: string, tokenId: bigint) {
   for (const l of tradeDeclined) pushTrade("OfferDeclined", `Trade #${l.args.offerId} declined; escrow returned`, l);
   for (const l of tradeWithdrawn) pushTrade("OfferWithdrawn", `Trade #${l.args.offerId} withdrawn; escrow returned`, l);
 
-  for (const l of loanOffers) {
-    const days = Math.round(Number(l.args.duration!) / 86400);
-    pushLoan("LoanOffered", `Loan offer #${l.args.offerId}: ${short(l.args.lender!)} offers ${short(l.args.borrower!)} ${usdc(l.args.principal!)} + ${usdc(l.args.interest!)} interest over ${days} day${days === 1 ? "" : "s"}, against this slab`, l);
-  }
-  for (const l of loanAccepted) pushLoan("LoanAccepted", `Loan #${l.args.offerId} accepted; slab held in LoanEscrow as collateral until ${new Date(Number(l.args.deadline!) * 1000).toISOString().slice(0, 10)}`, l);
-  for (const l of loanRepaid) pushLoan("LoanRepaid", `Loan #${l.args.offerId} repaid (${usdc(l.args.repayment!)}); slab released`, l);
-  for (const l of loanDefaulted) pushLoan("LoanDefaulted", `Loan #${l.args.offerId} defaulted; slab goes to lender ${short(l.args.lender!)}`, l);
-  for (const l of loanDeclined) pushLoan("LoanDeclined", `Loan #${l.args.offerId} declined`, l);
-  for (const l of loanWithdrawn) pushLoan("LoanWithdrawn", `Loan #${l.args.offerId} withdrawn by the lender`, l);
 
   for (const l of bountySet) pushLsr("BountySet", l.args.amount ? `${short(l.args.owner!)} set a ${usdc(l.args.amount)} finder bounty` : `${short(l.args.owner!)} removed the bounty`, l);
   for (const l of claimFiled) {

@@ -309,7 +309,11 @@ export function useLostReport() {
           }
           if (custody !== "Lost") await reportLost(tokenId, details || "Lost before vaulting: owner claimed insurance");
           await writeOffLost(tokenId);
+          // Save the outcome as soon as the burn lands: a reload during the refresh below would
+          // otherwise lose it, and Status Center would show the slab as still in recovery.
+          withdrawLostForInsurance(listingId);
           await refresh();
+          return;
         }
       }
       withdrawLostForInsurance(listingId);

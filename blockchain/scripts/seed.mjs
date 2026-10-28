@@ -309,11 +309,10 @@ async function seed() {
 
   const marketAbi = parseAbi([
     "function list(uint256 tokenId, uint256 price) external",
-    "function listWithLoan(uint256 tokenId, uint256 price, uint256 loanAsk) external",
     "function buy(uint256 tokenId) external",
     "function isListed(uint256 tokenId) external view returns (bool)",
     "function getSalesForToken(uint256 tokenId) external view returns ((uint256 tokenId, address seller, address buyer, uint256 price, uint256 fee, uint64 settledAt)[])",
-    "function getActiveListings() external view returns ((uint256 tokenId, address seller, string sellerHandle, uint256 price, uint64 listedAt, bool acceptsLoan, uint256 loanAsk, string grader, string certNumber, string title, string image)[])",
+    "function getActiveListings() external view returns ((uint256 tokenId, address seller, string sellerHandle, uint256 price, uint64 listedAt, string grader, string certNumber, string title, string image)[])",
   ]);
 
   // 1. Register Accounts & grant test USDC
@@ -456,17 +455,14 @@ async function seed() {
       if (!alreadyListed) {
         const ownerWallet = getWallet(slab.recipient);
         const priceUnits = parseUnits(String(slab.listPriceUsdc), 6);
-        // Alternate demo inventory opts into loans so both marketplace paths are easy to try locally.
-        const acceptsDemoLoan = tokenId % 2n === 0n;
-        const loanAskUnits = parseUnits(String(Math.floor(slab.listPriceUsdc * 0.6)), 6);
         const hash = await ownerWallet.writeContract({
           address: slabMarketAddress,
           abi: marketAbi,
-          functionName: acceptsDemoLoan ? "listWithLoan" : "list",
-          args: acceptsDemoLoan ? [tokenId, priceUnits, loanAskUnits] : [tokenId, priceUnits],
+          functionName: "list",
+          args: [tokenId, priceUnits],
         });
         await publicClient.waitForTransactionReceipt({ hash });
-        console.log(`  ✓ Listed Token #${tokenId} on SlabMarket for $${slab.listPriceUsdc.toLocaleString()} USDC${acceptsDemoLoan ? " (loans accepted)" : ""}`);
+        console.log(`  ✓ Listed Token #${tokenId} on SlabMarket for $${slab.listPriceUsdc.toLocaleString()} USDC`);
       }
     }
 

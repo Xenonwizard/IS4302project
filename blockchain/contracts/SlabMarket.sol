@@ -22,15 +22,13 @@ import {AccountRegistry} from "./AccountRegistry.sol";
  *           Cancelling its listing releases the sale restriction.
  *   Rule 6: Only successfully settled marketplace purchases are included in completed-sales data.
  *           The record identifies the token, price, buyer, seller, fees (0), and settlement time.
- *   Rule 7: Non-sale transfers, loans, or cancellations are excluded from completed-sales data.
+ *   Rule 7: Non-sale transfers or cancellations are excluded from completed-sales data.
  */
 contract SlabMarket is Ownable, ReentrancyGuard {
     struct Listing {
         address seller;
         uint256 price;
         uint64 listedAt;
-        bool acceptsLoan;
-        uint256 loanAsk;
     }
 
     struct SaleRecord {
@@ -48,8 +46,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         string sellerHandle;
         uint256 price;
         uint64 listedAt;
-        bool acceptsLoan;
-        uint256 loanAsk;
         string grader;
         string certNumber;
         string title;
@@ -59,7 +55,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     SlabVault public immutable vault;
     IERC20 public immutable usdc;
     AccountRegistry public immutable accounts;
-    address public loanEscrow;
 
     uint256 public constant MAX_FEE_BPS = 1000; // Max 10%
     /// @notice Protocol marketplace fee in basis points (100 = 1.00%). Deter wash trading.
@@ -77,8 +72,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     mapping(uint256 => uint256[]) private _tokenSaleIndices;
 
     event CardListed(uint256 indexed tokenId, address indexed seller, uint256 price, uint64 listedAt);
-    event LoanTermsSet(uint256 indexed tokenId, bool acceptsLoan, uint256 loanAsk);
-    event LoanEscrowSet(address indexed loanEscrow);
     event FeeConfigUpdated(uint256 feeBps, address indexed feeRecipient);
     event ListingCancelled(uint256 indexed tokenId, address indexed seller, uint64 cancelledAt);
     event CardPurchased(
@@ -99,9 +92,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     error NotVaulted(uint256 tokenId, SlabVault.Custody custody);
     error TokenRestricted(uint256 tokenId);
     error SelfPurchase(uint256 tokenId);
-    error InvalidLoanAsk();
-    error LoanEscrowAlreadySet();
-    error OnlyLoanEscrow();
     error FeeTooHigh(uint256 feeBps, uint256 maxBps);
     error InvalidFeeRecipient();
 
@@ -120,20 +110,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
      *      Applies the Rule 5 sale restriction to the token in SlabVault.
      */
     function list(uint256 tokenId, uint256 price) external {
-        _list(tokenId, price, false, 0);
-    }
-
-    /**
-     * @notice Lists a slab for sale and opts into secured loan offers.
-     * @param loanAsk Lowest principal the owner is willing to consider. It must stay below
-     *        the sale price so a loan can never masquerade as a purchase.
-     */
-    function listWithLoan(uint256 tokenId, uint256 price, uint256 loanAsk) external {
-        if (loanAsk == 0 || loanAsk >= price) revert InvalidLoanAsk();
-        _list(tokenId, price, true, loanAsk);
-    }
-
-    function _list(uint256 tokenId, uint256 price, bool acceptsLoan, uint256 loanAsk) private {
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
         if (vault.ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
         if (price == 0) revert InvalidPrice();
@@ -148,9 +124,7 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         listings[tokenId] = Listing({
             seller: msg.sender,
             price: price,
-            listedAt: uint64(block.timestamp),
-            acceptsLoan: acceptsLoan,
-            loanAsk: loanAsk
+            listedAt: uint64(block.timestamp)
         });
 
         // Lock the token from ordinary transfer and redemption while listed (Rule 5).
@@ -160,7 +134,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         }
 
         emit CardListed(tokenId, msg.sender, price, uint64(block.timestamp));
-        emit LoanTermsSet(tokenId, acceptsLoan, loanAsk);
     }
 
     /// @notice Sets the marketplace fee and recipient. Max fee is capped at MAX_FEE_BPS (10%).
@@ -170,13 +143,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         feeBps = newFeeBps;
         feeRecipient = newRecipient;
         emit FeeConfigUpdated(newFeeBps, newRecipient);
-    }
-
-    /// @notice One-time wiring to the collateral escrow.
-    function setLoanEscrow(address escrow) external onlyOwner {
-        if (loanEscrow != address(0)) revert LoanEscrowAlreadySet();
-        loanEscrow = escrow;
-        emit LoanEscrowSet(escrow);
     }
 
     /**
@@ -192,22 +158,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         vault.setListingRestriction(tokenId, false);
 
         emit ListingCancelled(tokenId, msg.sender, uint64(block.timestamp));
-    }
-
-    /**
-     * @notice Releases a listing immediately before LoanEscrow takes custody of its slab.
-     *         This is deliberately unavailable to collectors and other contracts.
-     */
-    function releaseForLoan(uint256 tokenId, address seller) external {
-        if (msg.sender != loanEscrow || loanEscrow == address(0)) revert OnlyLoanEscrow();
-        Listing memory l = listings[tokenId];
-        if (l.seller == address(0)) revert NotListed(tokenId);
-        if (l.seller != seller) revert NotSeller(tokenId);
-
-        delete listings[tokenId];
-        _removeActive(tokenId);
-        vault.setListingRestriction(tokenId, false);
-        emit ListingCancelled(tokenId, seller, uint64(block.timestamp));
     }
 
     /* ----------------------------- buying actions ----------------------------- */
@@ -308,8 +258,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
                 sellerHandle: handle,
                 price: listing.price,
                 listedAt: listing.listedAt,
-                acceptsLoan: listing.acceptsLoan,
-                loanAsk: listing.loanAsk,
                 grader: s.grader,
                 certNumber: s.certNumber,
                 title: s.title,
