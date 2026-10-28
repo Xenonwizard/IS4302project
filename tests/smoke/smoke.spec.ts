@@ -749,6 +749,11 @@ test("trace: a loan against a slab shows up in its /trace, with LoanEscrow holdi
   await expect(page.getByText("LoanEscrow.LoanAccepted")).toBeVisible();
   await expect(page.getByText(/→ LoanEscrow/)).toBeVisible();
   await expect(page.getByText(/Owner LoanEscrow →/)).toBeVisible();
+  // Timeline is newest first: the repay comes above the listing.
+  const rows = await page.locator("ol > li").allInnerTexts();
+  const at = (name: string) => rows.findIndex((r) => r.includes(name));
+  expect(at("LoanEscrow.LoanRepaid")).toBeGreaterThanOrEqual(0);
+  expect(at("LoanEscrow.LoanRepaid")).toBeLessThan(at("SlabMarket.CardListed"));
 });
 
 test("session: signing out in one tab signs the other tab out too, and the navbars don't flicker", async ({ page }) => {
