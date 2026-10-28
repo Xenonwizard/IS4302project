@@ -1030,6 +1030,8 @@ test("lost & found: choosing insurance after Pokechain's investigation burns the
   await page.getByRole("button", { name: /Claim vault-service insurance/ }).click();
   await page.getByRole("button", { name: "Submit insurance claim" }).click();
   await expect.poll(() => custodyOf(Number(cert))).toBe(10); // Written off
+  // The app confirms once it has saved the outcome; leaving before that used to lose it.
+  await expect(page.getByText("Insurance claim submitted").first()).toBeVisible();
   await expect(ownerOf(Number(cert))).rejects.toThrow();
 
   // It leaves the Vault and shows as claimed in Status Center, after a reload too.
