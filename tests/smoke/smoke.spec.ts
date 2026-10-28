@@ -3,7 +3,7 @@ import { createPublicClient, createWalletClient, http, keccak256, toBytes } from
 import { hardhat } from "viem/chains";
 import { deployments, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect, test } from "./fixtures";
-import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, resetDemo, resetSeeded } from "./helpers";
+import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
 
 // One test per role's main job, against the real app and local chain. Each test starts from a
 // freshly reset chain and a fresh browser (empty localStorage).
@@ -500,7 +500,7 @@ async function vaultedForAsh(page: Page, request: Parameters<typeof resetDemo>[0
   await intake.close();
 }
 
-test("outtake: withdrawing from the Vault waits for /outtake to notify Collector Crypt, then the Vault shows it shipped", async ({ page, request }) => {
+test("outtake: Ship to me locks the NFT, notifying Collector Crypt burns it, the slab leaves the Vault for Status Center → Withdrawn, and /outtake ships it", async ({ page, request }) => {
   const cert = "8887771";
   const shipTo = "Ash Ketchum, 1 Pallet Town Road";
   await vaultedForAsh(page, request, cert);
@@ -511,9 +511,16 @@ test("outtake: withdrawing from the Vault waits for /outtake to notify Collector
   await expect(page.getByText("Withdrawal requested")).toBeVisible();
   await page.getByRole("button", { name: "Done" }).click();
 
-  // The owner's withdrawal only locks the token: nothing has shipped yet.
-  await page.goto("/vault?tab=withdrawn");
-  await expect(page.getByText("Redemption requested").first()).toBeVisible();
+  // Asking to ship it locks the NFT but doesn't burn it: Collector Crypt hasn't been notified yet.
+  expect(await ownerOf(Number(cert))).toBe(ASH);
+  expect(await custodyOf(Number(cert))).toBe(2); // Redemption requested
+  // The Vault has no Withdrawn tab any more: the slab is tracked in Status Center → Withdrawn.
+  await page.goto("/vault");
+  await expect(page.getByRole("button", { name: /^Withdrawn/ })).toHaveCount(0);
+  await expect(page.getByText(`PSA cert ${cert}`)).toHaveCount(0);
+  await page.goto("/submissions?tab=withdrawn");
+  await expect(page.getByTestId("withdraw-requests").getByText("Redemption requested").first()).toBeVisible();
+  await expect(page.getByTestId("withdraw-requests")).toContainText("NFT locked until dispatch");
 
   // Pokechain's outtake step notifies Collector Crypt in another tab.
   const outtake = await page.context().newPage();
@@ -524,20 +531,33 @@ test("outtake: withdrawing from the Vault waits for /outtake to notify Collector
   await outtake.getByRole("button", { name: /Notify Collector Crypt and ship/ }).click();
   await expect(outtake.getByText(/Already dispatched:/)).toBeVisible();
   await expect(outtake.getByRole("button", { name: /Notify Collector Crypt and ship/ })).toBeDisabled();
+  // Only now, with Collector Crypt notified, is the NFT burned.
+  await expect(ownerOf(Number(cert))).rejects.toThrow();
 
-  // The collector's Vault picks up Collector Crypt's tracking number from the chain.
+  // Status Center picks up Collector Crypt's tracking number from the chain.
   await page.getByRole("button", { name: "View details" }).click();
   await expect(page.getByText(/Collector Crypt \S+ · /)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: /Confirm delivery/ })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: /Confirm delivery/ })).toBeVisible();
+  await expect(page.getByTestId("withdraw-requests")).toContainText("NFT burned");
+  // The redeemer confirms receipt even though their token is gone (SlabVault.redeemerOf).
+  await page.getByRole("button", { name: /Confirm delivery/ }).click();
+  await expect(page.getByText("Delivery confirmed")).toBeVisible();
+  await expect.poll(() => custodyOf(Number(cert))).toBe(4); // Delivered
+  await page.reload();
+  await expect(page.getByTestId("withdraw-requests").getByText("Delivered").first()).toBeVisible();
+  // Its asset page says it was withdrawn and offers no way to list it.
+  await page.getByRole("link", { name: "View Withdrawn NFT" }).click();
+  await expect(page.getByTestId("withdrawn-status")).toContainText("Withdrawn from the vault");
+  await expect(page.getByRole("button", { name: /List it from your Vault/ })).toHaveCount(0);
 
   // Dispatching twice is refused by the API.
   const again = await request.post("/api/chain/outtake", { data: { certNumber: cert } });
   expect(again.status()).toBe(400);
 });
 
-test("submissions: a withdrawal shows up as a withdraw request, where it can be reported lost", async ({ page, request }) => {
+test("submissions: Report lost on a withdrawn slab points to Collector Crypt and SingPost, with no on-chain report", async ({ page, request }) => {
   const cert = "8887779";
   await vaultedForAsh(page, request, cert);
   await page.goto("/vault");
@@ -549,12 +569,17 @@ test("submissions: a withdrawal shows up as a withdraw request, where it can be 
 
   const withdrawals = page.getByTestId("withdraw-requests");
   await expect(withdrawals.getByText("Redemption requested").first()).toBeVisible();
+  expect((await request.post("/api/chain/outtake", { data: { certNumber: cert } })).ok()).toBeTruthy();
   await page.reload();
+  await expect(withdrawals.getByRole("button", { name: /Confirm delivery/ })).toBeVisible();
   await withdrawals.getByRole("button", { name: "Report lost" }).click();
-  await withdrawals.getByPlaceholder(/Not delivered after 10 days/).fill("Never arrived");
-  await withdrawals.getByRole("button", { name: "File", exact: true }).click();
-  await expect(page.getByText("Lost report filed")).toBeVisible();
-  await expect(withdrawals.getByRole("button", { name: "Cancel lost status" })).toBeVisible();
+  const help = withdrawals.getByTestId("withdrawn-lost-help");
+  await expect(help).toContainText("Contact Collector Crypt and SingPost");
+  await expect(help.getByRole("link", { name: /SingPost tracking/ })).toBeVisible();
+  // Nothing is filed on-chain: the slab stays Shipped and the owner can still confirm delivery.
+  expect(await custodyOf(Number(cert))).toBe(3);
+  await expect(page.getByPlaceholder(/Not delivered after 10 days/)).toHaveCount(0);
+  await expect(withdrawals.getByRole("button", { name: /Confirm delivery/ })).toBeVisible();
 });
 
 test("outtake: the operator dispatches a pending redemption from /outtake by PSA cert", async ({ page, request }) => {
@@ -615,35 +640,14 @@ async function signOut(page: Page, handle: string) {
 test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through intake, the owner picks the vault, and the finder claims the bounty", async ({ page, request }) => {
   test.setTimeout(240_000);
   const cert = "8887773";
-  const shipTo = "Ash Ketchum, 1 Pallet Town Road";
   await vaultedForAsh(page, request, cert);
   await depositAsTest1(200);
-  await page.goto("/vault");
-  await page.getByRole("button", { name: "Ship to me" }).first().click();
-  await page.getByPlaceholder(/Ash Ketchum/).fill(shipTo);
-  await page.getByRole("button", { name: "Withdraw and ship to me" }).click();
-  await page.getByRole("button", { name: "Done" }).click();
-  const shipped = await request.post("/api/chain/outtake", { data: { certNumber: cert } });
-  expect(shipped.ok(), await shipped.text()).toBeTruthy();
 
-  // The owner reports it lost with a $50 bounty: LostAndFound escrows it from their balance.
-  await page.goto("/vault?tab=withdrawn");
-  await page.getByRole("button", { name: "Report lost" }).click();
-  await page.getByPlaceholder(/Not delivered after 10 days/).fill("No carrier scan for two weeks");
-  await page.getByPlaceholder("Bounty (optional)").fill("50");
-  await page.getByRole("button", { name: "File", exact: true }).click();
-  await expect(page.getByText("Lost report and bounty filed")).toBeVisible();
+  // The slab goes missing in Collector Crypt's vault; the owner reports it with a $50 bounty,
+  // which LostAndFound escrows from their balance.
+  await reportLostInVaultAs(1, Number(cert), "Missing at the vault audit", 50);
   expect(await escrowedBounty(Number(cert))).toBe(50);
   expect(await custodyDollars(TEST1)).toBe(150);
-  // Cancelling the report refunds the escrow; reporting again escrows it again.
-  await page.getByRole("button", { name: "Cancel lost status" }).click();
-  await expect(page.getByRole("button", { name: /Confirm delivery/ })).toBeVisible();
-  await expect.poll(() => custodyDollars(TEST1)).toBe(200);
-  await page.getByRole("button", { name: "Report lost" }).click();
-  await page.getByPlaceholder("Bounty (optional)").fill("50");
-  await page.getByRole("button", { name: "File", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Cancel lost status" })).toBeVisible();
-  await expect.poll(() => escrowedBounty(Number(cert))).toBe(50);
 
   // Another collector finds it, searches the cert, and files a claim on-chain.
   await signOut(page, "smoke_out");
@@ -672,10 +676,6 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   // The owner chooses the vault; Pokechain returns it, which closes the lost report on SlabVault.
   await signOut(page, "smoke_finder");
   await logIn(page, 1, "smoke_out");
-  // The owner can't dodge the bounty now: cancelling the lost report reverts on-chain.
-  await page.goto("/vault?tab=withdrawn");
-  await page.getByRole("button", { name: "Cancel lost status" }).click();
-  await expect(page.getByText(/A finder's claim on this slab is open/)).toBeVisible();
   await openOwnerRecoveries(page);
   const ownerCase = page.getByTestId("found-case-1");
   await expect(ownerCase).toContainText("Your lost slab");
@@ -714,13 +714,12 @@ test("lost & found: a bounty is escrowed on-chain, a finder's claim goes through
   const finderHistory = page.getByTestId("onchain-payments");
   await expect(finderHistory.getByRole("listitem").filter({ hasText: "Recovery bounty received · case #1" })).toContainText("+$50.00");
 
-  // The owner's history shows the escrow, the refund on cancel, and the second escrow.
+  // The owner's history shows the escrow.
   await signOut(page, "smoke_finder");
   await logIn(page, 1, "smoke_out");
   await page.goto("/wallet");
   const ownerHistory = page.getByTestId("onchain-payments");
-  await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Lost-slab bounty escrowed" })).toHaveCount(2);
-  await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Lost-slab bounty refunded" })).toContainText("+$50.00");
+  await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Lost-slab bounty escrowed" })).toHaveCount(1);
   await expect(ownerHistory.getByRole("listitem").filter({ hasText: "Deposit from wallet" })).toContainText("+$200.00");
 });
 
@@ -729,17 +728,8 @@ test("lost & found: the owner picks delivery, and the bounty unlocks only after 
   const cert = "8887775";
   await vaultedForAsh(page, request, cert);
   await depositAsTest1(100);
-  await page.goto("/vault");
-  await page.getByRole("button", { name: "Ship to me" }).first().click();
-  await page.getByPlaceholder(/Ash Ketchum/).fill("Ash Ketchum, 1 Pallet Town Road");
-  await page.getByRole("button", { name: "Withdraw and ship to me" }).click();
-  await page.getByRole("button", { name: "Done" }).click();
-  expect((await request.post("/api/chain/outtake", { data: { certNumber: cert } })).ok()).toBeTruthy();
-  await page.goto("/vault?tab=withdrawn");
-  await page.getByRole("button", { name: "Report lost" }).click();
-  await page.getByPlaceholder("Bounty (optional)").fill("40");
-  await page.getByRole("button", { name: "File", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Cancel lost status" })).toBeVisible();
+  await reportLostInVaultAs(1, Number(cert), "Missing at the vault audit", 40);
+  await expect.poll(() => escrowedBounty(Number(cert))).toBe(40);
 
   await signOut(page, "smoke_out");
   await openAccount(page, "smoke_finder", 2);
@@ -853,7 +843,7 @@ test("lost & found: a slab that never reached the vault: a delay report, Pokecha
   await expect(page.getByTestId(`request-${cert}`).getByTestId("request-stage")).toHaveText("Insurance claimed · NFT burned");
 });
 
-test("lost & found: a slab lost before vaulting, found and shipped to its owner, moves from Slab submissions to Slab withdrawals", async ({ page, request }) => {
+test("lost & found: a slab lost before vaulting, found and shipped to its owner, moves from Slab submissions to Withdrawn", async ({ page, request }) => {
   test.setTimeout(240_000);
   const cert = "8887773";
   await openAccount(page, "smoke_found_in");
@@ -917,12 +907,12 @@ test("lost & found: a slab lost before vaulting, found and shipped to its owner,
   expect(returned.ok(), await returned.text()).toBeTruthy();
   expect(await custodyOf(Number(cert))).toBe(3); // Shipped
 
-  // Shipped to the owner: it leaves Slab submissions and is tracked under Slab withdrawals, after a reload too.
+  // Shipped to the owner: it leaves Slab submissions and is tracked under Withdrawn, after a reload too.
   for (const reload of [false, true]) {
     if (reload) await page.reload();
     else await page.goto("/submissions");
     await expect(page.getByTestId(`request-${cert}`)).toHaveCount(0);
-    await page.getByRole("button", { name: /Slab withdrawals/ }).click();
+    await page.getByRole("button", { name: /^Withdrawn/ }).click();
     await expect(page.getByTestId("withdraw-requests")).toContainText(`#${cert}`);
     await page.getByRole("button", { name: /Slab submissions/ }).click();
   }
@@ -983,24 +973,14 @@ test("lost & found: a slab one collector reports lost is on every collector's Lo
   await expect(page.getByText(/Showing\s*2\s*cards/)).toBeVisible();
   await expect(page.getByText("$350.00 USDC").first()).toBeVisible();
 
-  // test2 withdraws one of their slabs; it never arrives, so they report it lost with a $150 bounty.
+  // One of test2's vaulted slabs goes missing in the vault: they report it lost with a $150 bounty.
   await depositAsTest2(150);
   const ownerCtx = await browser.newContext();
   const owner = await ownerCtx.newPage();
   await logIn(owner, 2, "test2");
-  await owner.goto("/vault");
-  await owner.getByRole("button", { name: "Ship to me" }).first().click();
-  const cert = (await owner.getByRole("dialog").getByText(/PSA cert \d+/).innerText()).match(/cert (\d+)/)![1];
-  await owner.getByPlaceholder(/Ash Ketchum/).fill("test2, 2 Cerulean Way");
-  await owner.getByRole("button", { name: "Withdraw and ship to me" }).click();
-  await owner.getByRole("button", { name: "Done" }).click();
-  expect((await request.post("/api/chain/outtake", { data: { certNumber: cert } })).ok()).toBeTruthy();
-  await owner.goto("/vault?tab=withdrawn");
-  await owner.getByRole("button", { name: "Report lost" }).click();
-  await owner.getByPlaceholder(/Not delivered after 10 days/).fill("Courier lost the parcel at the Tampines hub");
-  await owner.getByPlaceholder("Bounty (optional)").fill("150");
-  await owner.getByRole("button", { name: "File", exact: true }).click();
-  await expect(owner.getByText("Lost report and bounty filed")).toBeVisible();
+  await owner.goto("/vault?tab=unlisted");
+  const cert = (await owner.getByRole("link", { name: /Token #\d+/ }).first().innerText()).match(/#(\d+)/)![1];
+  await reportLostInVaultAs(2, Number(cert), "Missing from its shelf at the vault audit", 150);
   expect(await custodyOf(Number(cert))).toBe(5); // Lost
   expect(await escrowedBounty(Number(cert))).toBe(150);
   // Nothing about the public report is kept in the owner's browser.
@@ -1016,7 +996,7 @@ test("lost & found: a slab one collector reports lost is on every collector's Lo
   await logIn(page, 1, "test1");
   await page.goto(`/lost?q=${cert}`);
   const card = page.locator("div.rounded-card").filter({ hasText: `#${cert}` });
-  await expect(card).toContainText("Courier lost the parcel at the Tampines hub");
+  await expect(card).toContainText("Missing from its shelf at the vault audit");
   await expect(card).toContainText("$150.00 USDC");
   await expect(card.getByRole("button", { name: "Found Slab" })).toBeVisible();
   await page.reload();

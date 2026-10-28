@@ -33,7 +33,7 @@ type StatusFilter = "all" | "progress" | "awaiting" | "vaulted" | "action" | "co
 
 const CATEGORIES: { value: Category; label: string }[] = [
   { value: "submissions", label: "Slab submissions" },
-  { value: "withdrawals", label: "Slab withdrawals" },
+  { value: "withdrawals", label: "Withdrawn" },
   { value: "bounties", label: "Bounty claims" },
   { value: "recovery", label: "Recovery & insurance" },
 ];
@@ -100,7 +100,7 @@ export function SubmissionsView() {
   const params = useSearchParams();
   const [category, setCategory] = useState<Category>(() => {
     const tab = params.get("tab");
-    return tab === "withdrawals" ? "withdrawals" : tab === "found" ? "bounties" : "submissions";
+    return tab === "withdrawals" || tab === "withdrawn" ? "withdrawals" : tab === "found" ? "bounties" : "submissions";
   });
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -283,7 +283,7 @@ export function SubmissionsView() {
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat icon={<FileText size={15} />} label="Slab submissions" value={categoryCounts.submissions} />
         <Stat icon={<Clock3 size={15} />} label="In progress" value={inProgress} />
-        <Stat icon={<Truck size={15} />} label="Withdrawals" value={categoryCounts.withdrawals} />
+        <Stat icon={<Truck size={15} />} label="Withdrawn" value={categoryCounts.withdrawals} />
         <Stat icon={<PackageSearch size={15} />} label="Bounty & recovery" value={categoryCounts.bounties + categoryCounts.recovery} />
       </div>
 
@@ -377,11 +377,12 @@ export function SubmissionsView() {
           ) : null}
           {visibleWithdrawals.length ? (
             <section data-testid="withdraw-requests">
-              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><Truck size={15} /> Withdraw requests</h2>
+              <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><Truck size={15} /> Withdrawn</h2>
               <p className="mb-3 text-[12px] text-muted">
-                Slabs you asked to ship out of the vault. Confirm delivery when it arrives, or report it lost if it never does.
+                Slabs you asked to ship home. Their NFTs lock when you ask and burn once Collector Crypt is notified to ship them.
+                Confirm delivery when it arrives.
               </p>
-              <WithdrawnList items={visibleWithdrawals} />
+              <WithdrawnList items={visibleWithdrawals} showNftAction />
             </section>
           ) : null}
           {visibleOwnerRecoveries.length || visibleRecovery.length ? (

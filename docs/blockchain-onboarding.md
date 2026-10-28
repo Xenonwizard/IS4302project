@@ -5,7 +5,7 @@ This branch moves the start and end of a collector's life on Pokechain onto a bl
 | | Onboarding | Offboarding |
 | --- | --- | --- |
 | **Account** | connect a wallet → `register(handle)` → deposit USDC | withdraw USDC → `closeAccount()` |
-| **Slab** | `requestSubmission` creates the intake → Pokechain receives it (`markReceived`) and mints a locked ERC-721 whose id is the numeric PSA cert → forwards it to **Collector Crypt** (`markForwarded`) → CC vaults it and mints its **Solana** NFT to Pokechain's escrow → operator verifies that NFT → `confirmVaulted` (now tradeable). Lost in the post on the way in: `reportLost` | `requestRedemption` (token locked) → Pokechain asks CC to ship → `markShipped` (with CC's redemption id) → `confirmDelivery` burns the Pokechain NFT, or `reportLost` keeps it pending for recovery |
+| **Slab** | `requestSubmission` creates the intake → Pokechain receives it (`markReceived`) and mints a locked ERC-721 whose id is the numeric PSA cert → forwards it to **Collector Crypt** (`markForwarded`) → CC vaults it and mints its **Solana** NFT to Pokechain's escrow → operator verifies that NFT → `confirmVaulted` (now tradeable). Lost in the post on the way in: `reportLost` | `requestRedemption` locks the Pokechain NFT (and records `redeemerOf`) → Pokechain asks CC to ship → `markShipped` (with CC's redemption id) burns it → the redeemer's `confirmDelivery`. A parcel lost on the way out is between the owner, CC and the carrier (off-chain) |
 | **Ownership** | | A → B: `safeTransferFrom`, or a **TradeEscrow** swap of several slabs + cash both ways, settled in one transaction. CC's NFTs never move |
 
 **The model in one line:** the physical slab sits in Collector Crypt's vault, CC's Solana NFT for it
@@ -103,9 +103,10 @@ Two kinds of key sign transactions:
 
 Custody states. Inbound, from the moment of submission:
 `PostedToPokechain → AtPokechain → SentToCustodian → Vaulted` (or `Rejected`, token kept as the record).
-Outbound: `Vaulted → RedemptionRequested → Shipped → Delivered`. From any in-the-post state
-(`PostedToPokechain`, `SentToCustodian`, `RedemptionRequested`, `Shipped`) the owner can report it `Lost`,
-and the operator resolves it to `AtPokechain` (inbound parcel found), `Delivered` or `Vaulted`.
+Outbound: `Vaulted → RedemptionRequested → Shipped → Delivered`; the NFT is locked at `RedemptionRequested` and burns at `Shipped`.
+From an inbound in-the-post state (`PostedToPokechain`, `AtPokechain`, `SentToCustodian`) or `Vaulted` (missing
+from the vault) the owner can report it `Lost`, and the operator resolves it to `AtPokechain` (inbound parcel
+found) or `Vaulted`, or a found slab is shipped back (`markRecoveredShipped`, token kept until receipt).
 The token can only move (transfer, trade) while **Vaulted**. Token id = submission id.
 
 | Function | Who | What it changes | Event / errors |
@@ -118,10 +119,10 @@ The token can only move (transfer, trade) while **Vaulted**. Token id = submissi
 | `confirmVaulted(tokenId, title, image, custodianRef)` | operator | Only from SentToCustodian, after the Solana check. Custody **Vaulted**, stores **CC's Solana asset id**, counts it as vaulted: the token can now be traded | `SlabVaulted` |
 | `rejectSubmission(id, reason)` | operator | Any open stage → **Rejected** (e.g. no such cert, damaged slab). The token stays as the record; the cert is freed | `SubmissionRejected` |
 | `safeTransferFrom(from, to, tokenId)` | owner | **A → B**: the title changes hands. CC's NFT doesn't move | `Transfer` · `SlabLocked`, `AccountNotActive` |
-| `requestRedemption(tokenId, shippingHash)` | owner | Custody → **RedemptionRequested**, token **locked**, `vaultedCount--`. Only `keccak256(address)` goes on-chain | `RedemptionRequested` |
-| `markShipped(tokenId, redemptionRef, carrier, tracking)` | operator | Custody → **Shipped**; stores **CC's redemption id** | `SlabShipped` |
-| `confirmDelivery(tokenId)` | owner | Custody → **Delivered** | `SlabDelivered` |
-| `reportLost(tokenId, details)` | owner | Custody → **Lost**, from any in-the-post state, inbound or outbound | `SlabReportedLost` (carries the tracking number) |
+| `requestRedemption(tokenId, shippingHash)` | owner | Custody → **RedemptionRequested**, token **locked**, `redeemerOf[tokenId] = owner`, `vaultedCount--`. Only `keccak256(address)` goes on-chain | `RedemptionRequested` |
+| `markShipped(tokenId, redemptionRef, carrier, tracking)` | operator | Custody → **Shipped**; stores **CC's redemption id**, then token **burned** | `SlabShipped`, `Transfer(owner → 0)` |
+| `confirmDelivery(tokenId)` | redeemer (or owner of a recovered slab, whose token burns now) | Custody → **Delivered** | `SlabDelivered` |
+| `reportLost(tokenId, details)` | owner | Custody → **Lost**, inbound in the post or missing from the vault. Withdrawn slabs have no token to report | `SlabReportedLost` (carries the tracking number) |
 | `resolveLostReport(tokenId, outcome)` | operator | Lost → AtPokechain (inbound, found), Delivered, or back to Vaulted | `LostReportResolved` |
 | `setTradeEscrow(address)`, `isApprovedForAll` | admin / view | Names TradeEscrow, which may then move slabs without a per-token approval (it only does so inside a call signed by that slab's owner) | `TradeEscrowSet` |
 | `tokenURI(tokenId)` | view | **Fully on-chain metadata**: a base64 JSON document with grader, cert, Collector Crypt's Solana id, live custody, and the evidence hash of the owner's intake form | |
@@ -185,12 +186,14 @@ sequenceDiagram
 ERC-20 with 6 decimals and `permit`, plus a public `faucet(amount)` (≤ 10,000). On a real
 network you would point AccountRegistry at Circle's USDC instead.
 
-### Why the token burns only after owner-confirmed receipt
+### Why the token burns once Collector Crypt is told to ship it
 
-During withdrawal, the token is **locked**, not burned: `_update` refuses transfers once custody
-leaves `Vaulted`, and the owner can still file `reportLost` and attach a bounty. Pokechain/CC can
-verify a found slab and move it back to `Shipped`. Only `confirmDelivery`, signed by the latest
-owner after physical receipt, moves it to `Delivered` and burns the title NFT. The slab record,
+When the owner signs `requestRedemption` the title NFT is locked: it can't be listed, traded or pledged.
+It is only burned in `markShipped`, after Pokechain has notified Collector Crypt and recorded its
+redemption id, so the on-chain title never disappears before the custodian has actually been asked to
+release the slab. From then on the slab is a parcel between Collector Crypt, the carrier and the owner. `redeemerOf` remembers who asked, so only they can `confirmDelivery`. A parcel lost on the way
+out is Collector Crypt's and the carrier's responsibility, handled off-chain (the app's **Report lost**
+tells the owner to contact them with CC's redemption id and the tracking number). The slab record,
 certificate link and events remain queryable after the burn.
 
 **Does Collector Crypt burn its NFT on redemption?** We don't know, so the design works either way:
@@ -393,6 +396,7 @@ sequenceDiagram
   O->>CC: POST /redemptions {assetId, shipTo, requestedBy: escrow}
   CC-->>O: CCR-00001, FedEx FE…  (NFT frozen, not burned)
   O->>SV: markShipped(1, "CCR-00001", "FedEx", "FE…")
+  Note over SV: Shipped, title NFT burned
   C->>CC: events: in_transit → delivered | lost
   alt arrives
     B->>SV: confirmDelivery(1)

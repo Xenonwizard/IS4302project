@@ -73,23 +73,31 @@ export function ChainVaultSync() {
           return offer.maker === address;
         }),
       );
-      const isMine = (i: number) => owners[i]?.toLowerCase() === addrLower || escrowed[i];
-      const candidates = ids.filter((_, i) => isMine(i));
       // A token whose ownerOf call now fails was reverted out of the current chain history.
       // Treat it like a token held elsewhere so the local Vault mirror removes it. The
       // contract-code check above still prevents a temporarily offline node from clearing state.
-      // Exception: a token its owner burned, by confirming delivery (kept in the Withdrawn tab) or
-      // by writing it off for insurance (kept in Status Center), as the record of that slab.
-      const deliveredBurn = await Promise.all(
-        ids.map((id, i) =>
-          owners[i] === null
-            ? client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] })
-                .then((s) => CUSTODY[s.custody] === "Delivered" || CUSTODY[s.custody] === "Written off")
-                .catch(() => false)
-            : false,
-        ),
+      // Exceptions, kept as the record of that slab: a token burned when Collector Crypt was told
+      // to ship it out (shown in Status Center → Withdrawn, rebuilt from redeemerOf), or written off for
+      // insurance (kept in Status Center → Recovery).
+      const burned = await Promise.all(
+        ids.map(async (id, i) => {
+          if (owners[i] !== null) return { kept: false, redeemedByMe: false };
+          try {
+            const custody = CUSTODY[(await client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] })).custody];
+            if (custody === "Written off") return { kept: true, redeemedByMe: false };
+            if (custody !== "Redemption requested" && custody !== "Shipped" && custody !== "Delivered") {
+              return { kept: false, redeemedByMe: false };
+            }
+            const redeemer = await client!.readContract({ ...contracts.slabVault, functionName: "redeemerOf", args: [id] });
+            return { kept: true, redeemedByMe: redeemer.toLowerCase() === addrLower };
+          } catch {
+            return { kept: false, redeemedByMe: false };
+          }
+        }),
       );
-      const ownedByOthers = ids.filter((_, i) => !isMine(i) && !deliveredBurn[i]).map(String);
+      const isMine = (i: number) => owners[i]?.toLowerCase() === addrLower || escrowed[i] || burned[i].redeemedByMe;
+      const candidates = ids.filter((_, i) => isMine(i));
+      const ownedByOthers = ids.filter((_, i) => !isMine(i) && !burned[i].kept).map(String);
       const [read, marketListings] = await Promise.all([
         Promise.all(candidates.map((id) => client!.readContract({ ...contracts.slabVault, functionName: "slabOf", args: [id] }))),
         Promise.all(

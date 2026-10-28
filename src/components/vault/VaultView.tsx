@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Blocks, Grid2x2, Grid3x3, Lock, MessagesSquare, Package, PackageOpen, Route, ShieldCheck, Tag, Truck } from "lucide-react";
+import { Blocks, Grid2x2, Grid3x3, Lock, MessagesSquare, Package, Route, ShieldCheck, Tag, Truck } from "lucide-react";
 import type { Address } from "viem";
 import { useMemo, useState } from "react";
 import { BRAND } from "@/lib/brand";
@@ -18,13 +18,12 @@ import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useLostReport } from "@/lib/chain/useLostAndFound";
 import type { Listing, VaultItem, VaultLossReport } from "@/lib/types";
 import { RedeemModal } from "../chain/RedeemModal";
-import { WithdrawnList } from "../chain/WithdrawnList";
 import { Slab } from "../slab/Slab";
 import { Badge, Button, Field, Modal, TimeAgo, inputClass } from "../ui/primitives";
 import { ListForSaleForm } from "./ListForSaleForm";
 import { Empty, LoginPrompt } from "./shared";
 
-type Tab = "all" | "awaiting" | "listed" | "unlisted" | "loans" | "lost" | "withdrawn";
+type Tab = "all" | "awaiting" | "listed" | "unlisted" | "loans" | "lost";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "all", label: "All" },
@@ -33,7 +32,6 @@ const TABS: { value: Tab; label: string }[] = [
   { value: "unlisted", label: "Unlisted" },
   { value: "loans", label: "Used for Loan" },
   { value: "lost", label: "Lost" },
-  { value: "withdrawn", label: "Withdrawn" },
 ];
 
 export function VaultView() {
@@ -128,7 +126,6 @@ export function VaultView() {
     const loss = lossFor(i.entry, i.listing);
     return !hasPendingDecision(i.listing) && !loss?.published && !loss?.resolution;
   });
-  const withdrawn = allItems.filter((i) => i.entry.status === "Withdrawn");
 
   const totalValue = items.reduce((sum, i) => sum + (i.entry.status === "Listed" ? i.entry.listedPrice ?? i.listing.price : 0), 0);
   const listed = items.filter((i) => i.entry.status === "Listed" && !lossFor(i.entry, i.listing)?.published);
@@ -140,7 +137,6 @@ export function VaultView() {
     unlisted: unlisted.length,
     loans: loanCards.length,
     lost: lostItems.length,
-    withdrawn: withdrawn.length,
   };
 
   const handleReportLost = async (listingId: string, certNumber: string, details: string) => {
@@ -404,18 +400,6 @@ export function VaultView() {
             </div>
           ) : (
             <Empty icon={<Lock size={24} />} title="No cards used for loans" body="Cards securing an active accepted loan will be stored here until repayment or default." />
-          )
-        ) : null}
-
-        {tab === "withdrawn" ? (
-          withdrawn.length ? (
-            <WithdrawnList items={withdrawn} showNftAction />
-          ) : (
-            <Empty
-              icon={<PackageOpen size={24} />}
-              title="Nothing withdrawn"
-              body="Slabs you ship home move here. Their tokens stay in your wallet, so each one's custody trail can still be traced and a lost parcel reported."
-            />
           )
         ) : null}
 

@@ -11,6 +11,7 @@ export type ActivityKind =
   | "Listed"
   | "Offer"
   | "Transfer"
+  | "Burn"
   | "Delisted";
 
 export interface ActivityEvent {

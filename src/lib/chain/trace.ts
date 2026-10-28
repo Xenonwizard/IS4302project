@@ -30,8 +30,8 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 export async function traceSlab(origin: string, tokenId: bigint) {
   const sv = contracts.slabVault;
   const slab = await publicClient.readContract({ ...sv, functionName: "slabOf", args: [tokenId] });
-  // ownerOf intentionally stops existing once the owner confirms physical receipt. The custody
-  // record and delivery event remain queryable after that receipt-gated burn.
+  // ownerOf stops existing once the owner asks to ship the slab out (the token burns then). The
+  // custody record and redemption events remain queryable after the burn.
   let owner = await publicClient.readContract({ ...sv, functionName: "ownerOf", args: [tokenId] }).catch(() => zeroAddress);
   const from = { fromBlock: DEPLOY_BLOCK };
   const byToken = { args: { tokenId }, ...from };
@@ -55,6 +55,7 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     publicClient.getContractEvents({ ...sv, eventName: "SubmissionForwarded", ...bySub }),
   ]);
   if (owner === zeroAddress && delivered.length) owner = delivered.at(-1)!.args.owner!;
+  if (owner === zeroAddress && redeem.length) owner = redeem.at(-1)!.args.owner!;
 
   const rows: { event: string; detail: string; block: bigint; tx: string; logIndex: number }[] = [];
   const push = (event: string, detail: string, log: { blockNumber: bigint; transactionHash: string; logIndex: number }) =>
@@ -74,8 +75,8 @@ export async function traceSlab(origin: string, tokenId: bigint) {
     if (l.args.from === zeroAddress) continue; // the mint, already listed
     push("Transfer", `Owner ${short(l.args.from!)} → ${short(l.args.to!)}`, l);
   }
-  for (const l of redeem) push("RedemptionRequested", `${short(l.args.owner!)} asked for the slab; shippingHash ${short(l.args.shippingHash!)}; token locked`, l);
-  for (const l of shipped) push("SlabShipped", `Collector Crypt ${l.args.redemptionRef}: ${l.args.carrier} ${l.args.trackingNumber}`, l);
+  for (const l of redeem) push("RedemptionRequested", `${short(l.args.owner!)} asked for the slab; shippingHash ${short(l.args.shippingHash!)}; title NFT locked`, l);
+  for (const l of shipped) push("SlabShipped", `Collector Crypt ${l.args.redemptionRef}: ${l.args.carrier} ${l.args.trackingNumber}${l.args.redemptionRef === "RECOVERY" ? "" : "; title NFT burned"}`, l);
   for (const l of delivered) push("SlabDelivered", `${short(l.args.owner!)} confirmed delivery`, l);
   for (const l of lost) push("SlabReportedLost", `${short(l.args.owner!)}: "${l.args.details}" (tracking ${l.args.trackingNumber})`, l);
   for (const l of cancelled) push("LostReportCancelled", `${short(l.args.owner!)} cancelled the report; restored ${CUSTODY[Number(l.args.restoredCustody)]}`, l);

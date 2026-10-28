@@ -16,11 +16,11 @@
  *   transfer()        SlabVault.safeTransferFrom(me, to, tokenId)     collector's wallet
  *
  *  Outbound (owner → Collector Crypt ships to them)
- *   redeem()          SlabVault.requestRedemption (owner's wallet). Pokechain's outtake service
- *                     (/outtake) then notifies CC to ship to the current token owner and records
+ *   redeem()          SlabVault.requestRedemption (owner's wallet; burns the title NFT). Outtake service
+ *                     (/outtake) then notifies CC to ship to the redeemer and records
  *                     it with SlabVault.markShipped
  *   confirmDelivery() SlabVault.confirmDelivery                       collector's wallet
- *   reportLost()      SlabVault.reportLost (in the post, or missing from the vault)  collector's wallet
+ *   reportLost()      SlabVault.reportLost (inbound post, or missing from the vault)  collector's wallet
  *   writeOffLost()    SlabVault.writeOffLost: refunds the bounty, burns the token    collector's wallet
  *   resolveLost()     SlabVault.resolveLostReport                     operator (simulated carrier finds it)
  */
@@ -174,7 +174,7 @@ export function useSlabChain() {
             contract: "slabVault",
             functionName: "requestRedemption",
             args: [BigInt(tokenId), shippingHash],
-            label: "Withdraw slab",
+            label: "Withdraw slab (burns its NFT)",
           });
           requestTx = receipt.transactionHash;
         }

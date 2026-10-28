@@ -197,7 +197,8 @@ contract PokechainTest is Test {
         vm.prank(alice);
         accounts.closeAccount();
         assertFalse(accounts.isActive(alice));
-        // The token is still hers after offboarding.
+        // The token stays with her, locked, until Collector Crypt is told to ship it.
+        assertEq(vault.redeemerOf(tokenId), alice);
         assertEq(vault.ownerOf(tokenId), alice);
     }
 
@@ -506,16 +507,37 @@ contract PokechainTest is Test {
 
     /* ------------------------- slab offboarding ------------------------- */
 
-    function test_RedeemShipDeliverBurnsOnlyAfterOwnerConfirmation() public {
+    function test_RedeemBurnsAtDispatchThenRedeemerConfirmsDelivery() public {
         _register(alice, "alice");
+        _register(bob, "bob");
         uint256 tokenId = _mint(alice, "12345678");
 
         vm.prank(alice);
         vault.requestRedemption(tokenId, keccak256("1 Pallet Town"));
         assertEq(vault.vaultedCount(alice), 0);
+        // Still hers until Collector Crypt is notified, but locked: it can't be traded any more.
+        assertEq(vault.ownerOf(tokenId), alice);
+        assertEq(vault.redeemerOf(tokenId), alice);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(SlabVault.SlabLocked.selector, tokenId, SlabVault.Custody.RedemptionRequested)
+        );
+        vault.transferFrom(alice, bob, tokenId);
 
         vm.prank(operator);
         vault.markShipped(tokenId, "CCR-1", "DHL", "JD0123456789");
+        // Burned once Collector Crypt has the shipping order.
+        vm.expectRevert();
+        vault.ownerOf(tokenId);
+
+        // A lost outbound parcel is Collector Crypt's and the carrier's problem: no token to report.
+        vm.prank(alice);
+        vm.expectRevert();
+        vault.reportLost(tokenId, "Never arrived");
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(SlabVault.NotSlabOwner.selector, tokenId));
+        vault.confirmDelivery(tokenId);
 
         vm.prank(alice);
         vault.confirmDelivery(tokenId);
@@ -524,8 +546,6 @@ contract PokechainTest is Test {
         assertEq(uint8(s.custody), uint8(SlabVault.Custody.Delivered));
         assertEq(s.trackingNumber, "JD0123456789");
         assertEq(s.redemptionRef, "CCR-1");
-        vm.expectRevert();
-        vault.ownerOf(tokenId);
     }
 
     function test_CannotTransferToSelf() public {
@@ -555,39 +575,34 @@ contract PokechainTest is Test {
         vault.markShipped(tokenId, "CCR-7", "DHL", "JD999");
         vm.prank(bob);
         vault.confirmDelivery(tokenId);
-        vm.expectRevert();
-        vault.ownerOf(tokenId);
+        assertEq(uint8(vault.custodyOf(tokenId)), uint8(SlabVault.Custody.Delivered));
     }
 
-    function test_RedeemedTokenIsLocked() public {
+    function test_DispatchedTokenIsGone() public {
         _register(alice, "alice");
         _register(bob, "bob");
         uint256 tokenId = _mint(alice, "12345678");
         vm.prank(alice);
         vault.requestRedemption(tokenId, bytes32(0));
+        vm.prank(operator);
+        vault.markShipped(tokenId, "CCR-2", "DHL", "JD1");
 
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(SlabVault.SlabLocked.selector, tokenId, SlabVault.Custody.RedemptionRequested)
-        );
+        vm.expectRevert();
         vault.transferFrom(alice, bob, tokenId);
     }
 
-    function test_ReportLostInTransitAndResolve() public {
+    function test_ReportLostFromTheVaultAndResolve() public {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");
-        vm.prank(alice);
-        vault.requestRedemption(tokenId, bytes32(0));
-        vm.prank(operator);
-        vault.markShipped(tokenId, "CCR-1", "DHL", "JD0123456789");
 
-        vm.expectEmit(true, true, false, true);
-        emit SlabVault.SlabReportedLost(tokenId, alice, "JD0123456789", "Not delivered after 10 days");
+        vm.expectEmit(true, true, false, false);
+        emit SlabVault.SlabReportedLost(tokenId, alice, "", "Missing at audit");
         vm.prank(alice);
-        vault.reportLost(tokenId, "Not delivered after 10 days");
+        vault.reportLost(tokenId, "Missing at audit");
         assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Lost));
 
-        // The carrier returns it to the vault: it counts as vaulted and tradeable again.
+        // Collector Crypt finds it: it counts as vaulted and tradeable again.
         vm.prank(operator);
         vault.resolveLostReport(tokenId, SlabVault.Custody.Vaulted);
         assertEq(vault.vaultedCount(alice), 1);
@@ -597,11 +612,7 @@ contract PokechainTest is Test {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");
         vm.prank(alice);
-        vault.requestRedemption(tokenId, bytes32(0));
-        vm.prank(operator);
-        vault.markShipped(tokenId, "CCR-1", "DHL", "LOST-1");
-        vm.prank(alice);
-        vault.reportLost(tokenId, "Parcel did not arrive");
+        vault.reportLost(tokenId, "Missing at audit");
 
         vm.prank(operator);
         vm.expectRevert(abi.encodeWithSelector(SlabVault.WrongCustody.selector, tokenId, SlabVault.Custody.Delivered));
@@ -670,15 +681,11 @@ contract PokechainTest is Test {
         _register(alice, "alice");
         uint256 tokenId = _mint(alice, "12345678");
         vm.prank(alice);
-        vault.requestRedemption(tokenId, bytes32(0));
-        vm.prank(operator);
-        vault.markShipped(tokenId, "CCR-1", "DHL", "JD0123456789");
-        vm.prank(alice);
-        vault.reportLost(tokenId, "Mistaken carrier alert");
+        vault.reportLost(tokenId, "Mistaken audit alert");
 
         vm.prank(alice);
         vault.cancelLostReport(tokenId);
-        assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Shipped));
+        assertEq(uint8(vault.slabOf(tokenId).custody), uint8(SlabVault.Custody.Vaulted));
     }
 
     function test_TokenURIIsOnChainJson() public {
@@ -740,12 +747,10 @@ contract PokechainTest is Test {
         uint256 tokenId = _mint(alice, "12345678");
 
         vm.prank(alice);
-        vault.requestRedemption(tokenId, bytes32(0));
+        vault.reportLost(tokenId, "Missing at audit");
 
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(SlabMarket.NotVaulted.selector, tokenId, SlabVault.Custody.RedemptionRequested)
-        );
+        vm.expectRevert(abi.encodeWithSelector(SlabMarket.NotVaulted.selector, tokenId, SlabVault.Custody.Lost));
         market.list(tokenId, 100 * USD);
     }
 
