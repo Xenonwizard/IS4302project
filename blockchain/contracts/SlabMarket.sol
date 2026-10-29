@@ -7,23 +7,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {SlabVault} from "./SlabVault.sol";
 import {AccountRegistry} from "./AccountRegistry.sol";
 
-/**
- * @title SlabMarket
- * @notice Fixed-price marketplace for vaulted Pokéchain card slabs (ERC-721 SlabVault tokens).
- *
- * Implements Section 3.2.3 (Marketplace and Payment) business rules:
- *   Rule 1: Only the holder of a vaulted Pokéchain NFT may list it for sale, provided it is
- *           not locked or frozen and its vault custody is still confirmed.
- *   Rule 2: Listings use Pokéchain's supported stablecoin (USDC). Pokéchain charges 0% platform fee.
- *   Rule 3: Payment from the buyer's Pokechain account and NFT transfer settle atomically. If either fails, the entire transaction reverts.
- *   Rule 4: Successful settlement transfers the Pokéchain NFT to the buyer and distributes proceeds
- *           to the seller. The physical card and backing NFT remain in custody.
- *   Rule 5: A listed NFT cannot simultaneously be pledged, redeemed, or independently transferred.
- *           Cancelling its listing releases the sale restriction.
- *   Rule 6: Only successfully settled marketplace purchases are included in completed-sales data.
- *           The record identifies the token, price, buyer, seller, fees (0), and settlement time.
- *   Rule 7: Non-sale transfers or cancellations are excluded from completed-sales data.
- */
+
 contract SlabMarket is Ownable, ReentrancyGuard {
     struct Listing {
         address seller;
@@ -56,18 +40,14 @@ contract SlabMarket is Ownable, ReentrancyGuard {
     IERC20 public immutable usdc;
     AccountRegistry public immutable accounts;
 
-    uint256 public constant MAX_FEE_BPS = 1000; // Max 10%
-    /// @notice Protocol marketplace fee in basis points (100 = 1.00%). Deter wash trading.
+    uint256 public constant MAX_FEE_BPS = 1000;
     uint256 public feeBps;
-    /// @notice Recipient of the platform fee in AccountRegistry custody.
     address public feeRecipient;
 
-    /// @notice tokenId => active listing
     mapping(uint256 => Listing) public listings;
     uint256[] private _activeTokenIds;
     mapping(uint256 => uint256) private _activeIndexPlusOne;
 
-    /// @notice Auditable record of successfully settled marketplace purchases (Rule 6).
     SaleRecord[] public sales;
     mapping(uint256 => uint256[]) private _tokenSaleIndices;
 
@@ -102,13 +82,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         feeRecipient = msg.sender;
     }
 
-    /* ----------------------------- listing actions ---------------------------- */
-
-    /**
-     * @notice Lists a vaulted slab for sale at a fixed price in USDC.
-     * @dev Enforces Rule 1 (only owner of vaulted slab, no active restriction).
-     *      Applies the Rule 5 sale restriction to the token in SlabVault.
-     */
     function list(uint256 tokenId, uint256 price) external {
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
         if (vault.ownerOf(tokenId) != msg.sender) revert NotSlabOwner(tokenId);
@@ -127,7 +100,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
             listedAt: uint64(block.timestamp)
         });
 
-        // Lock the token from ordinary transfer and redemption while listed (Rule 5).
         if (currentSeller == address(0)) {
             vault.setListingRestriction(tokenId, true);
             _addActive(tokenId);
@@ -136,7 +108,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         emit CardListed(tokenId, msg.sender, price, uint64(block.timestamp));
     }
 
-    /// @notice Sets the marketplace fee and recipient. Max fee is capped at MAX_FEE_BPS (10%).
     function setFeeConfig(uint256 newFeeBps, address newRecipient) external onlyOwner {
         if (newFeeBps > MAX_FEE_BPS) revert FeeTooHigh(newFeeBps, MAX_FEE_BPS);
         if (newFeeBps > 0 && newRecipient == address(0)) revert InvalidFeeRecipient();
@@ -145,9 +116,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         emit FeeConfigUpdated(newFeeBps, newRecipient);
     }
 
-    /**
-     * @notice Cancels an active listing, releasing the Rule 5 sale restriction.
-     */
     function cancelListing(uint256 tokenId) external {
         Listing memory l = listings[tokenId];
         if (l.seller == address(0)) revert NotListed(tokenId);
@@ -160,25 +128,15 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         emit ListingCancelled(tokenId, msg.sender, uint64(block.timestamp));
     }
 
-    /* ----------------------------- buying actions ----------------------------- */
-
-    /**
-     * @notice Purchases a listed slab atomically.
-     * @dev Moves USDC inside Pokechain custody from buyer to seller (0% platform fee, Rule 2),
-     *      releases the listing lock, and transfers the NFT to the buyer (Rules 3, 4).
-     *      Records the completed purchase into the sales history (Rule 6).
-     */
     function buy(uint256 tokenId) external nonReentrant {
         Listing memory l = listings[tokenId];
         if (l.seller == address(0)) revert NotListed(tokenId);
         if (msg.sender == l.seller) revert SelfPurchase(tokenId);
         if (!accounts.isActive(msg.sender)) revert AccountNotActive(msg.sender);
 
-        // Verify vault custody is still confirmed (Rule 1)
         SlabVault.Slab memory s = vault.slabOf(tokenId);
         if (s.custody != SlabVault.Custody.Vaulted) revert NotVaulted(tokenId, s.custody);
 
-        // 1. Effects: remove listing and clear listing restriction
         delete listings[tokenId];
         _removeActive(tokenId);
         vault.setListingRestriction(tokenId, false);
@@ -186,7 +144,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         uint256 fee = (l.price * feeBps) / 10000;
         uint256 sellerProceeds = l.price - fee;
 
-        // Record completed sale for auditable comparable sales history (Rule 6)
         uint256 saleIdx = sales.length;
         sales.push(
             SaleRecord({
@@ -200,20 +157,15 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         );
         _tokenSaleIndices[tokenId].push(saleIdx);
 
-        // 2. Interactions: Atomic custody payment & token transfer.
-        // Buyer pays seller proceeds; protocol fee moves to feeRecipient in custody.
         accounts.moveBalance(msg.sender, l.seller, sellerProceeds);
         if (fee > 0 && feeRecipient != address(0)) {
             accounts.moveBalance(msg.sender, feeRecipient, fee);
         }
 
-        // SlabVault executes transfer from seller to buyer
         vault.settleMarketTransfer(l.seller, msg.sender, tokenId);
 
         emit CardPurchased(tokenId, l.seller, msg.sender, l.price, fee, uint64(block.timestamp));
     }
-
-    /* --------------------------------- views --------------------------------- */
 
     function isListed(uint256 tokenId) external view returns (bool) {
         return listings[tokenId].seller != address(0);
@@ -241,10 +193,6 @@ contract SlabMarket is Ownable, ReentrancyGuard {
         return sales;
     }
 
-    /**
-     * @notice Returns all currently active listings across Pokéchain with card metadata.
-     *         Allows any collector or visitor to view live marketplace inventory on-chain.
-     */
     function getActiveListings() external view returns (ActiveListing[] memory) {
         ActiveListing[] memory result = new ActiveListing[](_activeTokenIds.length);
         for (uint256 i = 0; i < _activeTokenIds.length; ++i) {
