@@ -1194,3 +1194,24 @@ test("bounty: the owner raises and lowers it from escrow, can't overspend, and a
   await expect(page.getByText(/Showing\s*1\s*card/)).toBeVisible();
   await ownerCtx.close();
 });
+
+test("marketplace: a slab you just listed is the first card under Recently listed, also after a reload", async ({ page, request }) => {
+  await resetSeeded(request);
+  await logIn(page, 1, "test1");
+  // test1's unlisted Charizard goes up for sale from the Vault.
+  await page.goto("/vault?tab=unlisted");
+  await page.getByRole("button", { name: "List for sale" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Charizard");
+  await dialog.locator("input[inputmode=decimal]").fill("1234");
+  await dialog.getByRole("button", { name: "List for $1,234.00" }).click();
+  await expect(page.getByText("Listed on the marketplace")).toBeVisible();
+  await expect.poll(() => isListed(22222222)).toBe(true);
+
+  await page.getByRole("link", { name: "Marketplace" }).first().click();
+  await expect(page).toHaveURL(/\/marketplace$/);
+  const cards = page.locator('main a[href^="/asset/"]');
+  await expect(cards.first()).toContainText("22222222");
+  await page.reload();
+  await expect(cards.first()).toContainText("22222222");
+});
