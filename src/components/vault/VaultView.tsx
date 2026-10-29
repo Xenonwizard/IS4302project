@@ -413,7 +413,7 @@ export function VaultView() {
               Are you sure you want to withdraw <span className="font-semibold text-white">{insuranceWithdrawTarget.listing.title}</span> from the Lost registry and your active Vault?
             </p>
             <div className="rounded-xl border border-warn/25 bg-warn/10 p-3 text-[12px] leading-relaxed text-muted">
-              Any bounty is refunded to your balance and the slab&apos;s NFT is burned on-chain (SlabVault.writeOffLost), so it will never be vaulted. Your insurance claim then goes to the vault provider off-chain.
+              Any bounty is refunded to your balance and the slab&apos;s NFT is burned on-chain, so it will never be vaulted. Your insurance claim then goes to the vault provider off-chain.
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={() => setInsuranceWithdrawTarget(null)}>Keep card</Button>

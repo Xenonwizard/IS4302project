@@ -109,9 +109,6 @@ export function ChainHistory({ address }: { address: Address }) {
         <h2 className="flex items-center gap-2 text-[14px] font-bold">
           <History size={15} /> On-chain history
         </h2>
-        <p className="text-[11px] text-dim">
-          <Fn>eth_getLogs</Fn> on both contracts, filtered by your address · from block {DEPLOY_BLOCK.toString()}
-        </p>
       </header>
       {isLoading ? (
         <p className="px-4 py-6 text-[13px] text-muted">Reading events…</p>

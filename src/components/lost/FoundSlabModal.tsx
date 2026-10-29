@@ -82,9 +82,6 @@ export function FoundSlabModal({ listing, open, onClose, onChain = false }: { li
         </div>
         {onChain ? (
           <div className="space-y-1 text-[11px] leading-relaxed text-dim">
-            <p>
-              Calls <Fn>LostSlabRecovery.fileClaim(tokenId, evidenceHash, carrier, tracking)</Fn>. Your evidence is hashed, not uploaded. The bounty is already escrowed in the contract and is paid to you once the slab is back in the owner&apos;s vault or they confirm delivery.
-            </p>
             {claimBond > 0 ? (
               <p className="text-amber-400">
                 <b>Anti-griefing bond:</b> ${claimBond} USDC will be escrowed from your Pokechain custody balance. It is refunded when authenticated, or awarded to the owner if the claim is rejected.

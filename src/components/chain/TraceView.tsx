@@ -202,10 +202,6 @@ export function TraceView({ tokenId }: { tokenId: string }) {
           <section className="rounded-card border border-hairline bg-surface">
             <header className="border-b border-hairline px-4 py-3">
               <h2 className="text-[14px] font-bold">Timeline</h2>
-              <p className="mt-0.5 text-[11px] text-dim">
-                Polygon <Fn>eth_getLogs</Fn> on SlabVault · Solana <Fn>getSignaturesForAsset</Fn> · Collector Crypt{" "}
-                <Fn>GET /redemptions/{"{id}"}</Fn>
-              </p>
             </header>
             <ol className="divide-y divide-[rgba(255,255,255,0.08)]">
               {rows.map((r, i) => (

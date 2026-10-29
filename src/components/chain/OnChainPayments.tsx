@@ -8,7 +8,6 @@ import { usePublicClient } from "wagmi";
 import { CONTRACT_LABEL, DEPLOY_BLOCK, contracts, fromUsdcUnits, type ContractName } from "@/lib/chain/config";
 import { shortDate, usd } from "@/lib/format";
 import { CopyText } from "./ChainConsole";
-import { Fn } from "./ui";
 
 interface Payment {
   key: string;
@@ -130,10 +129,6 @@ export function OnChainPayments({ address }: { address: Address }) {
       <div className="border-b border-hairline px-4 py-3">
         <p className="flex items-center gap-2 text-[14px] font-bold">
           <Receipt size={15} /> Pokechain account history
-        </p>
-        <p className="mt-1 text-[12px] text-muted">
-          Read from the chain: <Fn>AccountRegistry</Fn> <Fn>Deposited</Fn>, <Fn>Withdrawn</Fn> and <Fn>BalanceMoved</Fn> events for
-          your address. Bounty payouts and refunds come from the <Fn>LostSlabRecovery</Fn> escrow.
         </p>
       </div>
       {isLoading ? (
