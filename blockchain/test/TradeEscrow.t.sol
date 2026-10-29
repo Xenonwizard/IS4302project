@@ -38,7 +38,6 @@ contract TradeEscrowTest is Test {
         _account(misty, "misty", 1_000 * USD);
     }
 
-    /* ---------------------------- helpers ---------------------------- */
 
     function _account(address who, string memory handle, uint256 cash) internal {
         vm.startPrank(who);
@@ -75,7 +74,6 @@ contract TradeEscrowTest is Test {
         }
     }
 
-    /* ------------------------------ tests ------------------------------ */
 
     /// "2 Charizards + $300 for your 2 Bulbasaurs + $20"
     function test_SlabsAndCashBothWaysSwapAtOnce() public {
@@ -345,7 +343,6 @@ contract TradeEscrowTest is Test {
         assertEq(escrow.openOffers(brock), 3);
     }
 
-    /* ----------------------------- fee tests ----------------------------- */
 
     function test_SetFeeConfig() public {
         address treasury = makeAddr("treasury");
