@@ -1343,12 +1343,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           activeListings.flatMap((a) => (a.listing.tokenId ? [a.listing.tokenId] : []))
         );
 
+        // listedAt comes from the block that listed it: the app's own "now" from listFromVault can be
+        // minutes off the chain's clock, which would sort a fresh listing below older ones.
         for (const a of activeListings) {
           newOverrides[a.listing.id] = {
             ...newOverrides[a.listing.id],
             price: a.price,
             owner: a.seller || newOverrides[a.listing.id]?.owner,
             delisted: false,
+            listedAt: a.listing.listedAt,
           };
           if (a.listing.tokenId) {
             newOverrides[`token-${a.listing.tokenId}`] = {
@@ -1356,12 +1359,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               price: a.price,
               owner: a.seller || newOverrides[`token-${a.listing.tokenId}`]?.owner,
               delisted: false,
+              listedAt: a.listing.listedAt,
             };
             newOverrides[a.listing.tokenId] = {
               ...newOverrides[a.listing.tokenId],
               price: a.price,
               owner: a.seller || newOverrides[a.listing.tokenId]?.owner,
               delisted: false,
+              listedAt: a.listing.listedAt,
             };
             for (const s of prev.slabs) {
               if (s.tokenId === a.listing.tokenId) {
@@ -1370,6 +1375,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   price: a.price,
                   owner: a.seller || newOverrides[s.id]?.owner,
                   delisted: false,
+                  listedAt: a.listing.listedAt,
                 };
               }
             }
