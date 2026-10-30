@@ -931,6 +931,46 @@ test("lost & found: a slab that never reached the vault: a delay report, Pokecha
 });
 
 test("lost & found: a slab lost before vaulting, found and shipped to its owner, moves from Slab submissions to Withdrawn", async ({ page, request }) => {
+test("lost & found: a delay report filed from the Vault's All tab on a forwarded slab waits for Pokechain's investigation", async ({ page, request }) => {
+  const cert = "8887775";
+  await openAccount(page, "smoke_alltab");
+  await page.goto("/submit");
+  await page.getByLabel("Certification number").fill(cert);
+  await page.getByRole("button", { name: /Use sample photos/ }).click();
+  await expect(page.getByText(/^keccak 0x/)).toHaveCount(3);
+  await page.getByPlaceholder("RR123456789SG").fill("RR000777998SG");
+  for (const text of [/I own this slab/, /The slab is authentic/, /I agree to Pokechain/]) {
+    await page.getByText(text).click();
+  }
+  await page.getByRole("button", { name: "Upload evidence and submit on-chain" }).click();
+  await expect(page).toHaveURL(/\/submissions$/);
+  for (const step of ["receive", "forward"]) {
+    const res = await request.post(`/api/chain/${step}`, { data: { submissionId: cert } });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  }
+
+  // The All tab files the same private delay report as the Awaiting vault tab, not an on-chain lost report.
+  await page.goto("/vault?tab=all");
+  await page.getByRole("button", { name: "Report vaulting delay" }).click();
+  await expect(page.getByRole("dialog")).not.toContainText("lost in transit");
+  await page.getByPlaceholder(/The card has not been vaulted yet/).fill("Forwarded weeks ago, still not vaulted");
+  await page.getByRole("button", { name: "Submit report" }).click();
+  await expect(page.getByText("Vaulting delay under review")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit bounty" })).toHaveCount(0);
+  expect(await custodyOf(Number(cert))).not.toBe(5); // not Lost on-chain
+  await page.reload();
+  await expect(page.getByText("Vaulting delay under review")).toBeVisible();
+
+  const intake = await page.context().newPage();
+  await intake.goto("/intake");
+  await intake.getByPlaceholder("4324324").fill(cert);
+  await intake.getByRole("button", { name: "Simulate investigation" }).click();
+  await intake.close();
+  await page.goto("/submissions");
+  await page.getByRole("button", { name: /Recovery & insurance/ }).click();
+  await expect(page.getByRole("button", { name: "Review reply" })).toBeVisible();
+});
+
   test.setTimeout(240_000);
   const cert = "8887773";
   await openAccount(page, "smoke_found_in");

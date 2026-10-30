@@ -277,7 +277,15 @@ export function VaultView() {
                       onSell={() => setSellTarget({ ...listing, tokenId: entry.token?.tokenId ?? listing.tokenId })}
                       onShip={() => (user.address ? setRedeemTarget({ entry, listing }) : requestShipping(listing.id))}
                       inOffer={entry.token ? escrowed[entry.token.tokenId] : undefined}
-                      onReportLost={entry.token?.tokenId ? () => setMissingTarget({ entry, listing }) : undefined}
+                      // A slab not yet vaulted starts with a private delay report for Pokechain to investigate;
+                      // only a vaulted one goes straight to an on-chain lost report.
+                      onReportLost={
+                        entry.status === "Awaiting vaulting"
+                          ? () => setAwaitingReportTarget({ entry, listing })
+                          : entry.token?.tokenId
+                            ? () => setMissingTarget({ entry, listing })
+                            : undefined
+                      }
                       investigationComplete={hasPendingDecision(listing)}
                       loss={lossFor(entry, listing)}
                       onAddBounty={() => setBountyTarget({ entry, listing })}
