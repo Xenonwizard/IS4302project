@@ -56,6 +56,9 @@ const WELCOME_CREDIT = 50000;
 /** The demo account, which starts with a few slabs already vaulted. */
 const DEMO_USER = "demotester";
 
+/** How long a chat message this tab sent survives a poll that doesn't have it yet. */
+const UNSENT_GRACE_MS = 30_000;
+
 export interface SessionUser {
   username: string;
   email: string;
@@ -1619,25 +1622,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       text,
     };
 
-    let updatedNegotiation: Negotiation | null = null;
     setState((prev) => {
       const currentChat = prev.negotiations[negId];
       if (!currentChat || currentChat.status !== "open") return prev;
       if (currentChat.messages.some((m) => m.id === newMsg.id)) return prev;
-      const updated = {
-        ...currentChat,
-        messages: [...currentChat.messages, newMsg],
-      };
-      updatedNegotiation = updated;
       return {
         ...prev,
-        negotiations: { ...prev.negotiations, [negId]: updated },
+        negotiations: { ...prev.negotiations, [negId]: { ...currentChat, messages: [...currentChat.messages, newMsg] } },
       };
     });
-
-    if (updatedNegotiation) {
-      syncNegotiationToServer(updatedNegotiation);
-    }
+    // Sent outside the updater, which React may not have run yet (see appendMessage).
+    syncNegotiationToServer({ ...chat, messages: [...chat.messages, newMsg] });
   }, []);
 
   const openChat = useCallback((anchor: Listing): string | null => {
@@ -1645,49 +1640,53 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!me || anchor.owner === me) return null;
     const id = negotiationId(anchor.id, me);
     registerListing(anchor);
-    let updated: Negotiation | null = null;
+    const existing = latest.current.negotiations[id];
+    const opened: Negotiation | null =
+      existing && existing.status === "open"
+        ? null
+        : {
+            id,
+            listingId: anchor.id,
+            seller: anchor.owner,
+            buyer: me,
+            status: "open",
+            createdAt: new Date().toISOString(),
+            messages: [
+              ...(existing?.messages ?? []),
+              systemMessage(existing ? `${me} reopened the chat.` : `${me} opened a chat with ${anchor.owner}.`, me),
+            ],
+          };
     setState((prev) => {
-      const existing = prev.negotiations[id];
-      const n: Negotiation =
-        existing && existing.status === "open"
-          ? existing
-          : {
-              id,
-              listingId: anchor.id,
-              seller: anchor.owner,
-              buyer: me,
-              status: "open",
-              createdAt: new Date().toISOString(),
-              messages: [
-                ...(existing?.messages ?? []),
-                systemMessage(existing ? `${me} reopened the chat.` : `${me} opened a chat with ${anchor.owner}.`, me),
-              ],
-            };
-      updated = n;
+      const current = prev.negotiations[id];
       return {
         ...prev,
         // Kept so the chat's slab can be found again after a reload, but never shown as for sale.
         slabs: prev.slabs.some((s) => s.id === anchor.id) ? prev.slabs : [anchor, ...prev.slabs],
         overrides: prev.overrides[anchor.id] ? prev.overrides : { ...prev.overrides, [anchor.id]: { delisted: true } },
-        negotiations: { ...prev.negotiations, [id]: n },
+        negotiations: opened && current?.status !== "open" ? { ...prev.negotiations, [id]: opened } : prev.negotiations,
       };
     });
-    if (updated) syncNegotiationToServer(updated);
+    // Sent outside the updater, which React may not have run yet (see appendMessage).
+    if (opened) syncNegotiationToServer(opened);
     return id;
   }, []);
 
-  /** Adds one message from the signed-in user to an open chat and shares it with the other side. */
+  /**
+   * Adds one message from the signed-in user to an open chat and shares it with the other side.
+   * The message is built and sent outside the state update: React can run an updater later, during
+   * render, so a value it sets for after the call may still be unset and the message never sent.
+   */
   const appendMessage = useCallback((negId: string, build: (me: string) => ChatMessage, allowClosed = false) => {
     const me = latest.current.user?.username;
-    if (!me) return;
-    let updated: Negotiation | null = null;
+    const chat = latest.current.negotiations[negId];
+    if (!me || !chat || (chat.status !== "open" && !allowClosed)) return;
+    const message = build(me);
     setState((prev) => {
-      const chat = prev.negotiations[negId];
-      if (!chat || (chat.status !== "open" && !allowClosed)) return prev;
-      updated = { ...chat, messages: [...chat.messages, build(me)] };
-      return { ...prev, negotiations: { ...prev.negotiations, [negId]: updated } };
+      const current = prev.negotiations[negId] ?? chat;
+      return { ...prev, negotiations: { ...prev.negotiations, [negId]: { ...current, messages: [...current.messages, message] } } };
     });
-    if (updated) syncNegotiationToServer(updated);
+    // The server merges messages by id, so sending the chat as this render saw it loses nothing.
+    syncNegotiationToServer({ ...chat, messages: [...chat.messages, message] });
   }, []);
 
   const postTrade = useCallback(
@@ -1773,17 +1772,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 }
               }
             } else {
-              const existingMsgs = existing.messages?.length || 0;
-              const incomingMsgs = incoming.messages?.length || 0;
+              // A message sent moments ago may not be on the server yet (this poll's request can
+              // pass its POST), so keep it rather than let the server's older copy erase it.
+              const onServer = new Set(incoming.messages.map((m) => m.id));
+              const unsent = existing.messages.filter(
+                (m) => !onServer.has(m.id) && Date.now() - (Date.parse(m.at) || 0) < UNSENT_GRACE_MS,
+              );
+              const messages = unsent.length ? [...incoming.messages, ...unsent] : incoming.messages;
               const hasDiff =
                 existing.status !== incoming.status ||
-                incomingMsgs !== existingMsgs ||
-                JSON.stringify(existing.messages) !== JSON.stringify(incoming.messages);
+                JSON.stringify(existing.messages) !== JSON.stringify(messages);
               if (hasDiff) {
                 merged[id] = {
                   ...existing,
                   ...incoming,
-                  messages: incoming.messages,
+                  messages,
                 };
                 changed = true;
               }

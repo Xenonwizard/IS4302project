@@ -26,6 +26,7 @@ export function TradeCard({
   me,
   offer,
   onCounter,
+  fromChain = false,
 }: {
   message: ChatMessage;
   negotiationId: string;
@@ -33,6 +34,8 @@ export function TradeCard({
   /** the live TradeEscrow record, once read */
   offer?: TradeOffer;
   onCounter: (trade: NonNullable<ChatMessage["trade"]>) => void;
+  /** the chat had no message for this offer, so its terms were read from TradeEscrow */
+  fromChain?: boolean;
 }) {
   const trade = message.trade!;
   const iSent = trade.maker.toLowerCase() === me.address.toLowerCase();
@@ -89,6 +92,7 @@ export function TradeCard({
           {iSent ? "You offered a trade" : "Trade offer"} · #{trade.offerId}
         </span>
         {trade.counterOf ? <span className="text-dim">counter to #{trade.counterOf}</span> : null}
+        {fromChain ? <span data-testid="trade-from-chain" className="text-dim">read from TradeEscrow</span> : null}
         <Badge tone={tone} className="ml-auto">
           {status === "Accepted" ? <Check size={11} /> : null}
           <span data-testid="trade-status">{label}</span>

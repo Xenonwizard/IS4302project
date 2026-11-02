@@ -10,14 +10,14 @@ import { usePublicClient } from "wagmi";
 import { BRAND } from "@/lib/brand";
 import { getListing } from "@/lib/catalog";
 import { contracts } from "@/lib/chain/config";
-import { useHandleAddress, useTradeFeeBps, useTradeOffers } from "@/lib/chain/trades";
+import { useHandleAddress, useSlabDetails, useTradeFeeBps, useTradeOffers, type TradeOffer, type TradeSlab } from "@/lib/chain/trades";
 import { useMarketChain } from "@/lib/chain/useMarketChain";
 import { useOnchainAccount } from "@/lib/chain/useOnchainAccount";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { usd } from "@/lib/format";
 import { offerMix, pendingOffer } from "@/lib/negotiation";
 import { sellerFee, useStore } from "@/lib/store";
-import type { ChatMessage, Listing, Negotiation, OfferStatus } from "@/lib/types";
+import type { ChatMessage, ChatTradeSide, Listing, Negotiation, OfferStatus } from "@/lib/types";
 import { OfferModal } from "../modals/OfferModal";
 import { Slab } from "../slab/Slab";
 import { Avatar, Badge, Button, TimeAgo, inputClass } from "../ui/primitives";
@@ -110,6 +110,13 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
   // "Make an offer" on the asset page lands here with the builder already open.
   const [builder, setBuilder] = useState<{ counter?: CounterOf } | null>(openTrade ? {} : null);
   const openTrades = chainOffers.filter((o) => o.status === "Open");
+
+  // An offer made in this chat that the chat has no message for (the message was lost) is still in
+  // TradeEscrow, tagged with this room: show it from the chain so it can be answered or withdrawn.
+  const recorded = new Set(n.messages.flatMap((m) => (m.trade ? [m.trade.offerId] : [])));
+  const unrecorded = chainOffers.filter((o) => o.room === n.id && !recorded.has(o.id));
+  const { data: slabDetails = {} } = useSlabDetails(unrecorded.flatMap((o) => [...o.makerSlabs, ...o.takerSlabs]));
+  const messages = withChainOffers(n.messages, unrecorded, slabDetails, wallet.address, me, other);
 
 
   const counterTrade = (trade: NonNullable<ChatMessage["trade"]>) =>
@@ -296,7 +303,7 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
           </div>
 
           <div ref={scrollRef} className="cy-scroll flex-1 space-y-3 overflow-y-auto px-4 py-4">
-            {n.messages.map((m) => (
+            {messages.map((m) => (
               <MessageRow
                 key={m.id}
                 message={m}
@@ -309,6 +316,7 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
                       me={{ address: wallet.address, handle: me }}
                       offer={chainOffers.find((o) => o.id === m.trade!.offerId)}
                       onCounter={counterTrade}
+                      fromChain={m.id.startsWith(CHAIN_OFFER_PREFIX)}
                     />
                   ) : null
                 }
@@ -488,6 +496,49 @@ const STATUS_LABEL: Record<OfferStatus, string> = {
   withdrawn: "Cancelled",
   replaced: "Replaced",
 };
+
+const CHAIN_OFFER_PREFIX = "chain-offer-";
+
+/**
+ * The chat's messages with each unrecorded on-chain offer slotted in by offer id, before the first
+ * trade the chat does have with a later id. Offers wait until their slabs' details are read.
+ */
+function withChainOffers(
+  messages: ChatMessage[],
+  offers: TradeOffer[],
+  details: Record<string, TradeSlab>,
+  myAddress: string | undefined,
+  me: string,
+  other: string,
+): ChatMessage[] {
+  const side = (ids: string[], cash: number): ChatTradeSide => ({
+    cash,
+    slabs: ids.map((id) => ({ ...details[id], stated: null })),
+  });
+  const ready = offers.filter((o) => [...o.makerSlabs, ...o.takerSlabs].every((id) => details[id]));
+  if (!ready.length) return messages;
+  const out = [...messages];
+  for (const o of [...ready].sort((a, b) => Number(a.id) - Number(b.id))) {
+    const at = out.findIndex((m) => m.trade && Number(m.trade.offerId) > Number(o.id));
+    const index = at === -1 ? out.length : at;
+    out.splice(index, 0, {
+      id: `${CHAIN_OFFER_PREFIX}${o.id}`,
+      from: o.maker.toLowerCase() === myAddress?.toLowerCase() ? me : other,
+      // Trade cards show no time; borrow the neighbour's so the order holds if anything sorts by it.
+      at: (out[index] ?? out.at(-1))?.at ?? new Date().toISOString(),
+      kind: "trade",
+      trade: {
+        offerId: o.id,
+        maker: o.maker,
+        taker: o.taker,
+        give: side(o.makerSlabs, o.makerCash),
+        get: side(o.takerSlabs, o.takerCash),
+        ...(o.counterOf !== "0" ? { counterOf: o.counterOf } : {}),
+      },
+    });
+  }
+  return out;
+}
 
 function MessageRow({ message: m, me, trade }: { message: ChatMessage; me: string; trade?: React.ReactNode }) {
   if (m.kind === "trade") {

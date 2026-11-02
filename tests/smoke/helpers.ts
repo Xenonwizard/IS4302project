@@ -2,7 +2,7 @@ import { createPublicClient, createWalletClient, http, parseEventLogs, type Addr
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { accountRegistryAbi, deployments, lostSlabRecoveryAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi } from "../../src/lib/chain/generated";
+import { accountRegistryAbi, deployments, lostSlabRecoveryAbi, mockUSDCAbi, slabMarketAbi, slabVaultAbi, tradeEscrowAbi } from "../../src/lib/chain/generated";
 import { expect } from "./fixtures";
 
 const local = deployments["31337"];
@@ -134,6 +134,23 @@ export async function depositAsTest1(dollars: number) {
 /** test2 (wallet #2, the same Hardhat account as @misty) tops up their Pokechain balance. */
 export async function depositAsTest2(dollars: number) {
   await depositAs(MISTY_KEY, dollars);
+}
+
+/**
+ * Test wallet #1 offers a trade straight on TradeEscrow, tagged with a chat room, without the app
+ * posting it to that chat: as if the chat message was lost after the transaction went through.
+ */
+export async function offerAsTest1(to: Address, giveSlabs: number[], askSlabs: number[], room: string) {
+  const pub = createPublicClient({ chain: hardhat, transport: http() });
+  const wallet = createWalletClient({ chain: hardhat, transport: http(), account: privateKeyToAccount(TEST1_KEY) });
+  await pub.waitForTransactionReceipt({
+    hash: await wallet.writeContract({
+      address: local.TradeEscrow,
+      abi: tradeEscrowAbi,
+      functionName: "createOffer",
+      args: [to, giveSlabs.map(BigInt), BigInt(0), askSlabs.map(BigInt), BigInt(0), room],
+    }),
+  });
 }
 
 async function depositAs(key: `0x${string}`, dollars: number) {

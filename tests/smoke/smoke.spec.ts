@@ -1,10 +1,10 @@
-import type { Page } from "@playwright/test";
+import type { Page, WebSocketRoute } from "@playwright/test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createPublicClient, createWalletClient, http, keccak256, toBytes } from "viem";
 import { hardhat } from "viem/chains";
 import { buildHash, deployments, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect, test } from "./fixtures";
-import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
+import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, offerAsTest1, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
 
 // One test per role's main job, against the real app and local chain. Each test starts from a
 // freshly reset chain and a fresh browser (empty localStorage).
@@ -352,6 +352,64 @@ test("chain sync: an idle page sends no chain requests, and a listing made elsew
   // @misty lists from outside the app: the new block refreshes the marketplace without a reload.
   await listAsMisty(70000136, 900);
   await expect(page.getByText("Articuno").first()).toBeVisible({ timeout: 5_000 });
+});
+
+test("chain sync: after the chain socket drops for a while, a listing made elsewhere still shows up without a reload", async ({ page, request }) => {
+  await loadDemoTraders(request);
+  // Every socket to the chain goes through here, so the test can cut it off like a laptop going to sleep.
+  let refuse = false;
+  const sockets: WebSocketRoute[] = [];
+  await page.routeWebSocket(/:8545/, (ws) => {
+    if (refuse) return void ws.close();
+    sockets.push(ws);
+    ws.connectToServer();
+  });
+  await logIn(page, 1, "ash");
+  await page.goto("/marketplace");
+  await expect(page.getByText("Articuno")).toHaveCount(0);
+  await page.waitForTimeout(3_000); // let the page's first reads finish and its socket subscribe
+  // Unreachable for longer than viem's own reconnect tries (5 of them, 2 seconds apart).
+  refuse = true;
+  for (const ws of sockets) await ws.close();
+  await page.waitForTimeout(15_000);
+  refuse = false;
+
+  await listAsMisty(70000136, 900);
+  await expect(page.getByText("Articuno").first()).toBeVisible({ timeout: 10_000 });
+});
+
+test("two collectors: an offer whose chat message was lost still shows in the chat, read from TradeEscrow", async ({ page, browser, request }) => {
+  await loadDemoTraders(request);
+  await listAsMisty(70000136, 900);
+  await logIn(page, 1, "ash");
+  await page.goto("/marketplace");
+  await page.getByText("Articuno").first().click();
+  await page.getByRole("button", { name: "Make an offer" }).click();
+  await page.getByRole("button", { name: "Make a trade offer" }).click();
+  await expect(page.getByRole("heading", { name: "Trade offer to @misty" })).toBeVisible();
+  const room = new URL(page.url()).pathname.split("/").pop()!;
+
+  // The offer goes through on-chain, tagged with this chat, but nothing is posted to the chat.
+  await offerAsTest1(MISTY, [70000038], [70000136], room);
+  const card = page.getByTestId("trade-card");
+  await expect(card).toHaveCount(1);
+  await expect(card.getByTestId("trade-from-chain")).toBeVisible();
+  await expect(card.getByTestId("trade-status")).toHaveText("Waiting for them");
+  await expect(card).toContainText("Articuno");
+
+  // @misty sees it in the same chat and accepts it.
+  const other = await browser.newContext();
+  const misty = await other.newPage();
+  await logIn(misty, 2, "misty");
+  await misty.goto(`/trades/${room}`);
+  await expect(misty.getByTestId("trade-status")).toHaveText("Your move");
+  await misty.getByRole("button", { name: "Accept trade" }).click();
+  await expect(misty.getByTestId("trade-status")).toHaveText("Accepted");
+  await other.close();
+  expect(await ownerOf(70000136)).toBe(ASH);
+
+  await page.reload();
+  await expect(page.getByTestId("trade-card").getByTestId("trade-status")).toHaveText("Accepted");
 });
 
 test("two collectors: an offer on a listed slab starts a chat; accepting delists it, then swaps", async ({ page, browser, request }) => {
