@@ -81,7 +81,7 @@ export function PendingSubmissions() {
             <PackageSearch size={15} className="text-warn" /> Your slab requests
           </p>
           <p className="mt-1 text-[12.5px] text-muted">
-            Pokechain receives your slab (its NFT is minted then), sends it to Collector Crypt, and Collector Crypt vaults
+            Pokechain receives your slab, sends it to Collector Crypt, and Collector Crypt vaults
             it. This page updates by itself at each step.
           </p>
         </div>

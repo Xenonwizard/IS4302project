@@ -3,15 +3,6 @@
 import clsx from "clsx";
 import { Check, Loader2 } from "lucide-react";
 
-/** A contract function name set in code type, e.g. AccountRegistry.register(handle). */
-export function Fn({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <code className={clsx("rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[11.5px] font-semibold text-white", className)}>
-      {children}
-    </code>
-  );
-}
-
 export type StepState = "todo" | "active" | "busy" | "done";
 
 /** One numbered step in a multi-step chain flow. */

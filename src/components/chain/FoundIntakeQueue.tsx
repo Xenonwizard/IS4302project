@@ -22,7 +22,7 @@ export function FoundIntakeQueue({ onOpenCert }: { onOpenCert: (certNumber: stri
     <section className="mt-8 rounded-card border border-hairline bg-surface p-4" data-testid="found-intake">
       <p className="text-[15px] font-bold">Found-slab claims</p>
       <p className="mt-1 text-[12px] leading-relaxed text-muted">
-        A collector found a slab reported lost and posted it here. Authenticate it, wait for the owner to choose vault or delivery, then send it back. Each step is a <span className="font-mono">LostSlabRecovery</span> transaction from the operator key.
+        A collector found a slab reported lost and posted it here. Authenticate it, wait for the owner to choose vault or delivery, then send it back.
       </p>
       <div className="mt-4 space-y-3">
         {open.map((c) => <QueueItem key={c.claimId} c={c} onOpenCert={onOpenCert} />)}

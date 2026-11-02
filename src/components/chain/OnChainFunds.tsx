@@ -81,13 +81,12 @@ export function OnChainFunds() {
 
       <div className="grid gap-3 p-5 sm:grid-cols-3">
         <Balance label="In your wallet" value={acct.walletUsdc} hint="Wallet USDC balance" />
-        <Balance label="In your Pokechain account" value={acct.custodyBalance} hint="AccountRegistry.balanceOf(you)" accent />
+        <Balance label="In your Pokechain account" value={acct.custodyBalance} hint="Available to spend on Pokechain" accent />
         <div className="rounded-xl bg-[#101014] p-3.5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-dim">Gas</p>
           <p className="mt-1 text-lg font-bold">
             {acct.gasBalance.toFixed(3)} {acct.gasSymbol}
           </p>
-          <p className="mt-0.5 font-mono text-[10.5px] text-dim">eth_getBalance(you)</p>
         </div>
       </div>
 

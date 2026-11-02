@@ -11,7 +11,6 @@ import type { SlabTrace } from "@/lib/chain/trace";
 import { Badge, Button, inputClass } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
 import { EvidencePanel } from "./EvidencePanel";
-import { Fn } from "./ui";
 
 type Source = "Polygon" | "Solana" | "Collector Crypt";
 
@@ -92,7 +91,7 @@ export function TraceView({ tokenId }: { tokenId: string }) {
           <h1 className="flex items-center gap-2 text-[24px] font-bold">
             <Route size={22} /> Trace token #{tokenId}
           </h1>
-          <p className="mt-1 text-[13px] text-muted">The slab&apos;s whole journey, cross-checked across Polygon, Solana and Collector Crypt.</p>
+          <p className="mt-1 text-[13px] text-muted">The slab&apos;s whole journey.</p>
         </div>
         <form
           onSubmit={(e) => {
@@ -180,10 +179,6 @@ export function TraceView({ tokenId }: { tokenId: string }) {
 
           <section className="rounded-card border border-hairline bg-surface p-4">
             <h2 className="text-[14px] font-bold">Intake evidence</h2>
-            <p className="mb-3 mt-0.5 text-[11px] text-dim">
-              Photos and declarations the owner submitted, re-hashed now and compared with the <Fn>evidenceHash</Fn> stored
-              in the token.
-            </p>
             <EvidencePanel hash={data.evidenceHash} />
           </section>
 
@@ -191,10 +186,7 @@ export function TraceView({ tokenId }: { tokenId: string }) {
             <div className="flex gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-[12.5px] text-warn">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
               <span>
-                Reported lost. The claim rests on records three different parties wrote. Polygon shows who owned it and that they
-                asked for it (with the address hash). Collector Crypt&apos;s redemption {data.redemptionRef} names the carrier and
-                tracking number. Collector Crypt burned its Solana NFT when the slab left its vault (simulated), but the Pokechain token stays
-                locked to the owner until they confirm receipt, so the claim and any bounty stay attached to it.
+                Reported lost. The claim and any bounty stay attached to this slab until the owner confirms receipt.
               </span>
             </div>
           ) : null}
@@ -202,10 +194,6 @@ export function TraceView({ tokenId }: { tokenId: string }) {
           <section className="rounded-card border border-hairline bg-surface">
             <header className="border-b border-hairline px-4 py-3">
               <h2 className="text-[14px] font-bold">Timeline</h2>
-              <p className="mt-0.5 text-[11px] text-dim">
-                Polygon <Fn>eth_getLogs</Fn> on SlabVault · Solana <Fn>getSignaturesForAsset</Fn> · Collector Crypt{" "}
-                <Fn>GET /redemptions/{"{id}"}</Fn>
-              </p>
             </header>
             <ol className="divide-y divide-[rgba(255,255,255,0.08)]">
               {rows.map((r, i) => (

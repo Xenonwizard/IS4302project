@@ -8,6 +8,7 @@ import { getListing } from "@/lib/catalog";
 import { SUBMISSION_STATUS, contracts } from "@/lib/chain/config";
 import { useSlabChain } from "@/lib/chain/useSlabChain";
 import { useStore } from "@/lib/store";
+import type { DelayReport } from "@/lib/types";
 import { Button, inputClass } from "../ui/primitives";
 import { FoundIntakeQueue } from "./FoundIntakeQueue";
 
@@ -23,7 +24,7 @@ const STEP_COPY: Record<Step, { title: string; expectedStatus: number; path: str
 export function IntakeSimulator() {
   const client = usePublicClient();
   const queryClient = useQueryClient();
-  const { pushToast, user, vault, vaultLosses, pendingLossDecisions, resolve, completeLossInvestigation } = useStore();
+  const { pushToast, user, resolve, completeLossInvestigation } = useStore();
   const { submit } = useSlabChain();
   const [certNumber, setCertNumber] = useState("");
   const [busy, setBusy] = useState<Step | null>(null);
@@ -96,18 +97,26 @@ export function IntakeSimulator() {
   };
 
   const activeSubmission = submission && submission.status !== 0 ? submission : null;
-  const reportedDelays = Object.entries(vaultLosses).flatMap(([reportId, loss]) => {
-    if (loss.published || loss.resolution || pendingLossDecisions[reportId]) return [];
-    const entry = vault.find((item) =>
-      item.listingId === reportId ||
-      item.token?.tokenId === reportId ||
-      (item.token?.tokenId ? `token-${item.token.tokenId}` === reportId : false),
-    );
-    const listing = getListing(entry?.listingId ?? reportId);
+  // Delay reports come from the server, so a collector's report shows up here in any browser.
+  const { data: delayReports = [] } = useQuery({
+    queryKey: ["delay-reports"],
+    refetchInterval: 2_500,
+    queryFn: async () => {
+      const res = await fetch("/api/delay-reports", { cache: "no-store" });
+      return res.ok ? ((await res.json()) as { reports: DelayReport[] }).reports : [];
+    },
+  });
+  const reportedDelays = delayReports.flatMap((loss) => {
+    if (loss.status !== "reported") return [];
+    const listing = getListing(loss.id);
     const reportCertNumber = loss.certNumber ?? listing?.certNumber;
     if (!valid || reportCertNumber !== certNumber.trim()) return [];
-    return [{ reportId, loss, listing: listing ? resolve(listing) : null }];
+    return [{ reportId: loss.id, loss, title: loss.title ?? (listing ? resolve(listing).title : undefined) }];
   });
+  const investigate = async (reportId: string) => {
+    if (!(await completeLossInvestigation(reportId))) return;
+    queryClient.setQueryData<DelayReport[]>(["delay-reports"], (prev) => prev?.map((r) => (r.id === reportId ? { ...r, status: "investigated" } : r)));
+  };
   const unknown = !activeSubmission;
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
@@ -145,7 +154,7 @@ export function IntakeSimulator() {
                 <div>
                   <p className="text-[15px] font-bold">{index + 1}. {item.title}</p>
                   <p className="mt-1 text-[12px] text-muted">
-                    {step === "receive" ? "Mint the NFT once and lock it as awaiting vaulting." : step === "forward" ? "Keep the same NFT and record its transfer to Collector Crypt." : "Vault, verify and unlock the same NFT for normal vault use."}
+                    {step === "receive" ? "The slab arrived at Pokechain." : step === "forward" ? "Pokechain sent the slab to Collector Crypt." : "Collector Crypt stored and verified the slab."}
                   </p>
                   {activeSubmission ? (
                     <p className={`mt-2 text-[11px] font-bold ${allowed ? "text-good" : "text-dim"}`}>
@@ -177,13 +186,13 @@ export function IntakeSimulator() {
           <p className="text-[15px] font-bold">Investigation simulator</p>
           <p className="mt-1 text-[12px] leading-relaxed text-muted">A vaulting-delay report has been submitted. Simulate the vault team completing its investigation.</p>
           <ul className="mt-3 space-y-2">
-            {reportedDelays.map(({ reportId, loss, listing }) => (
+            {reportedDelays.map(({ reportId, loss, title }) => (
               <li key={reportId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-surface p-3">
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] font-semibold">{listing?.title ?? `Reported slab ${reportId}`}</p>
+                  <p className="truncate text-[13px] font-semibold">{title ?? `Reported slab ${reportId}`}</p>
                   <p className="mt-1 line-clamp-1 text-[11px] text-muted">{loss.details}</p>
                 </div>
-                <Button size="sm" variant="secondary" onClick={() => completeLossInvestigation(reportId)}>Simulate investigation</Button>
+                <Button size="sm" variant="secondary" onClick={() => void investigate(reportId)}>Simulate investigation</Button>
               </li>
             ))}
           </ul>

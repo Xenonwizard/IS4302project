@@ -136,6 +136,22 @@ export interface VaultLossReport {
   };
 }
 
+/** A vaulting-delay report as the server keeps it, so the vault team can work it from another browser. */
+export interface DelayReport {
+  /** The listing id, same key as the collector's vaultLosses entry. */
+  id: string;
+  owner: string;
+  title?: string;
+  certNumber?: string;
+  details: string;
+  reportedAt: string;
+  inTransit?: boolean;
+  /** reported → investigated (the collector chooses) → closed (cancelled, published or insured). */
+  status: "reported" | "investigated" | "closed";
+  resolution?: "insurance";
+  updatedAt: string;
+}
+
 export type RecoveryStatus = "Submitted" | "Returning to owner" | "Completed" | "Rejected";
 
 /** A finder-submitted claim for a physical slab that was publicly reported lost. */

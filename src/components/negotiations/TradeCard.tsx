@@ -150,8 +150,8 @@ export function TradeCard({
           )}
           <span className="text-[11.5px] text-dim">
             {iSent
-              ? "Your side is locked in TradeEscrow until they answer or you withdraw."
-              : "Accepting moves your side to them and their escrowed side to you, in one transaction."}
+              ? "Your side is held until they answer or you withdraw."
+              : "Accepting swaps both sides at once."}
           </span>
         </div>
       ) : null}

@@ -30,10 +30,11 @@ export function ListForSaleForm({
     if (value <= 0) return;
     setBusy(true);
     try {
+      let listedAt: string | undefined;
       if (user?.address && listing.tokenId) {
-        await listCard(listing.tokenId, value);
+        ({ listedAt } = await listCard(listing.tokenId, value));
       }
-      listFromVault(listing.id, value);
+      listFromVault(listing.id, value, listedAt);
       onListed?.();
     } catch (err) {
       pushToast({

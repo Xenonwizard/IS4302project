@@ -4,7 +4,7 @@ import clsx from "clsx";
 import Link from "next/link";
 import { ArrowLeft, ArrowLeftRight, Check, Gavel, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { keccak256, toBytes, zeroAddress } from "viem";
 import { usePublicClient } from "wagmi";
 import { BRAND } from "@/lib/brand";
@@ -155,38 +155,24 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
     }, 400);
   };
 
-  // If the card was already transferred on-chain to the buyer, automatically finalize the deal in the negotiation room
+  // If the card already went to the buyer (from this browser or another), finalise the deal in the chat.
+  // A query, so ChainBlockSync re-runs it on every new block instead of checking once on mount.
+  const watchSettle = Boolean(client && listing.tokenId && user?.address && n.status === "open" && pending);
+  const { data: settledOnChain = false } = useQuery({
+    queryKey: ["chat-settled", listing.tokenId, n.buyer],
+    enabled: watchSettle,
+    queryFn: async () => {
+      const buyerHandle = n.buyer.trim().toLowerCase().replace(/^@/, "");
+      const [ownerAddr, buyerAddr] = await Promise.all([
+        client!.readContract({ ...contracts.slabVault, functionName: "ownerOf", args: [BigInt(listing.tokenId!)] }).catch(() => zeroAddress),
+        client!.readContract({ ...contracts.accounts, functionName: "handleOwner", args: [keccak256(toBytes(buyerHandle))] }).catch(() => zeroAddress),
+      ]);
+      return buyerAddr !== zeroAddress && ownerAddr.toLowerCase() === buyerAddr.toLowerCase();
+    },
+  });
   useEffect(() => {
-    if (!client || !listing.tokenId || !user?.address || n.status !== "open" || !pending) return;
-    let cancelled = false;
-    async function checkAutoSettle() {
-      try {
-        const buyerHandle = n.buyer.trim().toLowerCase().replace(/^@/, "");
-        const [ownerAddr, buyerAddr] = await Promise.all([
-          client!.readContract({
-            ...contracts.slabVault,
-            functionName: "ownerOf",
-            args: [BigInt(listing.tokenId!)],
-          }).catch(() => zeroAddress),
-          client!.readContract({
-            ...contracts.accounts,
-            functionName: "handleOwner",
-            args: [keccak256(toBytes(buyerHandle))],
-          }).catch(() => zeroAddress),
-        ]);
-        if (cancelled) return;
-        if (buyerAddr && buyerAddr !== zeroAddress && ownerAddr.toLowerCase() === buyerAddr.toLowerCase()) {
-          respondToOffer(n.id, pending!.id, true);
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    void checkAutoSettle();
-    return () => {
-      cancelled = true;
-    };
-  }, [client, listing.tokenId, user?.address, n.status, n.id, n.buyer, pending, respondToOffer]);
+    if (watchSettle && settledOnChain && pending) respondToOffer(n.id, pending.id, true);
+  }, [watchSettle, settledOnChain, pending, n.id, respondToOffer]);
 
   const handleAccept = async () => {
     if (!pending || busy) return;
@@ -391,7 +377,7 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
               <ul className="list-disc space-y-1 pl-4">
                 <li>Chat as long as you like, then make a trade offer: slabs from both vaults, plus cash either way.</li>
                 <li>Compare listings and completed Pokechain transactions on each slab page, then agree on slabs and cash with the other collector.</li>
-                <li>Your side is locked in TradeEscrow. They accept, counter or decline; accepting swaps everything in one transaction.</li>
+                <li>Your side is held until they answer. They accept, counter or decline; accepting swaps everything at once.</li>
                 <li>Nothing ships: only the tokens change hands, the slabs stay vaulted.</li>
                 <li>Slab transfers are 0% fee. A {tradeFeeBps > 0 ? `${tradeFeeBps / 100}%` : "0%"} protocol fee applies to cash legs to prevent wash trading.</li>
               </ul>
@@ -399,7 +385,7 @@ function Chat({ negotiation: n, base, me, openTrade }: { negotiation: Negotiatio
               <ul className="list-disc space-y-1 pl-4">
                 <li>Offers are full cash, or slabs from your vault plus a cash top-up.</li>
                 <li>The seller accepts or declines. The buyer can edit or cancel a pending offer.</li>
-                <li>On accept the token moves on-chain and the vault updates custody. Nothing ships.</li>
+                <li>On accept the slab moves to the buyer&apos;s vault. Nothing ships.</li>
                 <li>The seller pays a {BRAND.sellerFee * 100}% fee on the cash part only.</li>
               </ul>
             )}

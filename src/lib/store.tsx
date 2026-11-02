@@ -32,6 +32,7 @@ import type {
   ActivityEvent,
   ChatMessage,
   ChatTrade,
+  DelayReport,
   FoundSlabRecovery,
   Grader,
   LedgerEntry,
@@ -239,7 +240,8 @@ interface StoreValue extends PersistShape {
   setAuthOpen: (open: boolean) => void;
   /* slabs */
   submitSlab: (input: SlabSubmission, token?: SlabToken) => Listing | null;
-  listFromVault: (id: string, price: number) => void;
+  /** `listedAt` is the listing block's time; without a chain it is now. */
+  listFromVault: (id: string, price: number, listedAt?: string) => void;
   delist: (id: string) => void;
   buyNow: (listingId: string, txHash?: string) => boolean;
   requestShipping: (id: string) => void;
@@ -285,7 +287,7 @@ interface StoreValue extends PersistShape {
   reportVaultLost: (listingId: string, details: string, inTransit?: boolean, certNumber?: string) => void;
   /** A slab reported lost on-chain: take it off sale here and close buyers' chats. The report itself is on SlabVault. */
   delistLostSlab: (listingId: string) => void;
-  completeLossInvestigation: (listingId: string) => void;
+  completeLossInvestigation: (listingId: string) => Promise<boolean>;
   resolveLossDecision: (listingId: string, outcome?: "insurance") => void;
   cancelVaultLost: (listingId: string) => void;
   withdrawLostForInsurance: (listingId: string) => void;
@@ -627,6 +629,51 @@ async function writeReply(chat: Negotiation, me: string, listing: Listing): Prom
   }
 }
 
+/** Tells the vault team (/intake, maybe in another browser) about a vaulting-delay report, or moves it along. */
+function postDelayReport(body: { report: Omit<DelayReport, "status" | "updatedAt"> } | { id: string; status: DelayReport["status"]; resolution?: "insurance" }) {
+  return fetch("/api/delay-reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+    .then((res) => res.ok)
+    .catch(() => false);
+}
+
+/**
+ * Brings a collector's own delay reports in line with the server: one filed from another browser
+ * appears, one the vault team investigated waits for a decision, one closed elsewhere goes away.
+ */
+function applyDelayReports(prev: PersistShape, reports: DelayReport[]): { next: PersistShape; investigated: string[] } {
+  const isOpen = (loss?: VaultLossReport) => loss?.published === false && !loss.resolution;
+  let vaultLosses = prev.vaultLosses;
+  let pending = prev.pendingLossDecisions;
+  const investigated: string[] = [];
+  for (const r of reports) {
+    const local = vaultLosses[r.id];
+    if (r.status === "closed") {
+      if (!isOpen(local)) continue;
+      vaultLosses = { ...vaultLosses };
+      if (r.resolution === "insurance") vaultLosses[r.id] = { ...local, resolution: "insurance" };
+      else delete vaultLosses[r.id];
+      if (pending[r.id]) {
+        pending = { ...pending };
+        delete pending[r.id];
+      }
+      continue;
+    }
+    if (!local) {
+      vaultLosses = { ...vaultLosses, [r.id]: { reportedAt: r.reportedAt, details: r.details, certNumber: r.certNumber, inTransit: r.inTransit, published: false } };
+    }
+    if (r.status === "investigated" && isOpen(vaultLosses[r.id]) && !pending[r.id]) {
+      pending = { ...pending, [r.id]: { createdAt: r.updatedAt } };
+      investigated.push(r.id);
+    }
+  }
+  if (vaultLosses === prev.vaultLosses && pending === prev.pendingLossDecisions) return { next: prev, investigated };
+  return { next: { ...prev, vaultLosses, pendingLossDecisions: pending }, investigated };
+}
+
 /** Each user's state is stashed under its own key when someone else signs in on this browser. */
 const userKey = (username: string) => `${STORAGE_KEY}:${username}`;
 
@@ -965,8 +1012,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const listFromVault = useCallback(
-    (id: string, price: number) => {
-      const now = new Date().toISOString();
+    (id: string, price: number, listedAt?: string) => {
+      const now = listedAt ?? new Date().toISOString();
       setState((prev) => ({
         ...prev,
         overrides: {
@@ -1343,12 +1390,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           activeListings.flatMap((a) => (a.listing.tokenId ? [a.listing.tokenId] : []))
         );
 
+        // listedAt comes from the block that listed it: the app's own "now" can be minutes off
+        // the chain's clock, which would sort a fresh listing below older ones.
         for (const a of activeListings) {
           newOverrides[a.listing.id] = {
             ...newOverrides[a.listing.id],
             price: a.price,
             owner: a.seller || newOverrides[a.listing.id]?.owner,
             delisted: false,
+            listedAt: a.listing.listedAt,
           };
           if (a.listing.tokenId) {
             newOverrides[`token-${a.listing.tokenId}`] = {
@@ -1356,12 +1406,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               price: a.price,
               owner: a.seller || newOverrides[`token-${a.listing.tokenId}`]?.owner,
               delisted: false,
+              listedAt: a.listing.listedAt,
             };
             newOverrides[a.listing.tokenId] = {
               ...newOverrides[a.listing.tokenId],
               price: a.price,
               owner: a.seller || newOverrides[a.listing.tokenId]?.owner,
               delisted: false,
+              listedAt: a.listing.listedAt,
             };
             for (const s of prev.slabs) {
               if (s.tokenId === a.listing.tokenId) {
@@ -1370,6 +1422,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                   price: a.price,
                   owner: a.seller || newOverrides[s.id]?.owner,
                   delisted: false,
+                  listedAt: a.listing.listedAt,
                 };
               }
             }
@@ -1952,6 +2005,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
   }, [ready, signedIn, pushToast]);
 
+  /* Vaulting-delay reports are shared with the vault team through the server, so /intake in another
+     browser can investigate one, and this collector's Vault hears back without a reload. */
+  const closedDelayReports = useRef(new Set<string>());
+  const closeDelayReport = (listingId: string, resolution?: "insurance") => {
+    closedDelayReports.current.add(listingId);
+    void postDelayReport({ id: listingId, status: "closed", resolution });
+  };
+  const delayReportOwner = state.user?.username;
+  useEffect(() => {
+    if (!ready || !delayReportOwner) return;
+    let active = true;
+    const poll = async () => {
+      const res = await fetch(`/api/delay-reports?owner=${encodeURIComponent(delayReportOwner)}`).catch(() => null);
+      const data = res?.ok ? ((await res.json().catch(() => null)) as { reports?: DelayReport[] } | null) : null;
+      if (!active || !data?.reports) return;
+      const reports = data.reports.filter((r) => !closedDelayReports.current.has(r.id));
+      if (latest.current.user?.username !== delayReportOwner) return;
+      const { investigated } = applyDelayReports(latest.current, reports);
+      setState((prev) => (prev.user?.username === delayReportOwner ? applyDelayReports(prev, reports).next : prev));
+      if (investigated.length) pushToast({ title: "Investigation complete", body: "A decision is waiting in Status Center.", tone: "success" });
+    };
+    void poll();
+    const interval = setInterval(poll, 2500);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [ready, delayReportOwner, pushToast]);
+
   const fileLostReport = useCallback(
     (negId: string, item: LostItem, tracking: string, details: string): LostReport => {
       const report: LostReport = {
@@ -1978,6 +2060,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const reportVaultLost = useCallback(
     (listingId: string, details: string, inTransit = false, certNumber?: string) => {
+      const snapshot = latest.current;
+      const reportedAt = new Date().toISOString();
+      const cert = certNumber ?? getListing(listingId)?.certNumber;
+      const me = snapshot.user?.username;
+      if (me && snapshot.vault.some((item) => item.listingId === listingId)) {
+        closedDelayReports.current.delete(listingId);
+        void postDelayReport({ report: { id: listingId, owner: me, title: current(snapshot, listingId)?.title, certNumber: cert, details, reportedAt, inTransit } });
+      }
       setState((prev) => {
         if (!prev.vault.some((item) => item.listingId === listingId)) return prev;
         const negotiations = closeSellerChats(
@@ -2000,9 +2090,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           vaultLosses: {
             ...prev.vaultLosses,
             [listingId]: {
-              reportedAt: new Date().toISOString(),
+              reportedAt,
               details,
-              certNumber: certNumber ?? getListing(listingId)?.certNumber,
+              certNumber: cert,
               published: false,
               inTransit,
             },
@@ -2014,6 +2104,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const delistLostSlab = useCallback((listingId: string) => {
+    closeDelayReport(listingId);
     setState((prev) => {
       const pendingLossDecisions = { ...prev.pendingLossDecisions };
       const vaultLosses = { ...prev.vaultLosses };
@@ -2033,18 +2124,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const completeLossInvestigation = useCallback((listingId: string) => {
-    setState((prev) => ({
-      ...prev,
-      pendingLossDecisions: {
-        ...prev.pendingLossDecisions,
-        [listingId]: { createdAt: new Date().toISOString() },
-      },
-    }));
-    pushToast({ title: "Investigation complete", body: "A decision is waiting in your Vault.", tone: "success" });
+  // The collector's browser picks this up from the server (the delay-report poll below).
+  const completeLossInvestigation = useCallback(async (listingId: string) => {
+    if (!(await postDelayReport({ id: listingId, status: "investigated" }))) {
+      pushToast({ title: "Could not save the investigation", tone: "error" });
+      return false;
+    }
+    pushToast({ title: "Investigation complete", body: "The collector now chooses insurance or a bounty.", tone: "success" });
+    return true;
   }, [pushToast]);
 
   const resolveLossDecision = useCallback((listingId: string, outcome?: "insurance") => {
+    closeDelayReport(listingId, outcome);
     setState((prev) => {
       const pending = { ...prev.pendingLossDecisions };
       delete pending[listingId];
@@ -2067,6 +2158,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         pushToast({ title: "Recovery in progress", body: `Finish recovery ${claim.id} first: confirm receipt once the slab arrives.`, tone: "error" });
         return;
       }
+      closeDelayReport(listingId);
       setState((prev) => {
         if (!prev.vaultLosses[listingId]) return prev;
         const vaultLosses = { ...prev.vaultLosses };
@@ -2079,6 +2171,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const withdrawLostForInsurance = useCallback((listingId: string) => {
+    closeDelayReport(listingId, "insurance");
     setState((prev) => {
       const item = prev.vault.find((vaultItem) => vaultItem.listingId === listingId);
       const tokenId = item?.token?.tokenId ?? prev.slabs.find((slab) => slab.id === listingId)?.tokenId;
@@ -2117,6 +2210,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const setVaultBounty = useCallback(
     (listingId: string, amount: number) => {
       if (!Number.isFinite(amount) || amount <= 0) return;
+      closeDelayReport(listingId);
       setState((prev) => {
         const report = prev.vaultLosses[listingId];
         if (!report) return prev;

@@ -204,8 +204,7 @@ export function SlabIntakeForm() {
         }
       >
         <p className="-mt-1 text-[12.5px] text-muted">
-          Pokechain and Collector Crypt compare these with the slab when it arrives. Each photo is hashed, and only the hashes
-          are fingerprinted on-chain.
+          Pokechain and Collector Crypt compare these with the slab when it arrives.
         </p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {PHOTO_SLOTS.map((s) => (

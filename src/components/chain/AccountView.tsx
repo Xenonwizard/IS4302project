@@ -13,7 +13,6 @@ import { Badge, Button } from "../ui/primitives";
 import { LoginPrompt } from "../vault/shared";
 import { ChainHistory } from "./ChainHistory";
 import { CopyText } from "./ChainConsole";
-import { Fn } from "./ui";
 
 /** /account: the on-chain account record, offboarding (close account) and the event history. */
 export function AccountView() {
@@ -37,8 +36,7 @@ export function AccountView() {
       <div className="mx-auto max-w-xl space-y-4 px-4 py-10 text-center">
         <h1 className="text-[22px] font-bold">@{user.username} is an off-chain demo account</h1>
         <p className="text-[13px] text-muted">
-          It lives only in this browser. Open an on-chain account with a wallet to register a handle in{" "}
-          <Fn>AccountRegistry</Fn>, deposit USDC and tokenise slabs.
+          It lives only in this browser. Open an account with a wallet to deposit USDC and tokenise slabs.
         </p>
         <Button onClick={() => setAuthOpen(true)}>
           <Wallet size={15} /> Open an on-chain account

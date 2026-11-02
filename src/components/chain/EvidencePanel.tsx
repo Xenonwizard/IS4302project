@@ -51,7 +51,7 @@ export function EvidencePanel({ hash, compact = false }: { hash: string; compact
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
         <span className={clsx("inline-flex items-center gap-1 font-semibold", data.verified.all ? "text-good" : "text-bad")}>
           {data.verified.all ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
-          {data.verified.all ? "Matches the on-chain evidenceHash" : "Does NOT match the on-chain evidenceHash"}
+          {data.verified.all ? "Matches the recorded evidence" : "Does NOT match the recorded evidence"}
         </span>
         <span className="text-dim">
           evidenceHash <CopyText text={hash} />

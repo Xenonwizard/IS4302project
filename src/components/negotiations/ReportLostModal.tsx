@@ -64,7 +64,7 @@ export function ReportLostModal({
           </span>
           <p className="mt-3 text-base font-bold">Report {filed.id} filed</p>
           <p className="mt-2 text-[13px] leading-relaxed text-muted">
-            The vault team will compare the on-chain transfer with the custody log for this deal
+            The vault team will check the custody log for this deal
             and email you within 48 hours. The report also shows in this chat.
           </p>
           <Button className="mt-5" onClick={close}>

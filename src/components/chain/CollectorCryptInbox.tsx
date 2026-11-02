@@ -7,7 +7,6 @@ import { useState } from "react";
 import type { InboxItem } from "@/lib/collectorCrypt/keys";
 import { Badge, Button } from "../ui/primitives";
 import { CopyText } from "./ChainConsole";
-import { Fn } from "./ui";
 
 interface Inbox {
   collectorCrypt: string;
@@ -41,8 +40,7 @@ export function CollectorCryptInbox() {
           <Badge tone="warn">Simulated custodian</Badge>
         </div>
         <p className="mt-1 text-[13px] text-muted">
-          What Collector Crypt sees when Pokechain forwards a slab. Anyone can read the same transaction on-chain, but only
-          Collector Crypt&apos;s private key turns it into parcel details.
+          What Collector Crypt sees when Pokechain forwards a slab.
         </p>
       </div>
 
@@ -145,9 +143,6 @@ function Parcel({ item }: { item: InboxItem }) {
           <Button size="sm" variant="secondary" onClick={runDispute} disabled={busy}>
             <Scale size={13} /> {busy ? "Checking on-chain…" : "Run dispute check"}
           </Button>
-          <span className="text-[11.5px] text-dim">
-            Pokechain reveals the message and salt; <Fn>SlabVault.verifyForwardCommitment</Fn> decides.
-          </span>
         </div>
         {dispute ? (
           "error" in dispute ? (

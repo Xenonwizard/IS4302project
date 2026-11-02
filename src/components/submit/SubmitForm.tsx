@@ -86,7 +86,7 @@ export function SubmitForm() {
             {user ? "Add slab" : "Log in and add slab"}
           </Button>
           <p className="text-center text-[11px] leading-relaxed text-dim">
-            Demo accounts vault immediately. Open an on-chain account to submit photos, shipping details and a tracked custody request.
+            Demo accounts vault immediately. Open an account with a wallet to submit photos, shipping details and a tracked custody request.
           </p>
         </form>
       )}

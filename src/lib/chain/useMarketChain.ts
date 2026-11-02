@@ -38,9 +38,12 @@ export function useMarketChain() {
       await queryClient.invalidateQueries({ queryKey: ["market-listing", tokenId] });
       await queryClient.invalidateQueries({ queryKey: ["owned-slabs", address] });
       await queryClient.invalidateQueries({ queryKey: ["market-active-listings"] });
-      return receipt.transactionHash;
+      // The listing's time is its block's, the same clock every other listing is sorted by.
+      const block = await client?.getBlock({ blockNumber: receipt.blockNumber }).catch(() => null);
+      const listedAt = block ? new Date(Number(block.timestamp) * 1000).toISOString() : undefined;
+      return { hash: receipt.transactionHash, listedAt };
     },
-    [send, address, queryClient],
+    [send, address, queryClient, client],
   );
 
   const cancelListing = useCallback(

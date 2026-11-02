@@ -184,7 +184,6 @@ function Row({
         <div data-testid="withdrawn-lost-help" className="space-y-2 border-t border-hairline bg-[#101014] p-4">
           <p className="text-[13px] font-bold text-white">Contact Collector Crypt and SingPost</p>
           <p className="text-[12px] text-muted">
-            This slab&apos;s Pokechain NFT is locked for shipping (and burned once dispatched), so there is nothing to report on Pokechain.
             A parcel lost on its way to you is Collector Crypt&apos;s and the carrier&apos;s responsibility: contact them
             with the references below and they will trace or compensate it.
           </p>

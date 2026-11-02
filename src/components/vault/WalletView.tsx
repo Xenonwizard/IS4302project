@@ -59,7 +59,7 @@ export function WalletView() {
           <p className="mt-1 text-[30px] font-bold leading-none">{usd(balance, { cents: true })}</p>
           <p className="mt-2 text-[12px] text-muted">
             {user.address
-              ? "The sum of every entry below. On-chain deposits and withdrawals are mirrored here. Offers and trades still settle off-chain in this build."
+              ? "The sum of every entry below."
               : "The sum of every entry below. Demo money only."}
             {pendingCash > 0
               ? ` ${usd(pendingCash, { cents: true })} is in offers waiting on sellers. It is not held, and only leaves your wallet if an offer is accepted.`

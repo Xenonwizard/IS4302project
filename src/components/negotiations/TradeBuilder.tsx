@@ -184,7 +184,7 @@ function Form({
       };
       postTrade(negotiationId, trade);
       try { window.localStorage.removeItem(key); } catch { /* storage may be unavailable */ }
-      pushToast({ title: counterOf ? "Counter-offer sent" : "Offer sent", body: "Your side is locked in TradeEscrow until they answer.", tone: "success" });
+      pushToast({ title: counterOf ? "Counter-offer sent" : "Offer sent", body: "Your side is held until they answer.", tone: "success" });
       onClose();
     } catch (e) {
       setError((e as Error).message);

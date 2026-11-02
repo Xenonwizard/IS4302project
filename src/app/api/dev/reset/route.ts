@@ -33,8 +33,9 @@ export async function POST(request: Request) {
   const clean = new URL(request.url).searchParams.get("clean") === "1";
   if (!IS_LOCAL) return Response.json({ error: "Reset only exists for the local chain" }, { status: 400 });
   let snapshotId: string;
+  let buildHash: string | undefined;
   try {
-    ({ snapshotId } = JSON.parse(readFileSync(SNAPSHOT_FILE, "utf8")) as { snapshotId: string });
+    ({ snapshotId, buildHash } = JSON.parse(readFileSync(SNAPSHOT_FILE, "utf8")) as { snapshotId: string; buildHash?: string });
   } catch {
     return Response.json(
       { error: "No snapshot of the fresh chain. Restart it once with npm run chain, which saves one." },
@@ -52,13 +53,15 @@ export async function POST(request: Request) {
     const next = await rpc<string>("evm_snapshot");
     // A new epoch tells every open tab that its saved copy belongs to the rolled-back chain.
     const epoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    writeFileSync(SNAPSHOT_FILE, JSON.stringify({ snapshotId: next, epoch }));
+    // Reverting keeps the deployed contracts, so it keeps their fingerprint too.
+    writeFileSync(SNAPSHOT_FILE, JSON.stringify({ snapshotId: next, epoch, buildHash }));
     rmSync(join(DATA, "collector-crypt.json"), { force: true });
     rmSync(join(DATA, "evidence"), { recursive: true, force: true });
     rmSync(join(DATA, "pokechain-forward-records.json"), { force: true });
     rmSync(join(DATA, "pokechain-redemption-addresses.json"), { force: true });
     // Chats carry trade offers by their on-chain id, and those ids restart with the chain.
     rmSync(join(DATA, "negotiations.json"), { force: true });
+    rmSync(join(DATA, "delay-reports.json"), { force: true });
     if (!clean) {
       const seed = spawnSync(process.execPath, [join(process.cwd(), "blockchain", "scripts", "seed.mjs")], { encoding: "utf8" });
       if (seed.status !== 0) return Response.json({ error: `Reset worked, but seeding the demo failed: ${seed.stderr || seed.stdout}` }, { status: 500 });

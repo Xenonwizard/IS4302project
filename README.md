@@ -48,6 +48,10 @@ Mew and Umbreon printings provide local-only comparables across grades and grade
 demo records, not market claims. The **test1 wallet** is **@test1** and the **test2 wallet** is **@test2**
 (the ones you can log in as, no MetaMask needed); @ash, @misty and @brock own the rest.
 
+Leave `npm run chain` running across `git checkout` / `git pull`: when the contracts, Ignition module or
+seed script change, it redeploys onto a fresh chain (same addresses) and seeds again, so the app never
+talks to another branch's contracts. While the chain and the checkout disagree, a yellow banner says so.
+
 To try a trade: open http://localhost:3000 → **Log in** → **Connect wallet** → **test1
 wallet** → **Negotiation rooms** → **Chat** next to **@test2** → type a message → **Make a trade offer**. Pick
 slabs from both vaults and choose any cash to add. Compare the records linked from each slab,
@@ -145,7 +149,7 @@ operator buttons), the seeded demo accounts and slabs (`seedSlab`, operator-only
 | A trade offer won't send: *"isn't in the vault"* or *"isn't owned by that collector"* | The slab is still pending, withdrawn, or locked in another open offer | Pick another slab, or withdraw the other offer in its chat first |
 | One of *your* slabs is greyed out in the trade builder: *"Listed for sale"* | A slab listed on the marketplace can't be locked in an offer | Cancel the listing in the Vault first (their listed slabs can still be asked for) |
 | MetaMask: wrong network, or transactions stuck | MetaMask isn't on the local chain, or remembers an old one | Use the **test1 wallet**; or in MetaMask approve *Add network* (127.0.0.1:8545, chain 31337) and Settings → Advanced → **Clear activity tab data** |
-| Account page shows nothing after `git pull` | The contracts changed | Stop `npm run chain`, run `npm run setup`, start `npm run chain` again, then reset demo data |
+| Banner: *"The local chain was started by an older npm run chain"* | That chain can't tell when you switch branches, so it may be serving another branch's contracts | Stop `npm run chain` and start it again (run `npm run setup` first if dependencies changed) |
 
 ```bash
 npm run build && npm start   # production build

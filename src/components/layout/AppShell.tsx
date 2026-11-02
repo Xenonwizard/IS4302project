@@ -7,6 +7,7 @@ import { ChainDownBanner } from "../chain/ChainDownBanner";
 import { ChainEpochGuard } from "../chain/ChainEpochGuard";
 import { ChainMarketSync } from "../chain/ChainMarketSync";
 import { ChainSessionSync } from "../chain/ChainSessionSync";
+import { ChainStaleBanner } from "../chain/ChainStaleBanner";
 import { ChainVaultSync } from "../chain/ChainVaultSync";
 import { FoundCaseSync } from "../chain/FoundCaseSync";
 import { AuthModal } from "../modals/AuthModal";
@@ -37,6 +38,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-black">
       <ChainDownBanner />
+      <ChainStaleBanner />
       <PromoBanner />
       <TopBar />
       <div className="flex min-h-0 flex-1">

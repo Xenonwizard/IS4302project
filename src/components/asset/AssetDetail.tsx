@@ -664,7 +664,7 @@ export function AssetDetail({ listing: base }: { listing: Listing }) {
 
             {listed ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-4 py-3 text-[11px] text-muted sm:px-5">
-                <span className="flex items-center gap-1.5"><ShieldCheck size={13} className="text-good" />{marketFeeBps === 0 ? "0% platform fee" : `${marketFeeBps / 100}% protocol fee`} · Atomic on-chain settlement</span>
+                <span className="flex items-center gap-1.5"><ShieldCheck size={13} className="text-good" />{marketFeeBps === 0 ? "0% platform fee" : `${marketFeeBps / 100}% protocol fee`}</span>
               </div>
             ) : null}
           </div>

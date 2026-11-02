@@ -10,7 +10,6 @@ import type { Manifest } from "@/lib/evidence/store";
 import { usd } from "@/lib/format";
 import { CopyText } from "./ChainConsole";
 import { EvidencePanel } from "./EvidencePanel";
-import { Fn } from "./ui";
 
 interface Attr {
   trait_type: string;
@@ -133,12 +132,6 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
       </header>
 
       <div className="space-y-4 p-4">
-        <p className="text-[12px] text-muted">
-          <b className="text-white">You entered</b> comes from your stored intake form, trusted only because it still hashes to
-          the token&apos;s <Fn>evidenceHash</Fn>. <b className="text-white">On-chain</b> is read live from{" "}
-          <Fn>SlabVault.slabOf({tokenId})</Fn> and <Fn>submissionOf</Fn>.
-        </p>
-
         {formRows.length ? (
           <ul className="divide-y divide-[rgba(255,255,255,0.08)] rounded-xl bg-[#101014]">
             {formRows.map((r) => (
@@ -162,7 +155,7 @@ export function TokenRecord({ tokenId }: { tokenId: string }) {
 
         <div>
           <p className="mb-1.5 text-[12px] font-semibold">
-            NFT metadata, decoded from <Fn>tokenURI({tokenId})</Fn>
+            NFT metadata
           </p>
           <ul className="space-y-1 rounded-xl bg-[#101014] px-3 py-2.5 text-[12px]">
             {metaRows.map((r) => (

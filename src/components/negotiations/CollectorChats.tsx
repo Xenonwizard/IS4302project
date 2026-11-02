@@ -22,7 +22,7 @@ export function CollectorChats({ me }: { me: string }) {
         Collectors to trade with
       </h2>
       <p className="mb-3 text-[13px] text-muted">
-        Chat with a collector, then offer a swap in the chat, e.g. 3 Pikachus + $50 for 2 Articunos. Offers are locked in the TradeEscrow contract and settle in one transaction.
+        Chat with a collector, then offer a swap in the chat, e.g. 3 Pikachus + $50 for 2 Articunos.
       </p>
       {collectors.length ? (
         <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -32,7 +32,7 @@ export function CollectorChats({ me }: { me: string }) {
         </ul>
       ) : (
         <p className="rounded-card border border-dashed border-hairline p-4 text-[13px] text-muted">
-          No other collectors on-chain yet. Open a second account with the test2 wallet (or use{" "}
+          No other collectors yet. Open a second account with the test2 wallet (or use{" "}
           <b className="text-white">Load demo traders</b> in the Chain log panel).
         </p>
       )}

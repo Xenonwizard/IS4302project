@@ -189,7 +189,7 @@ export function VaultView() {
       <h1 className="text-[24px] font-bold">Vault</h1>
       <p className="mt-1 text-[13px] text-muted">
         {user.address
-          ? "Stored by Collector Crypt. Each slab's token is yours on Polygon, and its Collector Crypt NFT is held in Pokechain's escrow."
+          ? "Stored by Collector Crypt."
           : `Held in the ${BRAND.vaultCity} vault, insured.`}
         {" "}
         <Link href="/submissions" className="font-semibold text-accent hover:underline">Track inbound requests in Status Center.</Link>
@@ -421,7 +421,7 @@ export function VaultView() {
               Are you sure you want to withdraw <span className="font-semibold text-white">{insuranceWithdrawTarget.listing.title}</span> from the Lost registry and your active Vault?
             </p>
             <div className="rounded-xl border border-warn/25 bg-warn/10 p-3 text-[12px] leading-relaxed text-muted">
-              Any bounty is refunded to your balance and the slab&apos;s NFT is burned on-chain (SlabVault.writeOffLost), so it will never be vaulted. Your insurance claim then goes to the vault provider off-chain.
+              Any bounty is refunded to your balance and the slab will never be vaulted. Your insurance claim then goes to the vault provider.
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={() => setInsuranceWithdrawTarget(null)}>Keep card</Button>
@@ -749,7 +749,7 @@ function SlabCard({
             <Badge className={small ? "px-1.5 text-[9px]" : undefined} tone="accent"><Lock size={11} /> In offer #{inOffer.offerId}</Badge>
           </div>
           <p className={clsx("mt-1.5 text-dim", small ? "text-[9.5px]" : "text-[11px]")}>
-            Locked in TradeEscrow until the other collector answers, or you withdraw the offer in the chat.
+            Held until the other collector answers, or you withdraw the offer in the chat.
           </p>
           <Link href={`/trades/${inOffer.room}`} className="mt-3 block">
             <Button size="sm" variant="secondary" className="w-full">See chat</Button>

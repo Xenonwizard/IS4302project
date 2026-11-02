@@ -12,6 +12,9 @@ export const deployments = {
   }
 } as const;
 
+// Fingerprint of the contract sources these ABIs were built from (scripts/build-hash.mjs).
+export const buildHash = "dc49cf67de75e0f2";
+
 export const mockUSDCAbi = [
   {
     "inputs": [],

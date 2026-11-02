@@ -152,7 +152,7 @@ export function LostCard({
           </div>
           {chainCase ? (
             <div className="mt-2 rounded-lg border border-accent/25 bg-accent/5 px-2.5 py-2 text-[11px] text-muted">
-              <span className="font-bold text-accent">Found · case #{chainCase.claimId}</span> · {CLAIM_STATUS[chainCase.status]} on LostSlabRecovery
+              <span className="font-bold text-accent">Found · case #{chainCase.claimId}</span> · {CLAIM_STATUS[chainCase.status]}
             </div>
           ) : null}
           {recovery && !onChain ? (
@@ -212,7 +212,7 @@ export function LostCard({
             Are you sure you want to withdraw <span className="font-semibold text-white">{listing.title}</span> from the Lost registry?
           </p>
           <div className="rounded-xl border border-warn/25 bg-warn/10 p-3 text-[12px] leading-relaxed text-muted">
-            Withdrawing removes the public listing and bounty. You can then claim insurance through the vault service provider off-chain, and the minted NFT will be retired from your active Vault.
+            Withdrawing removes the public listing and bounty. You can then claim insurance through the vault service provider, and the slab leaves your active Vault.
           </div>
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={() => setWithdrawOpen(false)}>Keep listing</Button>

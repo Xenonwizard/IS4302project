@@ -388,8 +388,7 @@ export function SubmissionsView() {
             <section data-testid="withdraw-requests">
               <h2 className="mb-1 flex items-center gap-2 text-[15px] font-bold"><Truck size={15} /> Withdrawn</h2>
               <p className="mb-3 text-[12px] text-muted">
-                Slabs you asked to ship home. Their NFTs lock when you ask and burn once Collector Crypt is notified to ship them.
-                Confirm delivery when it arrives.
+                Slabs you asked to ship home. Confirm delivery when it arrives.
               </p>
               <WithdrawnList items={visibleWithdrawals} />
             </section>
@@ -744,7 +743,7 @@ function SubmissionFormDetails({
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <span className="mr-auto text-[11.5px] text-muted">
             {recovery === "insurance"
-              ? `You claimed insurance for this slab, so NFT #${request.tokenId} was burned (SlabVault.writeOffLost) and it will not be vaulted.`
+              ? "You claimed insurance for this slab, so it will not be vaulted."
               : `This slab was reported lost. NFT #${request.tokenId} is tracked under Recovery & insurance until it is found or you claim insurance.`}
           </span>
           <button

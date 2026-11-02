@@ -93,7 +93,7 @@ export function OuttakeSimulator() {
     if (!awaitingDispatch || !shipTo.trim()) return;
     // Same check the operator makes before calling Collector Crypt: the address must hash to what the owner signed.
     if (keccak256(toBytes(shipTo.trim())) !== record.shippingHash) {
-      pushToast({ title: "Address mismatch", body: "That address doesn't match the shippingHash the owner signed on-chain.", tone: "error" });
+      pushToast({ title: "Address mismatch", body: "That address doesn't match the one the owner gave when requesting withdrawal.", tone: "error" });
       return;
     }
     setBusy(true);
@@ -147,7 +147,7 @@ export function OuttakeSimulator() {
     <div className="mx-auto max-w-2xl px-4 py-10">
       <h1 className="text-[26px] font-bold">Card outtake simulator</h1>
       <p className="mt-2 text-[14px] text-muted">
-        Enter the PSA cert number. Pokechain resolves its SlabVault token internally, then once its owner has requested withdrawal, notifies Collector Crypt&apos;s vault to release the physical card and ship it to that latest owner.
+        Enter the PSA cert number. Once its owner has requested withdrawal, Collector Crypt releases the card and ships it to them.
       </p>
 
       <label className="mt-7 block text-[13px] font-bold">
@@ -176,9 +176,6 @@ export function OuttakeSimulator() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[15px] font-bold">Notify Collector Crypt and dispatch</p>
-            <p className="mt-1 text-[12px] leading-relaxed text-muted">
-              Pokechain verifies the owner&apos;s signed shipping-address hash, calls Collector Crypt&apos;s redemption API as escrow NFT holder, then writes CC&apos;s tracking reference back to SlabVault.
-            </p>
             {record ? (
               <p className={`mt-2 text-[11px] font-bold ${awaitingDispatch ? "text-good" : "text-dim"}`}>
                 {awaitingDispatch ? "Ready: the latest owner requested redemption." : record.trackingNumber ? `Already dispatched: ${record.trackingNumber}` : "Available after the owner requests withdrawal."}

@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createPublicClient, createWalletClient, http, keccak256, toBytes } from "viem";
 import { hardhat } from "viem/chains";
-import { deployments, slabVaultAbi } from "../../src/lib/chain/generated";
+import { buildHash, deployments, slabVaultAbi } from "../../src/lib/chain/generated";
 import { expect, test } from "./fixtures";
 import { ASH, MISTY, TEST1, TEST2, custodyDollars, custodyOf, depositAsTest1, depositAsTest2, escrowedBounty, forwardedSubmission, isListed, listAsMisty, loadDemoTraders, logIn, openAccount, ownerOf, reportLostInVaultAs, resetDemo, resetSeeded } from "./helpers";
 
@@ -612,7 +613,7 @@ test("outtake: the operator dispatches a pending redemption from /outtake by PSA
   // A different address than the one the owner signed is refused.
   await page.getByPlaceholder(/Ash Ketchum/).fill("Team Rocket HQ");
   await page.getByRole("button", { name: /Notify Collector Crypt and ship/ }).click();
-  await expect(page.getByText(/doesn't match the shippingHash/)).toBeVisible();
+  await expect(page.getByText(/doesn't match the one the owner gave/)).toBeVisible();
   await page.getByPlaceholder(/Ash Ketchum/).fill(shipTo);
   await page.getByRole("button", { name: /Notify Collector Crypt and ship/ }).click();
   await expect(page.getByText("Collector Crypt notified")).toBeVisible();
@@ -894,6 +895,7 @@ test("lost & found: a slab that never reached the vault: a delay report, Pokecha
   await intake.goto("/intake");
   await intake.getByPlaceholder("4324324").fill(cert);
   await intake.getByRole("button", { name: "Simulate investigation" }).click();
+  await expect(intake.getByRole("button", { name: "Simulate investigation" })).toHaveCount(0);
   await intake.close();
 
   // The owner publishes it with a $75 bounty: SlabVault.reportLost, then LostSlabRecovery escrows the $75.
@@ -930,7 +932,6 @@ test("lost & found: a slab that never reached the vault: a delay report, Pokecha
   await expect(page.getByTestId(`request-${cert}`).getByTestId("request-stage")).toHaveText("Insurance claimed · NFT burned");
 });
 
-test("lost & found: a slab lost before vaulting, found and shipped to its owner, moves from Slab submissions to Withdrawn", async ({ page, request }) => {
 test("lost & found: a delay report filed from the Vault's All tab on a forwarded slab waits for Pokechain's investigation", async ({ page, request }) => {
   const cert = "8887775";
   await openAccount(page, "smoke_alltab");
@@ -965,12 +966,14 @@ test("lost & found: a delay report filed from the Vault's All tab on a forwarded
   await intake.goto("/intake");
   await intake.getByPlaceholder("4324324").fill(cert);
   await intake.getByRole("button", { name: "Simulate investigation" }).click();
+  await expect(intake.getByRole("button", { name: "Simulate investigation" })).toHaveCount(0);
   await intake.close();
   await page.goto("/submissions");
   await page.getByRole("button", { name: /Recovery & insurance/ }).click();
   await expect(page.getByRole("button", { name: "Review reply" })).toBeVisible();
 });
 
+test("lost & found: a slab lost before vaulting, found and shipped to its owner, moves from Slab submissions to Withdrawn", async ({ page, request }) => {
   test.setTimeout(240_000);
   const cert = "8887773";
   await openAccount(page, "smoke_found_in");
@@ -997,6 +1000,7 @@ test("lost & found: a delay report filed from the Vault's All tab on a forwarded
   await intake.goto("/intake");
   await intake.getByPlaceholder("4324324").fill(cert);
   await intake.getByRole("button", { name: "Simulate investigation" }).click();
+  await expect(intake.getByRole("button", { name: "Simulate investigation" })).toHaveCount(0);
   await intake.close();
   await page.goto("/submissions");
   await page.getByRole("button", { name: /Recovery & insurance/ }).click();
@@ -1046,7 +1050,7 @@ test("lost & found: a delay report filed from the Vault's All tab on a forwarded
 });
 
 test("lost & found: choosing insurance after Pokechain's investigation burns the slab's NFT, so it is never vaulted", async ({ page, request }) => {
-  const cert = "8887776";
+  const cert = "8887775";
   await openAccount(page, "smoke_insure");
   await page.goto("/submit");
   await page.getByLabel("Certification number").fill(cert);
@@ -1070,6 +1074,7 @@ test("lost & found: choosing insurance after Pokechain's investigation burns the
   await intake.goto("/intake");
   await intake.getByPlaceholder("4324324").fill(cert);
   await intake.getByRole("button", { name: "Simulate investigation" }).click();
+  await expect(intake.getByRole("button", { name: "Simulate investigation" })).toHaveCount(0);
   await intake.close();
 
   // Insurance instead of a bounty: SlabVault.reportLost, then writeOffLost burns the token.
@@ -1233,4 +1238,48 @@ test("bounty: the owner raises and lowers it from escrow, can't overspend, and a
   await page.goto("/lost");
   await expect(page.getByText(/Showing\s*1\s*card/)).toBeVisible();
   await ownerCtx.close();
+});
+
+test("marketplace: a slab you just listed is the first card on Home and Marketplace, also after a reload", async ({ page, request }) => {
+  await resetSeeded(request);
+  await logIn(page, 1, "test1");
+  // test1's unlisted Charizard goes up for sale from the Vault, after the 15 seeded listings.
+  await page.goto("/vault?tab=unlisted");
+  await page.getByRole("button", { name: "List for sale" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Charizard");
+  await dialog.locator("input[inputmode=decimal]").fill("1234");
+  await dialog.getByRole("button", { name: "List for $1,234.00" }).click();
+  await expect(page.getByText("Listed on the marketplace")).toBeVisible();
+  await expect.poll(() => isListed(22222222)).toBe(true);
+
+  await page.getByRole("link", { name: "Marketplace" }).first().click();
+  await expect(page).toHaveURL(/\/marketplace$/);
+  const cards = page.locator('main a[href^="/asset/"]');
+  await expect(cards.first()).toContainText("22222222");
+  await page.reload();
+  await expect(cards.first()).toContainText("22222222");
+
+  await page.getByRole("link", { name: "Home" }).first().click();
+  const fresh = page.locator("section").filter({ has: page.getByRole("heading", { name: "Fresh listings" }) });
+  await expect(fresh.locator('a[href^="/asset/"]').first()).toContainText("22222222");
+});
+
+test("chain guard: a banner shows while the chain runs other contracts than this branch", async ({ page }) => {
+  const file = ".data/chain-snapshot.json";
+  const original = readFileSync(file, "utf8");
+  const write = (hash: string) => writeFileSync(file, JSON.stringify({ ...JSON.parse(original), buildHash: hash }));
+  try {
+    write(buildHash);
+    await page.goto("/marketplace");
+    await expect(page.locator("main")).toBeVisible();
+    await expect(page.getByTestId("chain-stale")).toHaveCount(0);
+    // As after a `git checkout` to a branch with other contracts, before the chain has redeployed.
+    write("0000000000000000");
+    await expect(page.getByTestId("chain-stale")).toContainText("running other contracts than this branch");
+    write(buildHash);
+    await expect(page.getByTestId("chain-stale")).toHaveCount(0);
+  } finally {
+    writeFileSync(file, original);
+  }
 });
