@@ -43,7 +43,6 @@ contract PokechainTest is Test {
         usdc.faucet(1_000 * USD);
     }
 
-    /* ---------------------------- helpers ---------------------------- */
 
     function _register(address who, string memory handle) internal {
         vm.prank(who);
@@ -74,7 +73,6 @@ contract PokechainTest is Test {
         tokenId = vault.submissionOf(sid).tokenId;
     }
 
-    /* ------------------------ account onboarding ------------------------ */
 
     function test_RegisterOpensAccount() public {
         vm.expectEmit(true, false, false, true);
@@ -169,7 +167,6 @@ contract PokechainTest is Test {
         accounts.withdraw(51 * USD);
     }
 
-    /* ----------------------- account offboarding ------------------------ */
 
     function test_CloseRefundsBalance() public {
         _register(alice, "alice");
@@ -216,7 +213,6 @@ contract PokechainTest is Test {
         assertTrue(accounts.isActive(alice));
     }
 
-    /* -------------------------- slab onboarding ------------------------- */
 
     function test_SubmitAndMint() public {
         _register(alice, "alice");
@@ -390,7 +386,6 @@ contract PokechainTest is Test {
         assertEq(sub.forwardCommitment, commitment);
     }
 
-    /* ----------------------- encrypted hand-off to CC ----------------------- */
 
     function test_PartiesPublishTheirOwnKeys() public {
         assertEq(vault.encryptionKey(collectorCrypt), CC_KEY);
@@ -505,7 +500,6 @@ contract PokechainTest is Test {
         assertEq(vault.vaultedCount(bob), 1);
     }
 
-    /* ------------------------- slab offboarding ------------------------- */
 
     function test_RedeemBurnsAtDispatchThenRedeemerConfirmsDelivery() public {
         _register(alice, "alice");
@@ -695,7 +689,6 @@ contract PokechainTest is Test {
         assertEq(bytes(uri)[0], bytes1("d")); // data:application/json;base64,...
     }
 
-    /* ----------------------------- marketplace ----------------------------- */
 
     function test_ListVaultedSlab() public {
         _register(alice, "alice");

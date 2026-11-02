@@ -7,39 +7,14 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/// @dev The slice of SlabVault this contract needs, to stop an account closing while it still has slabs in custody.
 interface ISlabVaultCustody {
     function vaultedCount(address owner) external view returns (uint256);
 }
 
-/// @dev The slice of TradeEscrow this contract needs: an account with open offers holds escrowed assets.
 interface ITradeEscrowOffers {
     function openOffers(address maker) external view returns (uint256);
 }
 
-/**
- * @title AccountRegistry
- * @notice Account onboarding and offboarding for Pokechain.
- *
- *  Onboarding
- *   1. `register(handle)`     the wallet claims a unique handle and becomes an Active account.
- *   2. `deposit(amount)`      USDC moves from the wallet into Pokechain custody (needs `approve`),
- *      `depositWithPermit`    or the same thing with an EIP-2612 signature, in one transaction.
- *
- *  Offboarding
- *   3. `withdraw(amount)`     USDC moves from custody back to the wallet.
- *   4. `closeAccount()`       refunds the whole custody balance and marks the account Closed.
- *                             Refused while the account still has slabs Vaulted in SlabVault:
- *                             they must be redeemed (shipped out) or transferred first.
- *                             Also refused while it has trade offers open (assets in escrow).
- *
- *  Trading and marketplace purchases
- *      `moveBalance`         TradeEscrow, SlabMarket and LostSlabRecovery move custody balances: it locks the cash
- *                            in an offer or pays a seller without taking USDC out of custody.
- *
- *  Nothing is deleted. A closed account keeps its record and its handle stays reserved to that
- *  address, so the history of who owned what stays traceable on-chain.
- */
 contract AccountRegistry is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -58,19 +33,13 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
 
     IERC20 public immutable usdc;
     ISlabVaultCustody public slabVault;
-    /// @notice The TradeEscrow contract, which may move balances for offers.
     address public tradeEscrow;
-    /// @notice The SlabMarket contract, which may move balances for marketplace purchases.
     address public slabMarket;
-    /// @notice The LostSlabRecovery contract, which escrows lost-slab bounties until the finder is paid.
     address public lostSlabRecovery;
 
     mapping(address => Account) private _accounts;
-    /// @notice keccak256(handle) => the address that claimed it. Handles are never released.
     mapping(bytes32 => address) public handleOwner;
-    /// @notice USDC (6 decimals) each account holds in Pokechain custody.
     mapping(address => uint256) public balanceOf;
-    /// @notice Sum of every balance, which always equals the USDC this contract holds.
     uint256 public totalCustody;
 
     event AccountOpened(address indexed account, string handle, uint64 at);
@@ -101,39 +70,30 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         usdc = usdc_;
     }
 
-    /// @notice One-time wiring to SlabVault, which is deployed after this contract.
     function setSlabVault(ISlabVaultCustody vault) external onlyOwner {
         if (address(slabVault) != address(0)) revert SlabVaultAlreadySet();
         slabVault = vault;
         emit SlabVaultSet(address(vault));
     }
 
-    /// @notice One-time wiring to TradeEscrow.
     function setTradeEscrow(address escrow) external onlyOwner {
         if (tradeEscrow != address(0)) revert TradeEscrowAlreadySet();
         tradeEscrow = escrow;
         emit TradeEscrowSet(escrow);
     }
 
-    /// @notice One-time wiring to the fixed-price marketplace.
     function setSlabMarket(address market) external onlyOwner {
         if (slabMarket != address(0)) revert SlabMarketAlreadySet();
         slabMarket = market;
         emit SlabMarketSet(market);
     }
 
-    /// @notice One-time wiring to LostSlabRecovery.
     function setLostSlabRecovery(address lostSlabRecovery_) external onlyOwner {
         if (lostSlabRecovery != address(0)) revert LostSlabRecoveryAlreadySet();
         lostSlabRecovery = lostSlabRecovery_;
         emit LostSlabRecoverySet(lostSlabRecovery_);
     }
 
-    /**
-     * @notice Moves custody balance from one holder to another without any USDC leaving this
-     *         contract, so `totalCustody` is unchanged. TradeEscrow calls it inside a transaction
-     *         the paying side signed, and SlabMarket calls it for fixed-price purchases.
-     */
     function moveBalance(address from, address to, uint256 amount) external {
         if (
             (msg.sender != tradeEscrow || tradeEscrow == address(0))
@@ -149,13 +109,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         emit BalanceMoved(from, to, amount);
     }
 
-    /* ------------------------------ onboarding ------------------------------ */
-
-    /**
-     * @notice Opens an account for the calling wallet. A closed account may open again
-     *         under a new handle; its old handle stays reserved to it.
-     * @param handle 3 to 20 characters of a-z, 0-9 or underscore.
-     */
     function register(string calldata handle) external {
         Account storage a = _accounts[msg.sender];
         if (a.status == Status.Active) revert AlreadyActive();
@@ -173,24 +126,16 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         emit AccountOpened(msg.sender, handle, a.openedAt);
     }
 
-    /// @notice Moves USDC from the wallet into custody. The wallet must `approve` this contract first.
     function deposit(uint256 amount) external nonReentrant {
         _deposit(msg.sender, amount);
     }
 
-    /**
-     * @notice `deposit` authorised by an EIP-2612 permit signature, so the user signs once
-     *         off-chain and sends one transaction instead of approve + deposit.
-     */
     function depositWithPermit(uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
         // A front-runner can spend the permit first; the allowance is then already in place, so carry on.
         try IERC20Permit(address(usdc)).permit(msg.sender, address(this), amount, deadline, v, r, s) {} catch {}
         _deposit(msg.sender, amount);
     }
 
-    /* ------------------------------ offboarding ------------------------------ */
-
-    /// @notice Moves USDC from custody back to the wallet. Works on closed accounts too, so funds are never stuck.
     function withdraw(uint256 amount) external nonReentrant {
         if (amount == 0) revert ZeroAmount();
         uint256 available = balanceOf[msg.sender];
@@ -198,10 +143,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         _payOut(msg.sender, amount);
     }
 
-    /**
-     * @notice Offboards the account: refunds the full custody balance and marks it Closed.
-     *         Every slab must have left the vault first (redeemed or transferred).
-     */
     function closeAccount() external nonReentrant {
         Account storage a = _accounts[msg.sender];
         if (a.status != Status.Active) revert NotActive();
@@ -217,8 +158,6 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         emit AccountClosed(msg.sender, refund, a.closedAt);
     }
 
-    /* --------------------------------- views --------------------------------- */
-
     function accountOf(address owner) external view returns (Account memory) {
         return _accounts[owner];
     }
@@ -227,12 +166,9 @@ contract AccountRegistry is Ownable, ReentrancyGuard {
         return _accounts[owner].status == Status.Active;
     }
 
-    /* ------------------------------- internals ------------------------------- */
-
     function _deposit(address from, uint256 amount) private {
         if (amount == 0) revert ZeroAmount();
         if (_accounts[from].status != Status.Active) revert NotActive();
-        // Effects before the external call (checks-effects-interactions).
         uint256 newBalance = balanceOf[from] + amount;
         balanceOf[from] = newBalance;
         totalCustody += amount;
